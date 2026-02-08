@@ -120,11 +120,11 @@ Test each of the 14 rules individually:
 
 ## Validation Checklist
 
-- [ ] `server/src/machines/DefinitionValidator.ts` exists and compiles
-- [ ] `ajv` is added to `server/package.json` dependencies
-- [ ] All 14 rules are implemented
-- [ ] Rule 8 distinguishes save-time (advisory) vs. run-time (mandatory)
-- [ ] Multiple violations are collected and returned together
-- [ ] Cycle detection (Rule 12) works for direct and transitive cycles
-- [ ] Unit tests pass for all 14 rules individually and in combination
-- [ ] `pnpm --filter @aiflow/server run test` passes
+- [x] `server/src/machines/DefinitionValidator.ts` exists and compiles
+- [x] `ajv` is added to `server/package.json` dependencies
+- [x] All 14 rules are implemented
+- [x] Rule 8 distinguishes save-time (advisory) vs. run-time (mandatory)
+- [x] Multiple violations are collected and returned together
+- [x] Cycle detection (Rule 12) works for direct and transitive cycles
+- [x] Unit tests pass for all 14 rules individually and in combination
+- [x] `pnpm --filter @aiflow/server run test` passes
