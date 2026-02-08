@@ -1,7 +1,7 @@
 # Task 20 — REST API — Instance Management, History, Logs & Artifacts
 
 > **Phase**: 2 (REST API)
-> **Depends on**: Task 09 (runner), Task 14 (cancellation), Task 15 (resume), Task 21 (API wiring)
+> **Depends on**: Task 09 (runner), Task 14 (cancellation), Task 15 (resume)
 > **Blocks**: Task 22 (API tests)
 
 ---

@@ -1,7 +1,7 @@
 # Task 28 — Client Instance Viewer
 
 > **Phase**: 4 (Client Viewer)
-> **Depends on**: Task 26 (state management), Task 25 (WebSocket client), Task 29 (routing)
+> **Depends on**: Task 26 (state management), Task 25 (WebSocket client)
 > **Blocks**: Task 32 (integration & polish)
 
 ---

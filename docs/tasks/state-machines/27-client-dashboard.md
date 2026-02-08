@@ -1,7 +1,7 @@
 # Task 27 — Client Dashboard Page
 
 > **Phase**: 4 (Client Viewer)
-> **Depends on**: Task 26 (state management), Task 29 (routing)
+> **Depends on**: Task 26 (state management)
 > **Blocks**: Task 32 (integration & polish)
 
 ---

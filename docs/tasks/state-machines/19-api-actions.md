@@ -1,7 +1,7 @@
 # Task 19 — REST API — Action Routes
 
 > **Phase**: 2 (REST API)
-> **Depends on**: Task 05 (action registry), Task 21 (API wiring)
+> **Depends on**: Task 05 (action registry)
 > **Blocks**: Task 22 (API tests)
 
 ---

@@ -1,7 +1,7 @@
 # Task 18 — REST API — Definition CRUD Routes
 
 > **Phase**: 2 (REST API)
-> **Depends on**: Task 03 (definition validator), Task 04 (machine store), Task 21 (API wiring)
+> **Depends on**: Task 03 (definition validator), Task 04 (machine store)
 > **Blocks**: Task 22 (API tests)
 
 ---
