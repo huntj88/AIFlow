@@ -111,11 +111,11 @@ export const InMemoryMachineStoreLive = Layer.succeed(MachineStore, { ... });
 
 ## Validation Checklist
 
-- [ ] `server/src/machines/store/MachineStore.ts` defines the Effect Service Tag and interface
-- [ ] `server/src/machines/store/InMemoryMachineStore.ts` implements the interface
-- [ ] UUID generation for IDs works
-- [ ] Deep cloning prevents mutation bugs
-- [ ] Version auto-increment on update works correctly
-- [ ] All filter combinations on `listInstances` work
-- [ ] Unit tests pass
-- [ ] `pnpm --filter @aiflow/server run test` passes
+- [x] `server/src/machines/store/MachineStore.ts` defines the Effect Service Tag and interface
+- [x] `server/src/machines/store/InMemoryMachineStore.ts` implements the interface
+- [x] UUID generation for IDs works
+- [x] Deep cloning prevents mutation bugs
+- [x] Version auto-increment on update works correctly
+- [x] All filter combinations on `listInstances` work
+- [x] Unit tests pass
+- [x] `pnpm --filter @aiflow/server run test` passes
