@@ -19,6 +19,7 @@ client with live state visualization, transition history, and per-state log view
 | `state.toNextState(data)`                | `TransitionResult`                                 | Return value from an action that declares the next state + data |
 | `FlowResult<T>` (Completed / Back)       | `MachineResult<T>` (Completed / Cancelled / Error) | Terminal result of a machine                                    |
 | Child `flow(controller, input)`          | `spawnChild(machineDefId, input)`                  | Launch a child machine, suspend parent until child completes    |
+| Multiple child `flow()` calls            | `parallel_children` state type                     | Launch N child machines concurrently, wait for all to complete  |
 | Code generation from PlantUML            | Client-side visual editor + JSON definition        | Define machines visually, stored as JSON                        |
 
 ---
@@ -47,12 +48,20 @@ interface StateMachineDefinition {
 
 interface StateDefinition {
   name: string; // Same as the key
-  type: 'action' | 'child_machine' | 'terminal';
+  type: 'action' | 'child_machine' | 'parallel_children' | 'terminal';
   actionId?: string; // Reference to a registered ActionFunction
-  childMachineDefId?: string; // Reference to another StateMachineDefinition
+  childMachineDefId?: string; // For 'child_machine': reference to another StateMachineDefinition
   childInputMapping?: string; // JSONPath expression (via `jsonpath-plus`) to extract from parent context
+  children?: ChildSpawnDefinition[]; // For 'parallel_children': list of children to spawn concurrently
   description?: string;
   dataSchema?: JsonSchema; // Schema for data this state carries
+}
+
+/** Defines one child machine to spawn within a `parallel_children` state. */
+interface ChildSpawnDefinition {
+  key: string; // Unique key within this state (used to key results)
+  machineDefId: string; // Reference to a StateMachineDefinition
+  inputMapping: string; // JSONPath expression to extract child input from parent context
 }
 
 interface TransitionRule {
@@ -214,7 +223,7 @@ The **StateMachineRunner** is the core execution engine on the server.
 └──────────────────────────────────────────────────────────────┘
 ```
 
-#### Child Machine Spawning
+#### Child Machine Spawning (Single)
 
 When a state has `type: 'child_machine'`, the runner:
 
@@ -226,6 +235,73 @@ When a state has `type: 'child_machine'`, the runner:
 
 This mirrors Kotlin Flow's `this.flow(ChildController::class.java, input)` pattern
 where the parent suspends until the child completes.
+
+#### Parallel Child Machine Spawning
+
+When a state has `type: 'parallel_children'`, the runner spawns **multiple child
+machines concurrently** and waits for **all** of them to complete before continuing.
+
+1. For each entry in `children[]`, evaluate `inputMapping` against the parent's context
+2. Create all child `MachineInstance` records (status: `running`)
+3. Submit all children to the global execution `Semaphore` via `Effect.forEach` with
+   `{ concurrency: 'unbounded' }` — the Semaphore itself limits how many actually run
+   at once. Children that can't acquire a permit **queue** and start when a slot frees up.
+4. Wait for all children to resolve (using `Effect.all` semantics — all must complete)
+5. Collect results into a `Record<string, MachineResult>` keyed by each child's `key`
+6. The collected results become the state's `stateData` for the transition action
+
+The parent's `status` is set to `'waiting_for_child'` while the children execute,
+and `childInstanceIds` on the `MachineInstance` tracks all running children.
+
+```typescript
+/** What the action receives as `ctx.stateData` after parallel children complete. */
+interface ParallelChildrenResult {
+  results: Record<string, MachineResult>; // Keyed by ChildSpawnDefinition.key
+  childInstanceIds: Record<string, string>; // key → instanceId mapping
+}
+```
+
+**Error semantics:** If any child errors or is cancelled, the remaining children are
+**interrupted** (via Effect fiber interruption) and the parent receives the partial
+results. The action function can inspect each child's status and decide the transition.
+To change this to "wait for all even on failure", use `Effect.allSettled` semantics
+instead — this is configurable per state via a `parallelMode` field:
+
+```typescript
+interface StateDefinition {
+  // ... existing fields ...
+  parallelMode?: 'all_or_interrupt' | 'all_settled'; // Default: 'all_or_interrupt'
+}
+```
+
+- `'all_or_interrupt'` (default) — If any child fails, interrupt the rest immediately.
+  The action receives partial results with the failed child's error.
+- `'all_settled'` — Wait for every child to finish regardless of individual failures.
+  The action receives all results (some may be errors).
+
+#### Global Execution Semaphore
+
+All machine execution — top-level instances, single children, and parallel children —
+acquires a permit from a **single global `Semaphore`** before entering the state loop.
+This bounds total server-wide concurrency regardless of nesting depth.
+
+```typescript
+import { Effect, Semaphore } from 'effect';
+
+// Created once at Layer construction, shared across all runners
+const executionSemaphore = Semaphore.make(maxConcurrentMachines); // default: 50
+
+// Every machine run (top-level or child) wraps its execution:
+Semaphore.withPermits(executionSemaphore, 1)(runMachineLoop(definition, input));
+```
+
+When a parallel state spawns 10 children but only 3 semaphore permits are available,
+3 children start immediately and the remaining 7 queue. As each child completes and
+releases its permit, the next queued child starts. The parent fiber is suspended
+(via `Effect.all` / `Effect.allSettled`) until every child has resolved.
+
+The semaphore permit count is configurable via the `MAX_CONCURRENT_MACHINES` environment
+variable (default: 50).
 
 #### Machine Instance (Runtime State)
 
@@ -241,7 +317,8 @@ interface MachineInstance {
   output?: unknown; // Final output (when completed)
   error?: string; // Error message (when errored)
   parentInstanceId?: string; // If this is a child machine
-  childInstanceId?: string; // If currently waiting on a child
+  childInstanceId?: string; // If currently waiting on a single child
+  childInstanceIds?: string[]; // If currently waiting on parallel children
   history: TransitionRecord[];
   logs: LogEntry[];
   artifacts: ArtifactRecord[]; // Files generated during this instance's run
@@ -257,7 +334,8 @@ interface TransitionRecord {
   timestamp: string;
   durationMs: number; // How long the action took
   actionId?: string; // Which action was executed
-  childInstanceId?: string; // If a child machine was spawned
+  childInstanceId?: string; // If a single child machine was spawned
+  childInstanceIds?: string[]; // If parallel children were spawned
   middlewareResults?: Record<string, unknown>; // Data from middleware
 }
 
@@ -369,6 +447,12 @@ Clients connect to `ws://host/api/machines/live` and subscribe to instance event
 { type: 'machine_completed', instanceId: string, data: MachineResult }
 { type: 'child_spawned', instanceId: string, data: { childInstanceId: string } }
 { type: 'child_completed', instanceId: string, data: { childInstanceId: string, result: MachineResult } }
+{ type: 'children_spawned', instanceId: string, data: {
+    childInstanceIds: Record<string, string>; // key → instanceId
+}}
+{ type: 'children_completed', instanceId: string, data: {
+    results: Record<string, MachineResult>;   // key → result
+}}
 { type: 'artifact_created', instanceId: string, data: ArtifactRecord }
 ```
 
@@ -410,6 +494,8 @@ Clients connect to `ws://host/api/machines/live` and subscribe to instance event
 The key insight from Kotlin Flow is that a state in a parent machine can **delegate to
 an entire child machine**. The parent suspends, the child runs to completion, and the
 child's result flows back into the parent's transition logic.
+
+#### Single Child
 
 ```
 ┌─ Parent Machine ──────────────────────────┐
@@ -453,6 +539,98 @@ const processDataAfterChild = (ctx: ActionContext): Effect.Effect<TransitionResu
   });
 ```
 
+#### Parallel Children
+
+A state can also fan out to **multiple child machines** that execute concurrently.
+The parent waits for all to complete before continuing.
+
+```
+┌─ Parent Machine ─────────────────────────────────────┐
+│                                                      │
+│  [PrepareData] ──→ [ProcessAll] ──→ [Aggregate] → ...│
+│                         │                ▲           │
+│              spawns N   │                │ all done  │
+│              children   │                │           │
+│                    ┌────┴────┐           │           │
+│                    │ (queue) │           │           │
+│                    └────┬────┘           │           │
+│          ┌──────────────┼──────────────┐ │           │
+│          ▼              ▼              ▼ │           │
+│   ┌─ Child A ─┐  ┌─ Child B ─┐  ┌─ Child C ─┐      │
+│   │ [S1]→[S2] │  │ [S1]→[S2] │  │ [S1]→[S2] │      │
+│   │   →[Done] │  │   →[Done] │  │   →[Done] │      │
+│   └───────────┘  └───────────┘  └───────────┘      │
+│          │              │              │             │
+│          └──────────────┴──────────────┘             │
+│                    collected as                       │
+│               ParallelChildrenResult ────────────────┘
+│                                                      │
+└──────────────────────────────────────────────────────┘
+
+  Children are submitted to the global Semaphore.
+  Only N run at a time; the rest queue until a slot opens.
+```
+
+A state definition for parallel children:
+
+```json
+{
+  "name": "ProcessAll",
+  "type": "parallel_children",
+  "actionId": "aggregate-results",
+  "children": [
+    {
+      "key": "validate-us",
+      "machineDefId": "validation-pipeline-v2",
+      "inputMapping": "$.stateData.usRecords"
+    },
+    {
+      "key": "validate-eu",
+      "machineDefId": "validation-pipeline-v2",
+      "inputMapping": "$.stateData.euRecords"
+    },
+    {
+      "key": "validate-apac",
+      "machineDefId": "validation-pipeline-v2",
+      "inputMapping": "$.stateData.apacRecords"
+    }
+  ],
+  "parallelMode": "all_settled"
+}
+```
+
+After all children complete, the state's `actionId` runs with the collected results:
+
+```typescript
+import { Effect } from 'effect';
+
+const aggregateResults = (ctx: ActionContext): Effect.Effect<TransitionResult, ActionError> =>
+  Effect.gen(function* () {
+    const { results, childInstanceIds } = ctx.stateData as ParallelChildrenResult;
+
+    // Check if all children completed successfully
+    const allCompleted = Object.values(results).every((r) => r.status === 'completed');
+    if (!allCompleted) {
+      const failed = Object.entries(results)
+        .filter(([, r]) => r.status !== 'completed')
+        .map(([key]) => key);
+      return { nextState: 'HandleError', data: { failedRegions: failed } };
+    }
+
+    // Read artifacts from each child
+    const usReport = yield* ctx.artifacts.readChild(
+      childInstanceIds['validate-us'],
+      'validation-results.csv',
+    );
+
+    yield* ctx.artifacts.write('combined-report.csv', usReport, {
+      description: 'Combined validation report',
+    });
+
+    return { nextState: 'Deliver', data: { regionCount: Object.keys(results).length } };
+  });
+```
+
 ---
 
 ### 8. Non-Functional Requirements
@@ -464,9 +642,11 @@ const processDataAfterChild = (ctx: ActionContext): Effect.Effect<TransitionResu
   (name, size, state, timestamp) is tracked on the `MachineInstance`. The filesystem
   path is configurable via `ARTIFACT_ROOT` environment variable.
 - **Concurrency**: Multiple machine instances can run concurrently on the server.
-  The runner uses Effect's fiber model (no blocking). A configurable `Semaphore` bounds
-  the maximum number of concurrently running instances (default: 50) to prevent resource
-  exhaustion.
+  The runner uses Effect's fiber model (no blocking). A single global `Semaphore` bounds
+  the total number of concurrently executing machines (top-level, single children, and
+  parallel children alike). Default: 50 permits, configurable via `MAX_CONCURRENT_MACHINES`
+  env var. When parallel children are spawned, each child acquires its own permit — children
+  that can't acquire one queue until a slot frees up. See §3 "Global Execution Semaphore".
 - **Error handling**: If an action's Effect fails, the machine transitions to an error
   terminal state. Middleware `onError` hooks fire. The error is recorded in the instance.
 - **Idempotency**: Starting a machine returns an instance ID. Repeated GETs are safe.
@@ -673,12 +853,15 @@ The execution engine. **New server dependency required**: `jsonpath-plus` (for e
 - `server/src/machines/StateMachineRunner.ts` — Core runner Effect Service
   - `run(definition, input, opts?)` → `Effect<MachineResult, MachineError>`
   - Manages the state loop, action dispatch, child machine spawning
-  - Evaluates `childInputMapping` JSONPath expressions via `jsonpath-plus`
+  - Handles `parallel_children` states: spawns N children via `Effect.all` /
+    `Effect.allSettled` (based on `parallelMode`), gated by the global `Semaphore`
+  - Evaluates `childInputMapping` / `children[].inputMapping` JSONPath expressions
+    via `jsonpath-plus`
   - Calls middleware hooks around each transition
   - Records transition history and logs on the instance
   - Emits `MachineEvent` to Effect `PubSub` on each transition (consumed by WebSocket in Phase 3)
-  - Implemented as an Effect Layer, taking `ActionRegistry`, `MachineStore`, and
-    `PubSub<MachineEvent>` as dependencies
+  - Implemented as an Effect Layer, taking `ActionRegistry`, `MachineStore`,
+    `PubSub<MachineEvent>`, and `Semaphore` (global execution limiter) as dependencies
 - `server/src/machines/StateLogger.ts` — Scoped logger for a state; wraps Effect's `Logger`
   with machine instance + state name annotations, and appends `LogEntry` records to the instance
 
@@ -753,11 +936,15 @@ Tests are co-located with source files, matching the established project pattern
 - `server/src/machines/StateMachineRunner.test.ts` — Core runner tests
   - Simple linear machine
   - Branching machine
-  - Child machine composition
+  - Single child machine composition
+  - Parallel children: all succeed
+  - Parallel children: one fails with `all_or_interrupt` (remaining interrupted)
+  - Parallel children: one fails with `all_settled` (all results collected)
+  - Parallel children: semaphore queuing (more children than permits)
   - Error handling
   - Middleware execution order
   - Artifact creation during actions
-  - Parent reading child artifacts after child completes
+  - Parent reading child artifacts after child and parallel children complete
 - `server/src/machines/ActionRegistry.test.ts`
 - `server/src/machines/middleware/middleware.test.ts`
 - `server/src/machines/artifacts/ArtifactStore.test.ts` — Write, read, list,
@@ -791,11 +978,12 @@ Tests are co-located with source files, matching the established project pattern
 HttpLive = (HelloRouter + MachineRouter)
   |> HttpServer.serve(HttpMiddleware.logger)
   |> HttpServer.withLogAddress
-  |> Layer.provide(ActionRegistryLive)       // Built-in actions pre-registered
-  |> Layer.provide(StateMachineRunnerLive)    // Depends on ActionRegistry, MachineStore
-  |> Layer.provide(InMemoryMachineStoreLive)  // Implements MachineStore interface
-  |> Layer.provide(FsArtifactStoreLive)       // Implements ArtifactStoreFactory
-  |> Layer.provide(ServerLive)               // NodeHttpServer
+  |> Layer.provide(ActionRegistryLive)        // Built-in actions pre-registered
+  |> Layer.provide(StateMachineRunnerLive)     // Depends on ActionRegistry, MachineStore, Semaphore
+  |> Layer.provide(ExecutionSemaphoreLive)     // Global Semaphore(MAX_CONCURRENT_MACHINES)
+  |> Layer.provide(InMemoryMachineStoreLive)   // Implements MachineStore interface
+  |> Layer.provide(FsArtifactStoreLive)        // Implements ArtifactStoreFactory
+  |> Layer.provide(ServerLive)                // NodeHttpServer
 ```
 
 The `MachineRouter` routes access the `StateMachineRunner` and `MachineStore` services
@@ -828,7 +1016,8 @@ from the Effect context (they don't import singletons — everything flows throu
   events. Subscribes to the runner's Effect `PubSub` and forwards matching events to
   connected clients.
 - `server/src/machines/live/events.ts` — Event types: `state_changed`, `transition_recorded`,
-  `log_entry`, `machine_completed`, `child_spawned`, `child_completed`, `artifact_created`
+  `log_entry`, `machine_completed`, `child_spawned`, `child_completed`, `children_spawned`,
+  `children_completed`, `artifact_created`
 
 #### 3.2 Hook into Runner
 
@@ -916,11 +1105,11 @@ rather than creating a parallel client.
 - `client/src/components/machines/editor/StateNode.tsx` — Draggable state node
 - `client/src/components/machines/editor/TransitionEdge.tsx` — Connectable edges
 - `client/src/components/machines/editor/StateConfigPanel.tsx` — Side panel to configure
-  a selected state (name, action, child machine, schemas)
+  a selected state (name, action, child machine, parallel children list, schemas, parallelMode)
 - `client/src/components/machines/editor/ActionPicker.tsx` — Dropdown/search for
   registered actions
 - `client/src/components/machines/editor/ChildMachinePicker.tsx` — Pick a definition to use
-  as a child machine
+  as a child machine (used for both single-child and parallel-children entries)
 - `client/src/components/machines/editor/DefinitionValidator.tsx` — Validate & show errors
 
 #### 5.2 Editor State
@@ -992,3 +1181,12 @@ Phase 1 (Core Engine)
    can inspect `stateData` and return different `nextState` values). A structured guard
    expression language (field / operator / value predicates) may be added in a future
    phase once the core engine is proven.
+
+7. **Parallel children via global Semaphore** — A `parallel_children` state type spawns
+   N child machines concurrently, but total server-wide concurrency is bounded by a single
+   `Semaphore` shared across all execution (top-level, single children, parallel children).
+   Children that exceed the permit limit queue and start as slots free up. This avoids
+   resource exhaustion from deeply nested fan-outs while keeping the mental model simple:
+   one knob (`MAX_CONCURRENT_MACHINES`) controls all concurrency. Two error modes are
+   supported: `all_or_interrupt` (fail-fast, interrupt siblings) and `all_settled` (wait
+   for all regardless).
