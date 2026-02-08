@@ -15,7 +15,7 @@ client with live state visualization, transition history, and per-state log view
 | ---------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------- |
 | `FlowController<Input, Output>`          | `StateMachineDefinition`                           | Declarative description of states, transitions, and I/O types   |
 | `BusinessFlowController`                 | Server-side `StateMachineRunner`                   | Headless execution engine on the server                         |
-| `onStateName(state): Promise<FromState>` | `ActionFunction`                                   | Named async function that runs when a state is entered          |
+| `onStateName(state): Promise<FromState>` | `ActionFunction`                                   | Named Effect program that runs when a state is entered          |
 | `state.toNextState(data)`                | `TransitionResult`                                 | Return value from an action that declares the next state + data |
 | `FlowResult<T>` (Completed / Back)       | `MachineResult<T>` (Completed / Cancelled / Error) | Terminal result of a machine                                    |
 | Child `flow(controller, input)`          | `spawnChild(machineDefId, input)`                  | Launch a child machine, suspend parent until child completes    |
@@ -50,7 +50,7 @@ interface StateDefinition {
   type: 'action' | 'child_machine' | 'terminal';
   actionId?: string; // Reference to a registered ActionFunction
   childMachineDefId?: string; // Reference to another StateMachineDefinition
-  childInputMapping?: string; // JSONPath or expression to map parent context → child input
+  childInputMapping?: string; // JSONPath expression (via `jsonpath-plus`) to extract from parent context
   description?: string;
   dataSchema?: JsonSchema; // Schema for data this state carries
 }
@@ -58,26 +58,91 @@ interface StateDefinition {
 interface TransitionRule {
   from: string; // State name
   to: string; // State name
-  condition?: string; // Optional guard expression
   description?: string;
 }
 ```
 
-**Terminal states** are `"completed"`, `"cancelled"`, and `"error"` (analogous to
-`FlowResult.Completed` and `FlowResult.Back`, with `error` for unrecoverable failures).
-A machine always ends in one of these.
+**Terminal states**: Every definition **must** include exactly three terminal states keyed
+as `"completed"`, `"cancelled"`, and `"error"`. These are auto-validated by the runner on
+startup — definitions missing any of the three are rejected. Terminal states have
+`type: 'terminal'` and no `actionId`. The runner's main loop exits when it transitions
+into any terminal state. (Analogous to `FlowResult.Completed` and `FlowResult.Back` in
+Kotlin Flow, with `error` for unrecoverable failures.)
+
+#### MachineResult
+
+The terminal result of a machine execution:
+
+```typescript
+type MachineResult<T = unknown> =
+  | { status: 'completed'; output: T; instanceId: string }
+  | { status: 'cancelled'; instanceId: string }
+  | { status: 'error'; error: string; instanceId: string };
+```
+
+#### Error Types
+
+Machine-specific error types for the Effect error channel:
+
+```typescript
+/** Top-level tagged union for all machine errors. */
+type MachineError = ActionError | ValidationError | StoreError | NotFoundError | DefinitionError;
+
+/** An action function failed during execution. */
+interface ActionError {
+  readonly _tag: 'ActionError';
+  readonly actionId: string;
+  readonly stateName: string;
+  readonly cause: unknown;
+}
+
+/** Schema or data validation failed. */
+interface ValidationError {
+  readonly _tag: 'ValidationError';
+  readonly message: string;
+  readonly path?: string;
+}
+
+/** Persistence operation failed. */
+interface StoreError {
+  readonly _tag: 'StoreError';
+  readonly operation: string;
+  readonly cause: unknown;
+}
+
+/** A definition or instance was not found. */
+interface NotFoundError {
+  readonly _tag: 'NotFoundError';
+  readonly entityType: 'definition' | 'instance' | 'action';
+  readonly id: string;
+}
+
+/** The definition itself is invalid (orphan states, missing terminals, etc.). */
+interface DefinitionError {
+  readonly _tag: 'DefinitionError';
+  readonly message: string;
+  readonly details?: string[];
+}
+```
+
+All error types use the `_tag` discriminant pattern for idiomatic Effect
+`Effect.catchTag` / `Match.tag` usage throughout the codebase.
 
 ---
 
 ### 2. Action Functions (Server-Side)
 
 Each state of type `'action'` references a named **ActionFunction** registered on the server.
-Actions are the "what happens at this state" — they are pure async operations that receive
-context and return a transition decision.
+Actions are the "what happens at this state" — they are Effect programs that receive
+context and return a transition decision. Using `Effect` (instead of plain `Promise`)
+gives actions typed errors, structured concurrency, interruption, logging spans, and
+seamless integration with the runner's own Effect pipeline.
 
 ```typescript
+import { Effect } from 'effect';
+
 // Signature of every action function
-type ActionFunction = (ctx: ActionContext) => Promise<TransitionResult>;
+type ActionFunction = (ctx: ActionContext) => Effect.Effect<TransitionResult, ActionError>;
 
 interface ActionContext {
   machineInstanceId: string; // The running instance
@@ -91,8 +156,7 @@ interface ActionContext {
     parentStateName: string;
   };
   logger: StateLogger; // Scoped logger for this state
-  artifacts: ArtifactStore; // Scoped file store for this instance (see §9)
-  services: ServiceContainer; // Access to shared services (DB, HTTP, etc.)
+  artifacts: ArtifactStore; // Scoped artifact store for this instance (see §9)
 }
 
 // What an action returns to declare the next state
@@ -101,6 +165,12 @@ interface TransitionResult {
   data?: unknown; // Data to carry into the next state
 }
 ```
+
+> **Note on services:** There is no `ServiceContainer` bag object. Actions that need
+> shared services (HTTP clients, database connections, etc.) access them through the
+> Effect context — the runner provides all required services via its Layer graph.
+> Actions declare additional service requirements by widening their `R` type parameter
+> as needed; the runner's Layer composition ensures they are satisfied at startup.
 
 Actions are **registered by ID** in an `ActionRegistry` on the server. The client can
 browse the registry when wiring up state machine definitions.
@@ -124,23 +194,24 @@ to all state machine definitions.
 The **StateMachineRunner** is the core execution engine on the server.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  StateMachineRunner                                         │
-│                                                             │
-│  run(definition, input) → Promise<MachineResult<Output>>    │
-│                                                             │
-│  1. Validate input against inputSchema                      │
-│  2. Create MachineInstance record                           │
-│  3. Enter initialState                                      │
-│  4. Loop:                                                   │
-│     a. Run middleware chain (beforeTransition)               │
-│     b. Execute the state's action / spawn child machine     │
-│     c. Run middleware chain (afterTransition)                │
-│     d. Record transition in history                         │
-│     e. If result is terminal → resolve machine result       │
-│     f. Else → transition to next state, continue loop       │
-│  5. Return MachineResult                                    │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  StateMachineRunner                                          │
+│                                                              │
+│  run(definition, input) → Effect<MachineResult, MachineError>│
+│                                                              │
+│  1. Validate input against inputSchema (Effect Schema)       │
+│  2. Create MachineInstance record (via MachineStore)          │
+│  3. Enter initialState                                       │
+│  4. Loop:                                                    │
+│     a. Run middleware chain (beforeTransition)                │
+│     b. Execute the state's action / spawn child machine      │
+│     c. Run middleware chain (afterTransition)                 │
+│     d. Record transition in history                          │
+│     e. Publish event to Effect PubSub                        │
+│     f. If result is terminal → resolve machine result        │
+│     g. Else → transition to next state, continue loop        │
+│  5. Return MachineResult                                     │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 #### Child Machine Spawning
@@ -206,14 +277,18 @@ interface LogEntry {
 ### 4. Middleware System
 
 Middleware wraps every state transition for cross-cutting concerns.
-Inspired by the Effect middleware pattern already in the server.
+All middleware hooks return `Effect` for consistency with the rest of the server.
 
 ```typescript
+import { Effect } from 'effect';
+
 interface TransitionMiddleware {
   name: string;
-  beforeTransition?: (ctx: MiddlewareContext) => Promise<void>;
-  afterTransition?: (ctx: MiddlewareContext & { result: TransitionResult }) => Promise<void>;
-  onError?: (ctx: MiddlewareContext & { error: Error }) => Promise<void>;
+  beforeTransition?: (ctx: MiddlewareContext) => Effect.Effect<void, MachineError>;
+  afterTransition?: (
+    ctx: MiddlewareContext & { result: TransitionResult },
+  ) => Effect.Effect<void, MachineError>;
+  onError?: (ctx: MiddlewareContext & { error: MachineError }) => Effect.Effect<void, never>;
 }
 
 interface MiddlewareContext {
@@ -224,12 +299,28 @@ interface MiddlewareContext {
 }
 ```
 
+#### Middleware Registration
+
+Middleware is registered **globally on the `StateMachineRunner`** at Layer construction time.
+The runner accepts an ordered array of `TransitionMiddleware` — execution follows registration
+order (first registered = first to run `beforeTransition`, last to run `afterTransition`,
+like an onion). Middleware **cannot** short-circuit a transition; it can only observe, validate,
+or fail with an error (which sends the machine to the error terminal state).
+
+```typescript
+// At Layer construction
+const RunnerLive = StateMachineRunner.layer({
+  middleware: [ValidationMiddleware, LoggingMiddleware, TelemetryMiddleware, AuditMiddleware],
+});
+```
+
 **Built-in middleware:**
 
-- **TelemetryMiddleware** — Records timing, transition counts, error rates
+- **ValidationMiddleware** — Validates stateData against the state's `dataSchema` before
+  entering (fails with `ValidationError` if invalid)
+- **LoggingMiddleware** — Structured logs for each state via `Effect.log` with annotations
+- **TelemetryMiddleware** — Records timing per transition using `Effect.logSpan`
 - **AuditMiddleware** — Immutable audit log of every transition with actor, timestamp, data
-- **LoggingMiddleware** — Structured logs for each state (integrates with Effect logger)
-- **ValidationMiddleware** — Validates stateData against the state's `dataSchema` before entering
 
 ---
 
@@ -349,16 +440,17 @@ After the child completes, an **action function** on the parent state handles th
 child's result and decides the transition:
 
 ```typescript
+import { Effect } from 'effect';
+
 // The "after child" action for ProcessData state
-async function processDataAfterChild(ctx: ActionContext): Promise<TransitionResult> {
-  const childResult = ctx.stateData; // contains the child's MachineResult (including instanceId)
-  if (childResult.validCount > 0) {
-    // Parent can also access files the child generated:
-    // await ctx.artifacts.readChild(childResult.instanceId, 'output.csv')
-    return { nextState: 'SaveResults', data: childResult };
-  }
-  return { nextState: 'HandleError', data: { reason: 'No valid records' } };
-}
+const processDataAfterChild = (ctx: ActionContext): Effect.Effect<TransitionResult, ActionError> =>
+  Effect.gen(function* () {
+    const childResult = ctx.stateData as MachineResult<{ validCount: number }>;
+    if (childResult.status === 'completed' && childResult.output.validCount > 0) {
+      return { nextState: 'SaveResults', data: childResult };
+    }
+    return { nextState: 'HandleError', data: { reason: 'No valid records' } };
+  });
 ```
 
 ---
@@ -372,12 +464,17 @@ async function processDataAfterChild(ctx: ActionContext): Promise<TransitionResu
   (name, size, state, timestamp) is tracked on the `MachineInstance`. The filesystem
   path is configurable via `ARTIFACT_ROOT` environment variable.
 - **Concurrency**: Multiple machine instances can run concurrently on the server.
-  The runner uses async/await (no blocking).
-- **Error handling**: If an action throws, the machine transitions to an error terminal
-  state. Middleware `onError` hooks fire. The error is recorded in the instance.
+  The runner uses Effect's fiber model (no blocking). A configurable `Semaphore` bounds
+  the maximum number of concurrently running instances (default: 50) to prevent resource
+  exhaustion.
+- **Error handling**: If an action's Effect fails, the machine transitions to an error
+  terminal state. Middleware `onError` hooks fire. The error is recorded in the instance.
 - **Idempotency**: Starting a machine returns an instance ID. Repeated GETs are safe.
 - **Type safety**: Full TypeScript types for definitions, instances, actions, middleware.
-  JSON Schemas for runtime validation of state data.
+  Two validation layers: `Schema` from `effect` validates API payloads and internal
+  data structures (definition shape, instance shape). `ajv` validates user-provided
+  `inputSchema`/`outputSchema`/`dataSchema` JSON Schema definitions against state data
+  at runtime. Add `ajv` as a server dependency.
 
 ---
 
@@ -413,34 +510,43 @@ Actions receive a scoped `ArtifactStore` via `ctx.artifacts`. It can only write 
 the current instance's directory — no escaping the sandbox.
 
 ```typescript
+import { Effect } from 'effect';
+
 interface ArtifactStore {
   /** Write a file into this instance's artifact directory. */
   write(
     name: string,
     content: Buffer | string,
     metadata?: ArtifactMetadata,
-  ): Promise<ArtifactRecord>;
+  ): Effect.Effect<ArtifactRecord, MachineError>;
 
   /** Read a file from this instance's artifact directory. */
-  read(name: string): Promise<Buffer>;
+  read(name: string): Effect.Effect<Buffer, MachineError>;
 
   /** List all artifacts for this instance (not including children). */
-  list(): Promise<ArtifactRecord[]>;
+  list(): Effect.Effect<ArtifactRecord[], MachineError>;
 
   /**
    * Read a file from a child instance's artifact directory.
    * `childInstanceId` must be a direct or transitive child of this instance.
    */
-  readChild(childInstanceId: string, name: string): Promise<Buffer>;
+  readChild(childInstanceId: string, name: string): Effect.Effect<Buffer, MachineError>;
 
   /** List artifacts from a child instance. */
-  listChild(childInstanceId: string): Promise<ArtifactRecord[]>;
+  listChild(childInstanceId: string): Effect.Effect<ArtifactRecord[], MachineError>;
 
   /** Resolve the absolute filesystem path for an artifact (for use by actions that
    *  need to pass a path to external tools). */
   resolvePath(name: string): string;
 }
+```
 
+> **Factory pattern:** The runner constructs a new `ArtifactStore` instance per state
+> execution, scoped to the current machine instance ID. This differs from the typical
+> Effect singleton service pattern — the `ArtifactStoreFactory` Layer provides a
+> `makeScoped(instanceId)` method, and the runner calls it before entering each state.
+
+```typescript
 interface ArtifactRecord {
   name: string; // Filename (e.g., "report.pdf")
   instanceId: string; // Which instance wrote it
@@ -464,25 +570,28 @@ After a child machine completes, the parent can read the child's generated files
 via `ctx.artifacts.readChild(childInstanceId, name)`. This enables workflows like:
 
 ```typescript
-async function afterValidation(ctx: ActionContext): Promise<TransitionResult> {
-  const childResult = ctx.stateData; // child's MachineResult
-  const childId = childResult.instanceId;
+import { Effect } from 'effect';
 
-  // Read the CSV the child produced
-  const csvBuffer = await ctx.artifacts.readChild(childId, 'validation-results.csv');
+const afterValidation = (ctx: ActionContext): Effect.Effect<TransitionResult, ActionError> =>
+  Effect.gen(function* () {
+    const childResult = ctx.stateData as MachineResult;
+    const childId = childResult.instanceId;
 
-  // Write a combined report that includes child data
-  await ctx.artifacts.write(
-    'combined-report.json',
-    JSON.stringify({
-      parentData: ctx.machineInput,
-      childValidation: csvBuffer.toString('utf-8'),
-    }),
-    { description: 'Combined parent + child report' },
-  );
+    // Read the CSV the child produced
+    const csvBuffer = yield* ctx.artifacts.readChild(childId, 'validation-results.csv');
 
-  return { nextState: 'Deliver', data: { reportReady: true } };
-}
+    // Write a combined report that includes child data
+    yield* ctx.artifacts.write(
+      'combined-report.json',
+      JSON.stringify({
+        parentData: ctx.machineInput,
+        childValidation: csvBuffer.toString('utf-8'),
+      }),
+      { description: 'Combined parent + child report' },
+    );
+
+    return { nextState: 'Deliver', data: { reportReady: true } };
+  });
 ```
 
 #### Artifact Tree
@@ -525,11 +634,16 @@ Create the shared type definitions used by both server and client.
 
 - `server/src/machines/types.ts` — All interfaces: `StateMachineDefinition`, `StateDefinition`,
   `TransitionRule`, `MachineInstance`, `TransitionRecord`, `LogEntry`, `MachineResult`,
-  `ActionContext`, `TransitionResult`, `TransitionMiddleware`, `StateLogger`, `ServiceContainer`,
-  `JsonSchema` (type alias for JSON Schema objects used in `inputSchema`/`outputSchema`/`dataSchema`),
-  `ArtifactStore`, `ArtifactRecord`, `ArtifactMetadata`, `ArtifactTree`
-- `server/src/machines/schemas.ts` — `@effect/schema` validators for all types
-  (consistent with the project-wide decision to use Effect Schema — see SETUP_PLAN Decision #1)
+  `ActionContext`, `TransitionResult`, `TransitionMiddleware`, `StateLogger`,
+  `ArtifactStore`, `ArtifactRecord`, `ArtifactMetadata`, `ArtifactTree`.
+  Error types: `MachineError`, `ActionError`, `ValidationError`, `StoreError`,
+  `NotFoundError`, `DefinitionError` (all with `_tag` discriminant for Effect `catchTag`).
+  `JsonSchema` (type alias for JSON Schema objects used in `inputSchema`/`outputSchema`/`dataSchema`
+  — validated at runtime via `ajv`; add `ajv` as a server dependency).
+- `server/src/machines/schemas.ts` — `Schema` validators from `effect` (not `@effect/schema`,
+  which was consolidated into the main `effect` package in v3.x) for all definition and
+  instance types. Used to validate API request bodies, store operations, and definition
+  structure.
 
 #### 1.2 Action Registry
 
@@ -551,17 +665,22 @@ Register named async functions that states can reference.
 
 #### 1.3 Machine Runner
 
-The execution engine.
+The execution engine. **New server dependency required**: `jsonpath-plus` (for evaluating
+`childInputMapping` JSONPath expressions when spawning child machines).
 
 **Files:**
 
 - `server/src/machines/StateMachineRunner.ts` — Core runner Effect Service
   - `run(definition, input, opts?)` → `Effect<MachineResult, MachineError>`
   - Manages the state loop, action dispatch, child machine spawning
+  - Evaluates `childInputMapping` JSONPath expressions via `jsonpath-plus`
   - Calls middleware hooks around each transition
   - Records transition history and logs on the instance
-  - Implemented as an Effect Layer, taking `ActionRegistry` and `MachineStore` as dependencies
-- `server/src/machines/StateLogger.ts` — Scoped logger for a state (writes to instance's log entries)
+  - Emits `MachineEvent` to Effect `PubSub` on each transition (consumed by WebSocket in Phase 3)
+  - Implemented as an Effect Layer, taking `ActionRegistry`, `MachineStore`, and
+    `PubSub<MachineEvent>` as dependencies
+- `server/src/machines/StateLogger.ts` — Scoped logger for a state; wraps Effect's `Logger`
+  with machine instance + state name annotations, and appends `LogEntry` records to the instance
 
 #### 1.4 Middleware
 
@@ -575,24 +694,54 @@ The execution engine.
 
 #### 1.5 In-Memory Store
 
+The `MachineStore` is an Effect Service (Tag + Layer) with the following contract:
+
+```typescript
+import { Effect } from 'effect';
+
+interface MachineStore {
+  // Definitions
+  saveDefinition(def: StateMachineDefinition): Effect.Effect<void, StoreError>;
+  getDefinition(id: string): Effect.Effect<StateMachineDefinition, NotFoundError>;
+  listDefinitions(): Effect.Effect<StateMachineDefinition[], StoreError>;
+  deleteDefinition(id: string): Effect.Effect<void, NotFoundError>;
+
+  // Instances
+  saveInstance(instance: MachineInstance): Effect.Effect<void, StoreError>;
+  getInstance(id: string): Effect.Effect<MachineInstance, NotFoundError>;
+  listInstances(filter?: InstanceFilter): Effect.Effect<MachineInstance[], StoreError>;
+  updateInstance(id: string, patch: Partial<MachineInstance>): Effect.Effect<void, NotFoundError>;
+}
+
+interface InstanceFilter {
+  status?: MachineInstance['status'];
+  definitionId?: string;
+  parentInstanceId?: string;
+  limit?: number;
+  offset?: number;
+}
+```
+
 **Files:**
 
-- `server/src/machines/store/MachineStore.ts` — Interface for persistence
-- `server/src/machines/store/InMemoryMachineStore.ts` — In-memory implementation with
-  `Map<string, StateMachineDefinition>` and `Map<string, MachineInstance>`
+- `server/src/machines/store/MachineStore.ts` — `MachineStore` Effect Service Tag + interface
+- `server/src/machines/store/InMemoryMachineStore.ts` — In-memory `Layer.succeed` implementation
+  with `Map<string, StateMachineDefinition>` and `Map<string, MachineInstance>`
 
 #### 1.6 Artifact Store
 
 **Files:**
 
-- `server/src/machines/artifacts/ArtifactStore.ts` — `ArtifactStore` interface + factory.
-  Creates scoped instances bound to a machine instance ID. Writes files under
-  `<ARTIFACT_ROOT>/<instanceId>/`, nests children under `children/<childId>/`.
-  Validates filenames (no path traversal). Records `ArtifactRecord` entries on the
-  `MachineInstance`.
+- `server/src/machines/artifacts/ArtifactStoreFactory.ts` — `ArtifactStoreFactory` Effect Service
+  (Tag + Layer). Provides a `makeScoped(instanceId, parentInstanceId?)` method that returns
+  a scoped `ArtifactStore` instance. The runner calls this before entering each state.
+  This factory pattern differs from the typical Effect singleton service — each machine
+  instance gets its own sandboxed store. Validates filenames (no path traversal). Records
+  `ArtifactRecord` entries on the `MachineInstance`.
 - `server/src/machines/artifacts/FsArtifactStore.ts` — Filesystem-backed implementation
-  using `node:fs/promises`. Configured via `ARTIFACT_ROOT` env var (default `./data/artifacts`).
-  Implemented as an Effect Layer.
+  using `node:fs/promises`. Writes files under `<ARTIFACT_ROOT>/<instanceId>/`, nests
+  children under `children/<childId>/`. Configured via `ARTIFACT_ROOT` env var
+  (default `./data/artifacts`). Implemented as an Effect Layer providing `ArtifactStoreFactory`.
 
 #### 1.7 Tests
 
@@ -636,6 +785,22 @@ Tests are co-located with source files, matching the established project pattern
 
 - `server/src/lib/HttpServer.ts` — Add `MachineRouter` alongside `HelloRouter`
 
+**Layer composition sketch** (the full dependency graph for the server):
+
+```
+HttpLive = (HelloRouter + MachineRouter)
+  |> HttpServer.serve(HttpMiddleware.logger)
+  |> HttpServer.withLogAddress
+  |> Layer.provide(ActionRegistryLive)       // Built-in actions pre-registered
+  |> Layer.provide(StateMachineRunnerLive)    // Depends on ActionRegistry, MachineStore
+  |> Layer.provide(InMemoryMachineStoreLive)  // Implements MachineStore interface
+  |> Layer.provide(FsArtifactStoreLive)       // Implements ArtifactStoreFactory
+  |> Layer.provide(ServerLive)               // NodeHttpServer
+```
+
+The `MachineRouter` routes access the `StateMachineRunner` and `MachineStore` services
+from the Effect context (they don't import singletons — everything flows through Layers).
+
 #### 2.3 Tests
 
 **Files:**
@@ -648,25 +813,36 @@ Tests are co-located with source files, matching the established project pattern
 ### Phase 3 — WebSocket Live Updates
 
 > Goal: Real-time state change and log streaming to clients.
+>
+> **New server dependency required**: `ws` (WebSocket server library) + `@types/ws`.
+> `@effect/platform-node` does not include a built-in WS server. The `ws` library
+> handles the low-level transport; an Effect wrapper Layer manages connection lifecycle,
+> subscriptions, and event broadcasting.
 
 #### 3.1 WebSocket Server
 
 **Files:**
 
-- `server/src/machines/live/WebSocketManager.ts` — Manages WS connections, subscriptions,
-  broadcasts events per instance
+- `server/src/machines/live/WebSocketManager.ts` — Effect Service (Tag + Layer) wrapping
+  the `ws` library. Manages WS connections, subscriptions per instance ID, and broadcasts
+  events. Subscribes to the runner's Effect `PubSub` and forwards matching events to
+  connected clients.
 - `server/src/machines/live/events.ts` — Event types: `state_changed`, `transition_recorded`,
-  `log_entry`, `machine_completed`, `child_spawned`, `child_completed`
+  `log_entry`, `machine_completed`, `child_spawned`, `child_completed`, `artifact_created`
 
 #### 3.2 Hook into Runner
 
-The runner emits events through an `EventEmitter` / Effect `PubSub`. The
-`WebSocketManager` subscribes and forwards to connected clients.
+The runner emits events through an Effect `PubSub<MachineEvent>` (not Node's
+`EventEmitter` — `PubSub` is typed, integrates with Effect's fiber model, and supports
+backpressure). The `WebSocketManager` subscribes to the `PubSub` and forwards events
+to connected clients filtered by their subscribed instance IDs.
 
 **Modified files:**
 
-- `server/src/machines/StateMachineRunner.ts` — Emit events on each transition
-- `server/src/lib/HttpServer.ts` — Mount WS upgrade handler
+- `server/src/machines/StateMachineRunner.ts` — Emit events via `PubSub.publish` on each
+  transition, child spawn/complete, and log entry
+- `server/src/lib/HttpServer.ts` — Mount WS upgrade handler on the underlying Node
+  `http.Server` (accessed via the `NodeHttpServer` Layer)
 
 ---
 
@@ -779,9 +955,10 @@ Phase 1 (Core Engine)
    │        │
    │        ├──→ Phase 3 (WebSocket)
    │        │        │
-   │        │        └──→ Phase 4 (Client Viewer) ──→ Phase 6 (Polish)
-   │        │                                              ▲
-   │        └──→ Phase 5 (Client Editor) ─────────────────┘
+   │        ├──→ Phase 4 (Client Viewer) ──────────────→ Phase 6 (Polish)
+   │        │    (starts with REST; adds WS when Phase 3 ready)    ▲
+   │        │                                                      │
+   │        └──→ Phase 5 (Client Editor) ─────────────────────────┘
    │
    └──→ Tests at every phase
 ```
@@ -796,11 +973,22 @@ Phase 1 (Core Engine)
    still a TypeScript function, but it's registered by name. Definitions reference actions
    by ID. This separates the state machine structure from the execution logic.
 
-3. **Effect integration** — The server already uses Effect. The runner and stores will be
-   implemented as Effect services/layers for clean dependency injection and error handling.
+3. **Effect-first** — The entire server is built on Effect. All server-side interfaces
+   (`ActionFunction`, `TransitionMiddleware`, `ArtifactStore`, `MachineStore`) return
+   `Effect` — never raw `Promise`. This gives typed errors (`MachineError` union with
+   `_tag` discriminants for `catchTag`), structured concurrency via fibers, `Semaphore`-based
+   concurrency limits, `PubSub` for event broadcasting, `LogSpan` for automatic timing,
+   and clean dependency injection via the Layer/Service pattern. Actions that wrap
+   callback-style or Promise-based code use `Effect.tryPromise` at the boundary.
 
 4. **WebSocket for liveness, REST for everything else** — WS is only for real-time
    streaming of state changes and logs. All CRUD goes through REST.
 
 5. **In-memory first, persistence interface ready** — The `MachineStore` interface makes
    it trivial to swap in SQLite/Postgres later without changing the runner or API layer.
+
+6. **No guard expressions in Phase 1** — `TransitionRule` does not include a `condition`
+   field initially. Transition logic is handled entirely within action functions (which
+   can inspect `stateData` and return different `nextState` values). A structured guard
+   expression language (field / operator / value predicates) may be added in a future
+   phase once the core engine is proven.
