@@ -1,4 +1,4 @@
-# Task 09 — Composable Finite State Machines
+# Composable Finite State Machines
 
 ## Feature Specification
 
@@ -56,6 +56,7 @@ interface StateDefinition {
   // Must be omitted for 'terminal'.
   childMachineDefId?: string; // For 'child_machine': reference to another StateMachineDefinition
   childInputMapping?: string; // JSONPath expression (via `jsonpath-plus`) to extract from parent context
+  // The JSONPath root `$` is an object: { stateData, machineInput, stateName }
   children?: ChildSpawnDefinition[]; // For 'parallel_children': list of children to spawn concurrently
   description?: string;
   dataSchema?: JsonSchema; // Schema for data this state carries
@@ -67,6 +68,7 @@ interface ChildSpawnDefinition {
   key: string; // Unique key within this state (used to key results)
   machineDefId: string; // Reference to a StateMachineDefinition
   inputMapping: string; // JSONPath expression to extract child input from parent context
+  // The JSONPath root `$` is an object: { stateData, machineInput, stateName }
 }
 
 interface TransitionRule {
@@ -112,7 +114,11 @@ always mandatory; invalid definitions are rejected with `DefinitionError`.
 3. No transitions may originate **from** a terminal state
 4. Every `from` and `to` in `transitions[]` must reference an existing state
 5. Every non-terminal state must have at least one outgoing transition in `transitions[]`
-6. No orphan states — every state must be reachable from `initialState` via transitions
+6. No orphan non-terminal states — every non-terminal state must be reachable from
+   `initialState` via transitions. Terminal states are exempt because `cancelled` and
+   `error` are reached by system mechanisms (cancellation API, action failure) that
+   bypass `transitions[]`. `completed` is typically reachable via user transitions but
+   is not required to be — a machine that only errors or is cancelled is still valid.
 7. `StateDefinition.name` must match its key in the `states` record
 8. `action` states must have an `actionId` that references a registered action
    _(advisory at save time — the `ActionRegistry` may change between save and execution;
@@ -313,7 +319,7 @@ The **StateMachineRunner** is the core execution engine on the server.
 │                                                              │
 │  run(definition, input) → Effect<MachineResult, MachineError>│
 │                                                              │
-│  1. Validate input against inputSchema (Effect Schema)       │
+│  1. Validate input against inputSchema (ajv)                 │
 │  2. Create MachineInstance record (via MachineStore)          │
 │  3. Enter initialState                                       │
 │  4. Loop:                                                    │
@@ -330,7 +336,8 @@ The **StateMachineRunner** is the core execution engine on the server.
 │        transitions[] (fail with DefinitionError if not)      │
 │     d. Run middleware chain (afterTransition)                 │
 │     e. Record transition in history                          │
-│     █ Checkpoint 3: persist history + logs + stateData       │
+│     █ Checkpoint 3: persist history + logs + stateData +     │
+│       currentState (advance to nextState)                    │
 │     f. Publish event to Effect PubSub                        │
 │     g. If result is terminal → resolve machine result        │
 │        █ Checkpoint 4: persist final status + output/error   │
@@ -523,8 +530,10 @@ interface LogEntry {
 
 When `POST /api/machines/instances/:id/cancel` is called, the runner:
 
-1. Looks up the instance and verifies it is in a cancellable status (`running` or
-   `waiting_for_child`). Instances already in a terminal state return a 409 Conflict.
+1. Looks up the instance and verifies it is in a cancellable status (`running`,
+   `waiting_for_child`, or `suspended`). Instances already in a terminal state
+   return a 409 Conflict. For `suspended` instances, the runner skips fiber
+   interruption (no fiber exists) and directly transitions to `cancelled`.
 2. **Interrupts** the instance's Effect fiber via `Fiber.interrupt`. Effect fiber
    interruption is cooperative — it takes effect at the next async yield point, which
    is the standard Effect concurrency model.
@@ -561,7 +570,9 @@ at defined **checkpoint** points during execution:
    the state whose action did not complete.
 3. **After each completed transition** — `history[]` is appended with the
    `TransitionRecord`, `logs[]` updated, `stateData` set to the transition result's
-   `data`. This captures completed work.
+   `data`, and `currentState` advanced to `nextState`. This captures completed work
+   and ensures no crash window between recording the transition and advancing the
+   state pointer — resume will never re-execute a transition already in `history[]`.
 4. **On terminal state** — Final status, output/error written.
 5. **On suspend** — Status set to `'suspended'` during graceful shutdown.
 
@@ -573,7 +584,7 @@ The minimum data that must be persisted per checkpoint for resumability:
 | `definitionId`      | 1          | Which definition to reload on resume                    |
 | `definitionVersion` | 1          | Exact version the instance was started with             |
 | `status`            | 1–5        | Distinguishes resumable (`suspended`) from terminal     |
-| `currentState`      | 2          | The state to re-enter on resume                         |
+| `currentState`      | 2, 3       | The state to re-enter on resume (advanced at ckpt 3)    |
 | `stateData`         | 2, 3       | Data the current state needs (action input)             |
 | `input`             | 1          | Original machine input (needed by `ActionContext`)      |
 | `output`            | 4          | Terminal output (if completed)                          |
@@ -1129,9 +1140,11 @@ interface ArtifactStore {
 ```
 
 > **Factory pattern:** The runner constructs a new `ArtifactStore` instance per state
-> execution, scoped to the current machine instance ID. This differs from the typical
-> Effect singleton service pattern — the `ArtifactStoreFactory` Layer provides a
-> `makeScoped(instanceId)` method, and the runner calls it before entering each state.
+> execution, scoped to the current machine instance ID and state name. This differs
+> from the typical Effect singleton service pattern — the `ArtifactStoreFactory` Layer
+> provides a `makeScoped(instanceId, stateName, parentInstanceId?)` method, and the
+> runner calls it before entering each state. The `stateName` is used to populate
+> `ArtifactRecord.stateName` on write.
 
 ```typescript
 interface ArtifactRecord {
@@ -1339,8 +1352,10 @@ interface InstanceFilter {
 **Files:**
 
 - `server/src/machines/artifacts/ArtifactStoreFactory.ts` — `ArtifactStoreFactory` Effect Service
-  (Tag + Layer). Provides a `makeScoped(instanceId, parentInstanceId?)` method that returns
-  a scoped `ArtifactStore` instance. The runner calls this before entering each state.
+  (Tag + Layer). Provides a `makeScoped(instanceId, stateName, parentInstanceId?)` method
+  that returns a scoped `ArtifactStore` instance. The runner calls this before entering
+  each state. The `stateName` is captured so that `ArtifactRecord.stateName` is populated
+  automatically on write.
   This factory pattern differs from the typical Effect singleton service — each machine
   instance gets its own sandboxed store. Validates filenames (no path traversal). Records
   `ArtifactRecord` entries on the `MachineInstance`.
