@@ -100,12 +100,12 @@ This task provides the type foundation for all behavior spec sections. No behavi
 
 ## Validation Checklist
 
-- [ ] `server/src/machines/types.ts` exists and compiles with zero errors
-- [ ] All interfaces from the feature spec §1, §2, §3, §4, §9 are defined
-- [ ] `MachineError` is a union of 5 tagged error types
-- [ ] `MachineEvent` is a union of 10 event types
-- [ ] `MachineInstance.status` has all 6 possible values
-- [ ] `StateDefinition.type` has all 4 possible values
-- [ ] `MachineResult` has all 3 variants (completed, cancelled, error)
-- [ ] Error constructor helpers work and produce correctly tagged objects
-- [ ] `pnpm --filter @aiflow/server run build` succeeds (or `tsc --noEmit`)
+- [x] `server/src/machines/types.ts` exists and compiles with zero errors
+- [x] All interfaces from the feature spec §1, §2, §3, §4, §9 are defined
+- [x] `MachineError` is a union of 5 tagged error types
+- [x] `MachineEvent` is a union of 10 event types
+- [x] `MachineInstance.status` has all 6 possible values
+- [x] `StateDefinition.type` has all 4 possible values
+- [x] `MachineResult` has all 3 variants (completed, cancelled, error)
+- [x] Error constructor helpers work and produce correctly tagged objects
+- [x] `pnpm --filter @aiflow/server run build` succeeds (or `tsc --noEmit`)

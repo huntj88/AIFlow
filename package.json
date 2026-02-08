@@ -14,11 +14,11 @@
   },
   "lint-staged": {
     "client/src/**/*.{ts,tsx}": [
-      "eslint --fix",
+      "pnpm --filter @aiflow/client exec eslint --fix",
       "prettier --write"
     ],
     "server/src/**/*.ts": [
-      "eslint --fix",
+      "pnpm --filter @aiflow/server exec eslint --fix",
       "prettier --write"
     ],
     "*.{json,md,css,yaml,yml}": [
