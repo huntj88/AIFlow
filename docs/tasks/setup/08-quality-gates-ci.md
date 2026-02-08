@@ -30,18 +30,10 @@ Add to root **`package.json`**:
 ```jsonc
 {
   "lint-staged": {
-    "client/src/**/*.{ts,tsx}": [
-      "eslint --fix",
-      "prettier --write"
-    ],
-    "server/src/**/*.{ts}": [
-      "eslint --fix",
-      "prettier --write"
-    ],
-    "*.{json,md,css,yaml,yml}": [
-      "prettier --write"
-    ]
-  }
+    "client/src/**/*.{ts,tsx}": ["eslint --fix", "prettier --write"],
+    "server/src/**/*.{ts}": ["eslint --fix", "prettier --write"],
+    "*.{json,md,css,yaml,yml}": ["prettier --write"],
+  },
 }
 ```
 
@@ -159,8 +151,8 @@ Ensure husky installs hooks on `pnpm install`:
 ```jsonc
 {
   "scripts": {
-    "prepare": "husky"
-  }
+    "prepare": "husky",
+  },
 }
 ```
 
@@ -173,6 +165,7 @@ Ensure husky installs hooks on `pnpm install`:
 Run through every item below to confirm the template is complete:
 
 ### Monorepo structure
+
 - [x] `pnpm install` succeeds cleanly from a fresh clone
 - [x] `pnpm-workspace.yaml` lists `client` and `server`
 - [x] Root `package.json` has: `dev`, `build`, `lint`, `lint:fix`, `format`, `format:check`, `test`, `prepare`
@@ -182,6 +175,7 @@ Run through every item below to confirm the template is complete:
 - [x] `tsconfig.base.json` at root (no `module`/`moduleResolution`/`lib` keys)
 
 ### Client
+
 - [x] `pnpm --filter @aiflow/client run dev` serves at `http://localhost:5173`
 - [x] Page renders: header with "AIFlow", theme toggle, "Welcome to AIFlow" heading
 - [x] "Say Hello" button exists and is clickable
@@ -196,6 +190,7 @@ Run through every item below to confirm the template is complete:
 - [x] `npx tsc -b --noEmit` passes from `client/`
 
 ### Server
+
 - [x] `pnpm --filter @aiflow/server run dev` starts on port 3001
 - [x] `curl http://localhost:3001/api/hello` returns `{"message":"hello world"}`
 - [x] Server outputs structured JSON log lines (timestamp, level, message, spans)
@@ -207,6 +202,7 @@ Run through every item below to confirm the template is complete:
 - [x] `npx tsc --noEmit` passes from `server/`
 
 ### Integration
+
 - [x] `pnpm dev` starts both client + server concurrently
 - [x] Click "Say Hello" → "hello world" appears on screen
 - [x] Server logs show JSON for the request
@@ -214,11 +210,13 @@ Run through every item below to confirm the template is complete:
 - [x] Vite proxy: browser network tab shows `/api/hello` proxied correctly
 
 ### E2E
+
 - [x] `npx playwright install chromium` completes
 - [x] `pnpm --filter @aiflow/client run test:e2e` passes (Chromium, list reporter)
 - [x] Playwright config has `webServer` entries for both client and server
 
 ### Quality gates
+
 - [x] `.husky/pre-commit` exists and runs lint-staged + test + build
 - [x] `lint-staged` config in root `package.json` targets `client/src/**` and `server/src/**`
 - [x] `.github/workflows/ci.yml` exists
@@ -226,6 +224,7 @@ Run through every item below to confirm the template is complete:
 - [x] CI uploads Playwright report on failure
 
 ### Build
+
 - [x] `pnpm build` succeeds for both workspaces
 - [x] `pnpm lint` passes for both workspaces
 - [x] `pnpm format:check` passes for both workspaces

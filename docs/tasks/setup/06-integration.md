@@ -19,11 +19,7 @@ Wire the client to the server. Add a "Say Hello" button on the home page that ca
 **`client/src/utils/apiClient.ts`**:
 
 ```ts
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientResponse,
-} from '@effect/platform';
+import { FetchHttpClient, HttpClient, HttpClientResponse } from '@effect/platform';
 import { Effect } from 'effect';
 
 const makeRequest = (path: string) =>
@@ -68,9 +64,7 @@ export function useHello() {
 
     Effect.runPromise(apiClient.hello())
       .then((res) => setState({ data: res.message, loading: false, error: null }))
-      .catch((err: unknown) =>
-        setState({ data: null, loading: false, error: String(err) }),
-      );
+      .catch((err: unknown) => setState({ data: null, loading: false, error: String(err) }));
   }, []);
 
   return { ...state, fetchHello };

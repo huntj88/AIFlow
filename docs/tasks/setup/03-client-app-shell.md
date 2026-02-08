@@ -283,7 +283,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <I18nextProvider i18n={i18n}>
       <ThemeProvider>
-        <Suspense fallback={<div className="flex min-h-screen items-center justify-center">Loading…</div>}>
+        <Suspense
+          fallback={<div className="flex min-h-screen items-center justify-center">Loading…</div>}
+        >
           <App />
         </Suspense>
       </ThemeProvider>

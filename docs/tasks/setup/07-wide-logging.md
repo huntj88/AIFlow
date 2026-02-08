@@ -109,13 +109,9 @@ import { Logger, LogLevel, Layer, Effect } from 'effect';
  * Uses Effect's JSON logger which outputs structured entries to the console.
  * In production, set minimum level to Info to reduce noise.
  */
-const logLevel =
-  import.meta.env.MODE === 'production' ? LogLevel.Info : LogLevel.Debug;
+const logLevel = import.meta.env.MODE === 'production' ? LogLevel.Info : LogLevel.Debug;
 
-export const ClientLoggerLive = Layer.mergeAll(
-  Logger.json,
-  Logger.minimumLogLevel(logLevel),
-);
+export const ClientLoggerLive = Layer.mergeAll(Logger.json, Logger.minimumLogLevel(logLevel));
 
 /**
  * Helper to run an Effect with the client logger.
@@ -129,11 +125,7 @@ export const runWithLogging = <A, E>(effect: Effect.Effect<A, E>) =>
 Update **`client/src/utils/apiClient.ts`**:
 
 ```ts
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientResponse,
-} from '@effect/platform';
+import { FetchHttpClient, HttpClient, HttpClientResponse } from '@effect/platform';
 import { Effect } from 'effect';
 
 const makeRequest = (path: string) =>
@@ -182,9 +174,7 @@ export function useHello() {
 
     runWithLogging(apiClient.hello())
       .then((res) => setState({ data: res.message, loading: false, error: null }))
-      .catch((err: unknown) =>
-        setState({ data: null, loading: false, error: String(err) }),
-      );
+      .catch((err: unknown) => setState({ data: null, loading: false, error: String(err) }));
   }, []);
 
   return { ...state, fetchHello };
@@ -195,14 +185,14 @@ export function useHello() {
 
 ## What "wide logging" means in practice
 
-| Property | Server | Client |
-|----------|--------|--------|
-| **Format** | JSON to stdout (one line per entry) | JSON to browser console |
-| **Logger** | `Logger.json` (Effect built-in) | `Logger.json` (Effect built-in) |
-| **Min level** | `Debug` (dev) / `Info` (prod) | `Debug` (dev) / `Info` (prod) |
-| **Spans** | `Effect.withLogSpan` on request handling | `Effect.withLogSpan` on API calls |
-| **Annotations** | method, path, status, duration (via HttpMiddleware.logger) | path, response body |
-| **Duration** | Automatic via spans | Automatic via spans |
+| Property        | Server                                                     | Client                            |
+| --------------- | ---------------------------------------------------------- | --------------------------------- |
+| **Format**      | JSON to stdout (one line per entry)                        | JSON to browser console           |
+| **Logger**      | `Logger.json` (Effect built-in)                            | `Logger.json` (Effect built-in)   |
+| **Min level**   | `Debug` (dev) / `Info` (prod)                              | `Debug` (dev) / `Info` (prod)     |
+| **Spans**       | `Effect.withLogSpan` on request handling                   | `Effect.withLogSpan` on API calls |
+| **Annotations** | method, path, status, duration (via HttpMiddleware.logger) | path, response body               |
+| **Duration**    | Automatic via spans                                        | Automatic via spans               |
 
 ---
 

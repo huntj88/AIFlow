@@ -30,14 +30,14 @@ Create `/package.json`:
     "lint:fix": "pnpm -r run lint:fix",
     "format": "pnpm -r run format",
     "format:check": "pnpm -r run format:check",
-    "test": "pnpm -r run test"
+    "test": "pnpm -r run test",
   },
   "devDependencies": {
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
     "prettier": "^3.8.1",
-    "typescript": "~5.9.3"
-  }
+    "typescript": "~5.9.3",
+  },
 }
 ```
 
@@ -108,8 +108,8 @@ Create `/tsconfig.base.json`:
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
-  }
+    "sourceMap": true,
+  },
 }
 ```
 
@@ -120,6 +120,7 @@ Create `/tsconfig.base.json`:
 Create minimal `client/package.json` and `server/package.json` so `pnpm install` can resolve the workspace:
 
 **`client/package.json`**:
+
 ```json
 {
   "name": "@aiflow/client",
@@ -129,6 +130,7 @@ Create minimal `client/package.json` and `server/package.json` so `pnpm install`
 ```
 
 **`server/package.json`**:
+
 ```json
 {
   "name": "@aiflow/server",

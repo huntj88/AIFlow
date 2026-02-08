@@ -56,8 +56,8 @@ Add these scripts (deps will be filled in later tasks for vitest/playwright; inc
     "format:check": "prettier --check \"src/**/*.{ts,tsx,json,css,md}\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test --reporter=list"
-  }
+    "test:e2e": "playwright test --reporter=list",
+  },
 }
 ```
 
@@ -68,10 +68,7 @@ Add these scripts (deps will be filled in later tasks for vitest/playwright; inc
 ```json
 {
   "files": [],
-  "references": [
-    { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
-  ]
+  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }]
 }
 ```
 
@@ -88,11 +85,11 @@ Add these scripts (deps will be filled in later tasks for vitest/playwright; inc
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
     },
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo"
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
   },
-  "include": ["src"]
+  "include": ["src"],
 }
 ```
 
@@ -107,9 +104,9 @@ Add these scripts (deps will be filled in later tasks for vitest/playwright; inc
     "module": "ESNext",
     "moduleResolution": "bundler",
     "types": ["node"],
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
   },
-  "include": ["vite.config.ts", "postcss.config.js", "eslint.config.ts"]
+  "include": ["vite.config.ts", "postcss.config.js", "eslint.config.ts"],
 }
 ```
 
@@ -215,7 +212,10 @@ export default {
 }
 
 html {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
   background-color: var(--color-bg);
   color: var(--color-text);
 }

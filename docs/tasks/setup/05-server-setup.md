@@ -33,8 +33,8 @@ Replace the placeholder from Task 01:
     "format": "prettier --write \"src/**/*.{ts,json,md}\"",
     "format:check": "prettier --check \"src/**/*.{ts,json,md}\"",
     "test": "vitest run",
-    "test:watch": "vitest"
-  }
+    "test:watch": "vitest",
+  },
 }
 ```
 
@@ -69,11 +69,11 @@ pnpm add -D typescript @types/node tsx \
     "rootDir": "src",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
     },
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo"
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo",
   },
-  "include": ["src"]
+  "include": ["src"],
 }
 ```
 
