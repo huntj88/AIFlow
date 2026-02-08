@@ -281,9 +281,14 @@ interface StateDefinition {
 
 #### Global Execution Semaphore
 
-All machine execution — top-level instances, single children, and parallel children —
-acquires a permit from a **single global `Semaphore`** before entering the state loop.
-This bounds total server-wide concurrency regardless of nesting depth.
+A single global `Semaphore` bounds the number of machines **actively executing** (running
+an action or processing a transition) at any given time. The key word is _actively_ —
+a parent that is suspended waiting for children is **not** doing work and must **release
+its permit** before waiting, then **re-acquire** when the children finish.
+
+Without this release-before-wait design, recursive spawning deadlocks. Consider a
+linked-list of 51 machines (each spawns one child): all 50 permits would be held by
+waiting parents, and machine 51 could never start — classic resource deadlock.
 
 ```typescript
 import { Effect, Semaphore } from 'effect';
@@ -291,17 +296,48 @@ import { Effect, Semaphore } from 'effect';
 // Created once at Layer construction, shared across all runners
 const executionSemaphore = Semaphore.make(maxConcurrentMachines); // default: 50
 
-// Every machine run (top-level or child) wraps its execution:
-Semaphore.withPermits(executionSemaphore, 1)(runMachineLoop(definition, input));
+// The state loop acquires/releases the permit per step, NOT for the entire lifetime:
+const runStateLoop = (instance, definition) =>
+  Effect.gen(function* () {
+    while (!isTerminal(instance.currentState)) {
+      // Acquire permit for this active step
+      const result = yield* Semaphore.withPermits(
+        executionSemaphore,
+        1,
+      )(executeStep(instance, definition));
+
+      if (result.type === 'spawn_child') {
+        // Permit is already released (withPermits scope ended).
+        // Child will acquire its own permit when it runs.
+        const childResult = yield* runChildMachine(result.childDef, result.childInput);
+        instance.stateData = childResult;
+      }
+
+      if (result.type === 'spawn_parallel_children') {
+        // Permit released. Each child independently acquires a permit.
+        const childResults = yield* runParallelChildren(result.children);
+        instance.stateData = childResults;
+      }
+
+      // Re-acquire happens on next loop iteration via withPermits
+    }
+  });
 ```
 
-When a parallel state spawns 10 children but only 3 semaphore permits are available,
-3 children start immediately and the remaining 7 queue. As each child completes and
-releases its permit, the next queued child starts. The parent fiber is suspended
-(via `Effect.all` / `Effect.allSettled`) until every child has resolved.
+**Invariant**: A permit is held only while a machine is _actively computing_ (executing
+an action function, evaluating transitions). It is **never** held while waiting for
+child machines. This means:
+
+- **Linked-list recursion** (depth 51+): Only 1 permit is held at a time (the deepest
+  active machine). All ancestors have released their permits while waiting. No deadlock.
+- **Fan-out** (10 parallel children): Parent releases its 1 permit, 10 children compete
+  for permits. If the semaphore has 50 permits, all 10 start immediately. If only 3 are
+  free, 3 start and 7 queue — but no deadlock since the parent isn't holding one.
+- **Mixed nesting** (fan-out where children also spawn children): Works correctly because
+  every wait-for-child releases the permit first.
 
 The semaphore permit count is configurable via the `MAX_CONCURRENT_MACHINES` environment
-variable (default: 50).
+variable (default: 50). It bounds **active concurrency**, not total in-flight machines.
 
 #### Machine Instance (Runtime State)
 
@@ -567,8 +603,9 @@ The parent waits for all to complete before continuing.
 │                                                      │
 └──────────────────────────────────────────────────────┘
 
-  Children are submitted to the global Semaphore.
-  Only N run at a time; the rest queue until a slot opens.
+  Parent releases its Semaphore permit before waiting.
+  Children each acquire their own permit; excess queue until a slot opens.
+  No deadlock: no permit is held by a waiting parent.
 ```
 
 A state definition for parallel children:
@@ -643,10 +680,10 @@ const aggregateResults = (ctx: ActionContext): Effect.Effect<TransitionResult, A
   path is configurable via `ARTIFACT_ROOT` environment variable.
 - **Concurrency**: Multiple machine instances can run concurrently on the server.
   The runner uses Effect's fiber model (no blocking). A single global `Semaphore` bounds
-  the total number of concurrently executing machines (top-level, single children, and
-  parallel children alike). Default: 50 permits, configurable via `MAX_CONCURRENT_MACHINES`
-  env var. When parallel children are spawned, each child acquires its own permit — children
-  that can't acquire one queue until a slot frees up. See §3 "Global Execution Semaphore".
+  the number of **actively executing** machines (running an action / processing a transition).
+  Machines that are passively waiting for children **release their permit** first, preventing
+  deadlock on recursive or deeply nested spawning. Default: 50 permits, configurable via
+  `MAX_CONCURRENT_MACHINES` env var. See §3 "Global Execution Semaphore".
 - **Error handling**: If an action's Effect fails, the machine transitions to an error
   terminal state. Middleware `onError` hooks fire. The error is recorded in the instance.
 - **Idempotency**: Starting a machine returns an instance ID. Repeated GETs are safe.
@@ -854,7 +891,8 @@ The execution engine. **New server dependency required**: `jsonpath-plus` (for e
   - `run(definition, input, opts?)` → `Effect<MachineResult, MachineError>`
   - Manages the state loop, action dispatch, child machine spawning
   - Handles `parallel_children` states: spawns N children via `Effect.all` /
-    `Effect.allSettled` (based on `parallelMode`), gated by the global `Semaphore`
+    `Effect.allSettled` (based on `parallelMode`), releasing the parent's semaphore
+    permit before waiting (release-before-wait pattern prevents deadlock)
   - Evaluates `childInputMapping` / `children[].inputMapping` JSONPath expressions
     via `jsonpath-plus`
   - Calls middleware hooks around each transition
@@ -941,6 +979,8 @@ Tests are co-located with source files, matching the established project pattern
   - Parallel children: one fails with `all_or_interrupt` (remaining interrupted)
   - Parallel children: one fails with `all_settled` (all results collected)
   - Parallel children: semaphore queuing (more children than permits)
+  - Recursive single-child depth exceeding semaphore permits (no deadlock)
+  - Mixed nesting: parallel children that themselves spawn children (no deadlock)
   - Error handling
   - Middleware execution order
   - Artifact creation during actions
@@ -1182,11 +1222,11 @@ Phase 1 (Core Engine)
    expression language (field / operator / value predicates) may be added in a future
    phase once the core engine is proven.
 
-7. **Parallel children via global Semaphore** — A `parallel_children` state type spawns
-   N child machines concurrently, but total server-wide concurrency is bounded by a single
-   `Semaphore` shared across all execution (top-level, single children, parallel children).
-   Children that exceed the permit limit queue and start as slots free up. This avoids
-   resource exhaustion from deeply nested fan-outs while keeping the mental model simple:
-   one knob (`MAX_CONCURRENT_MACHINES`) controls all concurrency. Two error modes are
-   supported: `all_or_interrupt` (fail-fast, interrupt siblings) and `all_settled` (wait
-   for all regardless).
+7. **Parallel children via global Semaphore with release-before-wait** — A
+   `parallel_children` state type spawns N child machines concurrently, bounded by a
+   single global `Semaphore`. The semaphore is **not** reentrant, so a parent **releases
+   its permit before waiting** for children, then re-acquires when they finish. This
+   prevents deadlock on deep recursion (e.g. a linked-list of 51 machines with 50
+   permits — only the deepest active machine holds a permit at any time). One knob
+   (`MAX_CONCURRENT_MACHINES`) controls all active concurrency. Two error modes:
+   `all_or_interrupt` (fail-fast, interrupt siblings) and `all_settled` (wait for all).
