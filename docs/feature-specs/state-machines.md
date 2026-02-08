@@ -756,7 +756,9 @@ const RunnerLive = StateMachineRunner.layer({
 - **ValidationMiddleware** — Validates stateData against the state's `dataSchema` (a JSON
   Schema document) via `ajv` before entering (fails with `ValidationError` if invalid)
 - **LoggingMiddleware** — Structured logs for each state via `Effect.log` with annotations
-- **TelemetryMiddleware** — Records timing per transition using `Effect.logSpan`
+- **TelemetryMiddleware** — Records timing per transition as OpenTelemetry spans via
+  `Effect.logSpan` (which integrates with the OpenTelemetry tracer). Emits metrics
+  (transition count, duration histogram, error rate) to the configured OTLP exporter.
 - **AuditMiddleware** — Immutable audit log of every transition with actor, timestamp, data
 
 ---
@@ -1037,6 +1039,18 @@ const aggregateResults = (ctx: ActionContext): Effect.Effect<TransitionResult, A
   runner wraps the action in `Effect.timeout` when set. Machine-level timeout can be
   passed via `run(definition, input, { timeoutMs })`.
 - **Idempotency**: Starting a machine returns an instance ID. Repeated GETs are safe.
+- **Observability**: The server exports traces and metrics via **OpenTelemetry** (OTLP).
+  `TelemetryMiddleware` creates a span per state transition (with `machineDefId`,
+  `instanceId`, `stateName`, and `actionId` as span attributes) and records duration
+  histograms. Child machine spans are nested under their parent's span, producing a
+  full trace tree for composed machines. Metrics include: active instance count,
+  transition throughput, action error rate, and semaphore utilisation. The OTLP endpoint
+  is configured via `OTEL_EXPORTER_OTLP_ENDPOINT` env var (standard OpenTelemetry env
+  convention). Add `@opentelemetry/api`, `@opentelemetry/sdk-node`,
+  `@opentelemetry/exporter-trace-otlp-http`, and
+  `@opentelemetry/exporter-metrics-otlp-http` as server dependencies. Effect's built-in
+  OpenTelemetry integration (`@effect/opentelemetry`) bridges `Effect.logSpan` to OTel
+  spans automatically.
 - **Type safety**: Full TypeScript types for definitions, instances, actions, middleware.
   Two validation layers: `Schema` from `effect` (the main package — not `@effect/schema`,
   which was consolidated in Effect v3.x) validates API payloads and internal data structures
@@ -1277,7 +1291,9 @@ The execution engine. **New server dependency required**: `jsonpath-plus` (for e
 **Files:**
 
 - `server/src/machines/middleware/index.ts` — Re-exports
-- `server/src/machines/middleware/TelemetryMiddleware.ts` — Timing per transition
+- `server/src/machines/middleware/TelemetryMiddleware.ts` — OpenTelemetry spans and
+  metrics per transition (duration histogram, error counter, span attributes for
+  `machineDefId`, `instanceId`, `stateName`, `actionId`)
 - `server/src/machines/middleware/AuditMiddleware.ts` — Immutable audit trail
 - `server/src/machines/middleware/LoggingMiddleware.ts` — Structured logs via Effect logger
 - `server/src/machines/middleware/ValidationMiddleware.ts` — Schema validation on state data
