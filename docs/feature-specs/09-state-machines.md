@@ -91,6 +91,7 @@ interface ActionContext {
     parentStateName: string;
   };
   logger: StateLogger; // Scoped logger for this state
+  artifacts: ArtifactStore; // Scoped file store for this instance (see §9)
   services: ServiceContainer; // Access to shared services (DB, HTTP, etc.)
 }
 
@@ -172,6 +173,7 @@ interface MachineInstance {
   childInstanceId?: string; // If currently waiting on a child
   history: TransitionRecord[];
   logs: LogEntry[];
+  artifacts: ArtifactRecord[]; // Files generated during this instance's run
   createdAt: string;
   updatedAt: string;
 }
@@ -235,22 +237,25 @@ interface MiddlewareContext {
 
 #### REST API (CRUD & queries)
 
-| Method   | Path                                       | Description                      |
-| -------- | ------------------------------------------ | -------------------------------- |
-| `GET`    | `/api/machines/definitions`                | List all machine definitions     |
-| `POST`   | `/api/machines/definitions`                | Create a new definition          |
-| `GET`    | `/api/machines/definitions/:id`            | Get a definition                 |
-| `PUT`    | `/api/machines/definitions/:id`            | Update a definition              |
-| `DELETE` | `/api/machines/definitions/:id`            | Delete a definition              |
-| `GET`    | `/api/machines/actions`                    | List registered action functions |
-| `GET`    | `/api/machines/actions/:id`                | Get action function metadata     |
-| `POST`   | `/api/machines/instances`                  | Start a new machine instance     |
-| `GET`    | `/api/machines/instances`                  | List instances (with filters)    |
-| `GET`    | `/api/machines/instances/:id`              | Get instance state + history     |
-| `GET`    | `/api/machines/instances/:id/history`      | Get transition history           |
-| `GET`    | `/api/machines/instances/:id/logs`         | Get logs for an instance         |
-| `GET`    | `/api/machines/instances/:id/logs?state=X` | Get logs filtered by state       |
-| `POST`   | `/api/machines/instances/:id/cancel`       | Cancel a running instance        |
+| Method   | Path                                              | Description                      |
+| -------- | ------------------------------------------------- | -------------------------------- |
+| `GET`    | `/api/machines/definitions`                       | List all machine definitions     |
+| `POST`   | `/api/machines/definitions`                       | Create a new definition          |
+| `GET`    | `/api/machines/definitions/:id`                   | Get a definition                 |
+| `PUT`    | `/api/machines/definitions/:id`                   | Update a definition              |
+| `DELETE` | `/api/machines/definitions/:id`                   | Delete a definition              |
+| `GET`    | `/api/machines/actions`                           | List registered action functions |
+| `GET`    | `/api/machines/actions/:id`                       | Get action function metadata     |
+| `POST`   | `/api/machines/instances`                         | Start a new machine instance     |
+| `GET`    | `/api/machines/instances`                         | List instances (with filters)    |
+| `GET`    | `/api/machines/instances/:id`                     | Get instance state + history     |
+| `GET`    | `/api/machines/instances/:id/history`             | Get transition history           |
+| `GET`    | `/api/machines/instances/:id/logs`                | Get logs for an instance         |
+| `GET`    | `/api/machines/instances/:id/logs?state=X`        | Get logs filtered by state       |
+| `POST`   | `/api/machines/instances/:id/cancel`              | Cancel a running instance        |
+| `GET`    | `/api/machines/instances/:id/artifacts`           | List artifacts for an instance   |
+| `GET`    | `/api/machines/instances/:id/artifacts/:name`     | Download an artifact file        |
+| `GET`    | `/api/machines/instances/:id/artifacts?tree=true` | Artifact tree (incl. children)   |
 
 #### WebSocket API (live updates)
 
@@ -273,6 +278,7 @@ Clients connect to `ws://host/api/machines/live` and subscribe to instance event
 { type: 'machine_completed', instanceId: string, data: MachineResult }
 { type: 'child_spawned', instanceId: string, data: { childInstanceId: string } }
 { type: 'child_completed', instanceId: string, data: { childInstanceId: string, result: MachineResult } }
+{ type: 'artifact_created', instanceId: string, data: ArtifactRecord }
 ```
 
 ---
@@ -294,6 +300,9 @@ Clients connect to `ws://host/api/machines/live` and subscribe to instance event
 - Transition history as a timeline/table showing: from → to, data, duration, timestamp
 - **Logs panel** filterable by state, level, time range
 - Child machine tree showing parent-child relationships (click to navigate)
+- **Artifacts panel** — file-explorer-style tree view of generated files across the
+  instance hierarchy; click to download or preview. Updated live via WebSocket
+  `artifact_created` events.
 - Action args/results displayed per transition
 - Live updates via WebSocket — diagram and history update in real time
 
@@ -342,8 +351,10 @@ child's result and decides the transition:
 ```typescript
 // The "after child" action for ProcessData state
 async function processDataAfterChild(ctx: ActionContext): Promise<TransitionResult> {
-  const childResult = ctx.stateData; // contains the child's output
+  const childResult = ctx.stateData; // contains the child's MachineResult (including instanceId)
   if (childResult.validCount > 0) {
+    // Parent can also access files the child generated:
+    // await ctx.artifacts.readChild(childResult.instanceId, 'output.csv')
     return { nextState: 'SaveResults', data: childResult };
   }
   return { nextState: 'HandleError', data: { reason: 'No valid records' } };
@@ -356,6 +367,10 @@ async function processDataAfterChild(ctx: ActionContext): Promise<TransitionResu
 
 - **Persistence**: In-memory store initially, with a clean interface for plugging in
   SQLite/Postgres later. Definitions and instances are stored server-side.
+- **Artifact storage**: Generated files are written to the local filesystem in a
+  hierarchy that mirrors instance parent/child relationships. Artifact metadata
+  (name, size, state, timestamp) is tracked on the `MachineInstance`. The filesystem
+  path is configurable via `ARTIFACT_ROOT` environment variable.
 - **Concurrency**: Multiple machine instances can run concurrently on the server.
   The runner uses async/await (no blocking).
 - **Error handling**: If an action throws, the machine transitions to an error terminal
@@ -363,6 +378,135 @@ async function processDataAfterChild(ctx: ActionContext): Promise<TransitionResu
 - **Idempotency**: Starting a machine returns an instance ID. Repeated GETs are safe.
 - **Type safety**: Full TypeScript types for definitions, instances, actions, middleware.
   JSON Schemas for runtime validation of state data.
+
+---
+
+### 9. Artifact File System
+
+State actions often produce **output files** — reports, CSVs, transformed data, images, etc.
+Rather than forcing actions to manage file paths manually, the runner provides an implicit,
+hierarchical file store scoped to each machine instance.
+
+#### Directory Structure
+
+Every machine instance gets an artifact directory. Child machines are nested under their parent:
+
+```
+<artifacts-root>/
+  <parent-instance-id>/
+    report.pdf                          # Written by parent action
+    summary.json                        # Written by parent action
+    children/
+      <child-instance-id>/
+        validation-results.csv          # Written by child action
+        children/
+          <grandchild-instance-id>/
+            ...                         # Arbitrarily deep
+```
+
+The `<artifacts-root>` is configurable (defaults to `./data/artifacts` in dev,
+configurable via environment variable `ARTIFACT_ROOT` for production).
+
+#### ArtifactStore API
+
+Actions receive a scoped `ArtifactStore` via `ctx.artifacts`. It can only write within
+the current instance's directory — no escaping the sandbox.
+
+```typescript
+interface ArtifactStore {
+  /** Write a file into this instance's artifact directory. */
+  write(
+    name: string,
+    content: Buffer | string,
+    metadata?: ArtifactMetadata,
+  ): Promise<ArtifactRecord>;
+
+  /** Read a file from this instance's artifact directory. */
+  read(name: string): Promise<Buffer>;
+
+  /** List all artifacts for this instance (not including children). */
+  list(): Promise<ArtifactRecord[]>;
+
+  /**
+   * Read a file from a child instance's artifact directory.
+   * `childInstanceId` must be a direct or transitive child of this instance.
+   */
+  readChild(childInstanceId: string, name: string): Promise<Buffer>;
+
+  /** List artifacts from a child instance. */
+  listChild(childInstanceId: string): Promise<ArtifactRecord[]>;
+
+  /** Resolve the absolute filesystem path for an artifact (for use by actions that
+   *  need to pass a path to external tools). */
+  resolvePath(name: string): string;
+}
+
+interface ArtifactRecord {
+  name: string; // Filename (e.g., "report.pdf")
+  instanceId: string; // Which instance wrote it
+  stateName: string; // Which state produced it
+  size: number; // File size in bytes
+  mimeType?: string; // Optional MIME type hint
+  metadata?: ArtifactMetadata; // User-defined metadata
+  createdAt: string; // ISO timestamp
+}
+
+interface ArtifactMetadata {
+  description?: string;
+  tags?: string[];
+  [key: string]: unknown; // Extensible
+}
+```
+
+#### Parent Access to Child Artifacts
+
+After a child machine completes, the parent can read the child's generated files
+via `ctx.artifacts.readChild(childInstanceId, name)`. This enables workflows like:
+
+```typescript
+async function afterValidation(ctx: ActionContext): Promise<TransitionResult> {
+  const childResult = ctx.stateData; // child's MachineResult
+  const childId = childResult.instanceId;
+
+  // Read the CSV the child produced
+  const csvBuffer = await ctx.artifacts.readChild(childId, 'validation-results.csv');
+
+  // Write a combined report that includes child data
+  await ctx.artifacts.write(
+    'combined-report.json',
+    JSON.stringify({
+      parentData: ctx.machineInput,
+      childValidation: csvBuffer.toString('utf-8'),
+    }),
+    { description: 'Combined parent + child report' },
+  );
+
+  return { nextState: 'Deliver', data: { reportReady: true } };
+}
+```
+
+#### Artifact Tree
+
+The REST API supports a `?tree=true` query parameter on the artifacts endpoint.
+This returns a recursive tree of all artifacts for the instance and its descendants:
+
+```typescript
+interface ArtifactTree {
+  instanceId: string;
+  definitionName: string;
+  artifacts: ArtifactRecord[];
+  children: ArtifactTree[]; // Recursive — one per child instance
+}
+```
+
+The client UI uses this to render a file-explorer-style tree view showing which files
+were produced at each level of the machine hierarchy.
+
+#### Cleanup
+
+Artifact directories are **not** automatically deleted when an instance completes.
+This allows post-hoc inspection and download. A future garbage collection mechanism
+can be added (TTL-based, or manual delete via API).
 
 ---
 
@@ -382,7 +526,8 @@ Create the shared type definitions used by both server and client.
 - `server/src/machines/types.ts` — All interfaces: `StateMachineDefinition`, `StateDefinition`,
   `TransitionRule`, `MachineInstance`, `TransitionRecord`, `LogEntry`, `MachineResult`,
   `ActionContext`, `TransitionResult`, `TransitionMiddleware`, `StateLogger`, `ServiceContainer`,
-  `JsonSchema` (type alias for JSON Schema objects used in `inputSchema`/`outputSchema`/`dataSchema`)
+  `JsonSchema` (type alias for JSON Schema objects used in `inputSchema`/`outputSchema`/`dataSchema`),
+  `ArtifactStore`, `ArtifactRecord`, `ArtifactMetadata`, `ArtifactTree`
 - `server/src/machines/schemas.ts` — `@effect/schema` validators for all types
   (consistent with the project-wide decision to use Effect Schema — see SETUP_PLAN Decision #1)
 
@@ -436,7 +581,20 @@ The execution engine.
 - `server/src/machines/store/InMemoryMachineStore.ts` — In-memory implementation with
   `Map<string, StateMachineDefinition>` and `Map<string, MachineInstance>`
 
-#### 1.6 Tests
+#### 1.6 Artifact Store
+
+**Files:**
+
+- `server/src/machines/artifacts/ArtifactStore.ts` — `ArtifactStore` interface + factory.
+  Creates scoped instances bound to a machine instance ID. Writes files under
+  `<ARTIFACT_ROOT>/<instanceId>/`, nests children under `children/<childId>/`.
+  Validates filenames (no path traversal). Records `ArtifactRecord` entries on the
+  `MachineInstance`.
+- `server/src/machines/artifacts/FsArtifactStore.ts` — Filesystem-backed implementation
+  using `node:fs/promises`. Configured via `ARTIFACT_ROOT` env var (default `./data/artifacts`).
+  Implemented as an Effect Layer.
+
+#### 1.7 Tests
 
 Tests are co-located with source files, matching the established project pattern
 (e.g., `hello.test.ts` beside `hello.ts`, `HomePage.test.tsx` beside `HomePage.tsx`).
@@ -449,8 +607,12 @@ Tests are co-located with source files, matching the established project pattern
   - Child machine composition
   - Error handling
   - Middleware execution order
+  - Artifact creation during actions
+  - Parent reading child artifacts after child completes
 - `server/src/machines/ActionRegistry.test.ts`
 - `server/src/machines/middleware/middleware.test.ts`
+- `server/src/machines/artifacts/ArtifactStore.test.ts` — Write, read, list,
+  path traversal rejection, child artifact access, artifact tree construction
 
 ---
 
@@ -466,7 +628,7 @@ Tests are co-located with source files, matching the established project pattern
 - `server/src/routes/machines/definitions.ts` — CRUD for StateMachineDefinition
 - `server/src/routes/machines/actions.ts` — List / get registered actions
 - `server/src/routes/machines/instances.ts` — Start, list, get, cancel instances;
-  get history and logs
+  get history, logs, and artifacts (list, download, tree)
 
 #### 2.2 Wire into HttpServer
 
@@ -526,8 +688,8 @@ rather than creating a parallel client.
 **Files:**
 
 - `client/src/utils/apiClient.ts` — **Modified**: Add machine endpoint functions (`getDefinitions`,
-  `createDefinition`, `getInstance`, `startInstance`, `cancelInstance`, etc.) using the
-  existing `makeRequest` pattern
+  `createDefinition`, `getInstance`, `startInstance`, `cancelInstance`, `listArtifacts`,
+  `downloadArtifact`, `getArtifactTree`, etc.) using the existing `makeRequest` pattern
 - `client/src/utils/machineSocket.ts` — WebSocket client with reconnection,
   subscription management, event callbacks
 
@@ -552,6 +714,9 @@ rather than creating a parallel client.
 - `client/src/components/machines/TransitionHistory.tsx` — Timeline table of transitions
 - `client/src/components/machines/LogViewer.tsx` — Filterable log panel
 - `client/src/components/machines/ChildMachineTree.tsx` — Tree view of parent/child relationships
+- `client/src/components/machines/ArtifactViewer.tsx` — File-explorer tree of artifacts
+  across the instance hierarchy. Fetches `?tree=true` endpoint, renders nested folders
+  per child instance with download links. Live-updates on `artifact_created` WS events.
 - `client/src/components/machines/ActionInfo.tsx` — Display action metadata for a state
 
 #### 4.4 Routing
