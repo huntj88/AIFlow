@@ -175,16 +175,16 @@ test.describe('Home page', () => {
 
 ## Validation Checklist
 
-- [ ] `client/src/utils/apiClient.ts` exists — uses Effect `HttpClient` to call `/api/hello`
-- [ ] `client/src/hooks/useHello.ts` exists — manages loading/data/error state
-- [ ] `client/src/pages/HomePage.tsx` has a button that calls `fetchHello` and displays response
-- [ ] `pnpm dev` starts both client and server concurrently
-- [ ] Open `http://localhost:5173` — page renders with heading and "Say Hello" button
-- [ ] Click button → "hello world" appears on screen (text reads "Server says: hello world")
-- [ ] Server stdout shows structured JSON log for the incoming `GET /api/hello` request
-- [ ] `pnpm --filter @aiflow/client run test` passes — HomePage unit tests pass
-- [ ] `pnpm --filter @aiflow/server run test` passes — hello route test still passes
-- [ ] `pnpm --filter @aiflow/client run test:e2e` passes — Playwright clicks button, asserts "hello world"
-- [ ] Vite proxy works: browser network tab shows `/api/hello` proxied to `localhost:3001`
-- [ ] No TypeScript errors in either workspace
-- [ ] `pnpm lint` passes for both workspaces
+- [x] `client/src/utils/apiClient.ts` exists — uses Effect `HttpClient` to call `/api/hello`
+- [x] `client/src/hooks/useHello.ts` exists — manages loading/data/error state
+- [x] `client/src/pages/HomePage.tsx` has a button that calls `fetchHello` and displays response
+- [x] `pnpm dev` starts both client and server concurrently
+- [x] Open `http://localhost:5173` — page renders with heading and "Say Hello" button
+- [x] Click button → "hello world" appears on screen (text reads "Server says: hello world")
+- [x] Server stdout shows structured JSON log for the incoming `GET /api/hello` request
+- [x] `pnpm --filter @aiflow/client run test` passes — HomePage unit tests pass
+- [x] `pnpm --filter @aiflow/server run test` passes — hello route test still passes
+- [x] `pnpm --filter @aiflow/client run test:e2e` passes — Playwright clicks button, asserts "hello world"
+- [x] Vite proxy works: browser network tab shows `/api/hello` proxied to `localhost:3001`
+- [x] No TypeScript errors in either workspace
+- [x] `pnpm lint` passes for both workspaces

@@ -208,26 +208,26 @@ export function useHello() {
 
 ## Validation Checklist
 
-- [ ] `server/src/lib/Logger.ts` exports `ServerLoggerLive` combining JSON logger + log level
-- [ ] `server/src/lib/RequestLogger.ts` exports request logging middleware
-- [ ] `server/src/lib/HttpServer.ts` applies request logging middleware
-- [ ] `server/src/index.ts` provides `ServerLoggerLive` to the main program
-- [ ] Start server → `curl http://localhost:3001/api/hello` → stdout shows JSON log line with:
+- [x] `server/src/lib/Logger.ts` exports `ServerLoggerLive` combining JSON logger + log level
+- [x] `server/src/lib/RequestLogger.ts` exports request logging middleware
+- [x] `server/src/lib/HttpServer.ts` applies request logging middleware
+- [x] `server/src/index.ts` provides `ServerLoggerLive` to the main program
+- [x] Start server → `curl http://localhost:3001/api/hello` → stdout shows JSON log line with:
   - `timestamp`
   - `level`
   - `message`
   - `spans` (with duration)
   - Request details (method, path)
-- [ ] `client/src/utils/logger.ts` exports `ClientLoggerLive` and `runWithLogging`
-- [ ] `client/src/utils/apiClient.ts` uses `Effect.withLogSpan` and `Effect.log` for annotations
-- [ ] `client/src/hooks/useHello.ts` uses `runWithLogging` instead of raw `Effect.runPromise`
-- [ ] Click "Say Hello" in browser → open DevTools console → see structured JSON log entry with:
+- [x] `client/src/utils/logger.ts` exports `ClientLoggerLive` and `runWithLogging`
+- [x] `client/src/utils/apiClient.ts` uses `Effect.withLogSpan` and `Effect.log` for annotations
+- [x] `client/src/hooks/useHello.ts` uses `runWithLogging` instead of raw `Effect.runPromise`
+- [x] Click "Say Hello" in browser → open DevTools console → see structured JSON log entry with:
   - `timestamp`
   - `message` ("API response received")
   - `spans` with duration for `api.GET /api/hello`
   - `annotations` with path and response
-- [ ] Log level respects environment: dev shows Debug+, production would show Info+ only
-- [ ] All existing tests still pass (`pnpm test`)
-- [ ] All existing E2E tests still pass (`pnpm --filter @aiflow/client run test:e2e`)
-- [ ] `pnpm lint` passes for both workspaces
-- [ ] No TypeScript errors in either workspace
+- [x] Log level respects environment: dev shows Debug+, production would show Info+ only
+- [x] All existing tests still pass (`pnpm test`)
+- [x] All existing E2E tests still pass (`pnpm --filter @aiflow/client run test:e2e`)
+- [x] `pnpm lint` passes for both workspaces
+- [x] No TypeScript errors in either workspace

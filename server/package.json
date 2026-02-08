@@ -2,5 +2,33 @@
   "name": "@aiflow/server",
   "private": true,
   "version": "0.0.0",
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"src/**/*.{ts,json,md}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,json,md}\"",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@effect/platform": "^0.94.3",
+    "@effect/platform-node": "^0.104.1",
+    "effect": "^3.19.16"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^25.2.2",
+    "@vitest/coverage-v8": "^4.0.18",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.3.0",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.54.0",
+    "vitest": "^4.0.18"
+  }
 }

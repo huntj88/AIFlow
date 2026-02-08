@@ -245,21 +245,21 @@ describe('HelloRouter', () => {
 
 ## Validation Checklist
 
-- [ ] `server/package.json` has all scripts: `dev`, `build`, `start`, `lint`, `lint:fix`, `format`, `format:check`, `test`, `test:watch`
-- [ ] `server/package.json` has `"type": "module"`
-- [ ] Production deps installed: `effect`, `@effect/platform`, `@effect/platform-node`
-- [ ] Dev deps installed: `typescript`, `@types/node`, `tsx`, `vitest`, `@vitest/coverage-v8`, `eslint`, `typescript-eslint`, `@eslint/js`, `eslint-config-prettier`, `globals`
-- [ ] `server/tsconfig.json` extends `../tsconfig.base.json`, sets `module: NodeNext`, `moduleResolution: NodeNext`
-- [ ] `server/vitest.config.ts` exists with `globals: true`, `@` alias, coverage config
-- [ ] `server/eslint.config.ts` exists with type-aware strict rules, node globals, prettier compat
-- [ ] Folder structure: `src/index.ts`, `src/routes/hello.ts`, `src/lib/HttpServer.ts`, `src/lib/Logger.ts`
-- [ ] `pnpm --filter @aiflow/server run dev` starts server
-- [ ] `curl http://localhost:3001/api/hello` returns `{"message":"hello world"}`
-- [ ] Server outputs structured JSON log lines to stdout
-- [ ] `pnpm --filter @aiflow/server run lint` passes
-- [ ] `pnpm --filter @aiflow/server run format:check` passes
-- [ ] `pnpm --filter @aiflow/server run test` passes (hello route smoke test)
-- [ ] `pnpm --filter @aiflow/server run build` succeeds (`dist/` appears with compiled JS)
-- [ ] `cd server && node dist/index.js` starts the server from compiled output
-- [ ] No TypeScript errors: `cd server && npx tsc --noEmit`
-- [ ] `@/*` path alias resolves correctly (IDE + build + vitest)
+- [x] `server/package.json` has all scripts: `dev`, `build`, `start`, `lint`, `lint:fix`, `format`, `format:check`, `test`, `test:watch`
+- [x] `server/package.json` has `"type": "module"`
+- [x] Production deps installed: `effect`, `@effect/platform`, `@effect/platform-node`
+- [x] Dev deps installed: `typescript`, `@types/node`, `tsx`, `vitest`, `@vitest/coverage-v8`, `eslint`, `typescript-eslint`, `@eslint/js`, `eslint-config-prettier`, `globals`
+- [x] `server/tsconfig.json` extends `../tsconfig.base.json`, sets `module: NodeNext`, `moduleResolution: NodeNext`
+- [x] `server/vitest.config.ts` exists with `globals: true`, `@` alias, coverage config
+- [x] `server/eslint.config.ts` exists with type-aware strict rules, node globals, prettier compat
+- [x] Folder structure: `src/index.ts`, `src/routes/hello.ts`, `src/lib/HttpServer.ts`, `src/lib/Logger.ts`
+- [x] `pnpm --filter @aiflow/server run dev` starts server
+- [x] `curl http://localhost:3001/api/hello` returns `{"message":"hello world"}`
+- [x] Server outputs structured JSON log lines to stdout
+- [x] `pnpm --filter @aiflow/server run lint` passes
+- [x] `pnpm --filter @aiflow/server run format:check` passes
+- [x] `pnpm --filter @aiflow/server run test` passes (hello route smoke test)
+- [x] `pnpm --filter @aiflow/server run build` succeeds (`dist/` appears with compiled JS)
+- [x] `cd server && node dist/index.js` starts the server from compiled output
+- [x] No TypeScript errors: `cd server && npx tsc --noEmit`
+- [x] `@/*` path alias resolves correctly (IDE + build + vitest)

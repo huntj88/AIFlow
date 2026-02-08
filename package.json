@@ -9,7 +9,21 @@
     "lint:fix": "pnpm -r run lint:fix",
     "format": "pnpm -r run format",
     "format:check": "pnpm -r run format:check",
-    "test": "pnpm -r run test"
+    "test": "pnpm -r run test",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "client/src/**/*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "server/src/**/*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,css,yaml,yml}": [
+      "prettier --write"
+    ]
   },
   "devDependencies": {
     "husky": "^9.1.7",
