@@ -13,7 +13,7 @@ This document captures reusable **how-it’s-built** practices for a modern Reac
 - **Testing**: Vitest + Testing Library + jsdom + Playwright
 - **Localization**: i18next + react-i18next + browser language detection
 - **Linting/Formatting**: ESLint (type-aware) + Prettier
-- **Schema Validation**: Zod
+- **Schema Validation**: `@effect/schema` (Effect ecosystem — shared with server)
 - **Package Management**: pnpm
 
 ## 2) Core scripts (package.json)
