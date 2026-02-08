@@ -1,0 +1,9 @@
+packages:
+  - client
+  - server
+
+ignoredBuiltDependencies:
+  - '@swc/core'
+  - esbuild
+  - msgpackr-extract
+  - unrs-resolver

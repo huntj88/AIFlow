@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Coverage
+coverage/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Vite
+.vite/
+
+# Playwright
+playwright-report/
+test-results/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# IDE
+.idea/
+.vscode/

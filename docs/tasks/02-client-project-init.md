@@ -328,20 +328,20 @@ export default tseslint.config(
 
 ## Validation Checklist
 
-- [ ] `cd client && pnpm install` succeeds (or `pnpm install` from root)
-- [ ] `client/package.json` has all listed prod and dev dependencies
-- [ ] `client/tsconfig.json` has project references only (no `compilerOptions`)
-- [ ] `client/tsconfig.app.json` extends `../tsconfig.base.json`, has `jsx: react-jsx`, `paths: @/*`
-- [ ] `client/tsconfig.node.json` extends `../tsconfig.base.json`, has `types: ["node"]`
-- [ ] `client/vite.config.ts` has SWC plugin, `@` alias, `/api` proxy to `localhost:3001`
-- [ ] `client/index.html` exists with `<div id="root">` and module script pointing to `main.tsx`
-- [ ] `client/src/vite-env.d.ts` exists
-- [ ] `client/postcss.config.js` configures `@tailwindcss/postcss` + `autoprefixer`
-- [ ] `client/src/index.css` has `@import 'tailwindcss'`, `@custom-variant dark`, CSS variables for light + dark
-- [ ] `client/src/main.tsx` exists and renders placeholder
-- [ ] `pnpm --filter @aiflow/client run dev` starts and serves page at `http://localhost:5173`
-- [ ] Page shows "AIFlow" heading styled with Tailwind (accent colour, centered)
-- [ ] `client/eslint.config.ts` exists with type-aware rules, import ordering, react-hooks, jsx-a11y, prettier compat
-- [ ] `pnpm --filter @aiflow/client run lint` passes (or shows only expected warnings)
-- [ ] `pnpm --filter @aiflow/client run format:check` passes
-- [ ] No TypeScript errors: `cd client && npx tsc -b --noEmit` succeeds
+- [x] `cd client && pnpm install` succeeds (or `pnpm install` from root)
+- [x] `client/package.json` has all listed prod and dev dependencies
+- [x] `client/tsconfig.json` has project references only (no `compilerOptions`)
+- [x] `client/tsconfig.app.json` extends `../tsconfig.base.json`, has `jsx: react-jsx`, `paths: @/*`
+- [x] `client/tsconfig.node.json` extends `../tsconfig.base.json`, has `types: ["node"]`
+- [x] `client/vite.config.ts` has SWC plugin, `@` alias, `/api` proxy to `localhost:3001`
+- [x] `client/index.html` exists with `<div id="root">` and module script pointing to `main.tsx`
+- [x] `client/src/vite-env.d.ts` exists
+- [x] `client/postcss.config.js` configures `@tailwindcss/postcss` + `autoprefixer`
+- [x] `client/src/index.css` has `@import 'tailwindcss'`, `@custom-variant dark`, CSS variables for light + dark
+- [x] `client/src/main.tsx` exists and renders placeholder
+- [x] `pnpm --filter @aiflow/client run dev` starts and serves page at `http://localhost:5173`
+- [x] Page shows "AIFlow" heading styled with Tailwind (accent colour, centered)
+- [x] `client/eslint.config.ts` exists with type-aware rules, import ordering, react-hooks, jsx-a11y, prettier compat
+- [x] `pnpm --filter @aiflow/client run lint` passes (or shows only expected warnings)
+- [x] `pnpm --filter @aiflow/client run format:check` passes
+- [x] No TypeScript errors: `cd client && npx tsc -b --noEmit` succeeds

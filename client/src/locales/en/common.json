@@ -1,0 +1,8 @@
+{
+  "app.title": "AIFlow",
+  "nav.home": "Home",
+  "home.heading": "Welcome to AIFlow",
+  "home.hello_button": "Say Hello",
+  "home.response_label": "Server says:",
+  "theme.toggle": "Toggle theme"
+}

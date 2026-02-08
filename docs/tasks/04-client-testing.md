@@ -191,14 +191,14 @@ npx playwright install chromium
 
 ## Validation Checklist
 
-- [ ] `client/vitest.config.ts` exists with `jsdom`, `globals: true`, setup file path, coverage config
-- [ ] `client/src/test-utils/vitest.setup.ts` exists with jest-dom, canvas mock, i18n mock
-- [ ] `client/src/test-utils/renderWithProviders.tsx` exists and wraps in `MemoryRouter` + `ThemeProvider`
-- [ ] `pnpm --filter @aiflow/client run test` passes — smoke test for `HomePage` succeeds
-- [ ] i18n mock returns identity keys (test asserts against `'home.heading'`, not the English string)
-- [ ] `client/playwright.config.ts` exists with Chromium only, `reporter: 'list'`, `webServer` for both client + server
-- [ ] `client/e2e/home.spec.ts` exists
-- [ ] `npx playwright install chromium` completed successfully
+- [x] `client/vitest.config.ts` exists with `jsdom`, `globals: true`, setup file path, coverage config
+- [x] `client/src/test-utils/vitest.setup.ts` exists with jest-dom, canvas mock, i18n mock
+- [x] `client/src/test-utils/renderWithProviders.tsx` exists and wraps in `MemoryRouter` + `ThemeProvider`
+- [x] `pnpm --filter @aiflow/client run test` passes — smoke test for `HomePage` succeeds
+- [x] i18n mock returns identity keys (test asserts against `'home.heading'`, not the English string)
+- [x] `client/playwright.config.ts` exists with Chromium only, `reporter: 'list'`, `webServer` for both client + server
+- [x] `client/e2e/home.spec.ts` exists
+- [x] `npx playwright install chromium` completed successfully
 - [ ] `pnpm --filter @aiflow/client run test:e2e` passes (requires server to be set up — can defer final E2E pass to Task 06)
-- [ ] Coverage report generates in `client/coverage/` when running `pnpm --filter @aiflow/client run test -- --coverage`
-- [ ] No TypeScript errors: `cd client && npx tsc -b --noEmit`
+- [x] Coverage report generates in `client/coverage/` when running `pnpm --filter @aiflow/client run test -- --coverage`
+- [x] No TypeScript errors: `cd client && npx tsc -b --noEmit`

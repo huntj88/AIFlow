@@ -148,15 +148,15 @@ pnpm install
 
 ## Validation Checklist
 
-- [ ] `/package.json` exists with `"private": true` and all root scripts
-- [ ] `/pnpm-workspace.yaml` lists `client` and `server`
-- [ ] `/.nvmrc` contains `22`
-- [ ] `/.gitignore` exists and covers: `node_modules`, `dist`, `coverage`, `.env`, `*.tsbuildinfo`, `playwright-report`, `.vite`
-- [ ] `/.prettierrc` exists with `singleQuote: true`, `trailingComma: "all"`, `semi: true`, `printWidth: 100`
-- [ ] `/tsconfig.base.json` exists with `strict: true`, `target: ES2022`, no `module`/`moduleResolution`/`lib` keys
-- [ ] `/client/package.json` exists with `"name": "@aiflow/client"`
-- [ ] `/server/package.json` exists with `"name": "@aiflow/server"`, `"type": "module"`
-- [ ] `pnpm install` completes without errors
-- [ ] `node_modules/` appears at root (hoisted)
-- [ ] Root scripts are defined: `dev`, `build`, `lint`, `lint:fix`, `format`, `format:check`, `test`
-- [ ] `husky`, `lint-staged`, `prettier`, `typescript` are in root `devDependencies`
+- [x] `/package.json` exists with `"private": true` and all root scripts
+- [x] `/pnpm-workspace.yaml` lists `client` and `server`
+- [x] `/.nvmrc` contains `22`
+- [x] `/.gitignore` exists and covers: `node_modules`, `dist`, `coverage`, `.env`, `*.tsbuildinfo`, `playwright-report`, `.vite`
+- [x] `/.prettierrc` exists with `singleQuote: true`, `trailingComma: "all"`, `semi: true`, `printWidth: 100`
+- [x] `/tsconfig.base.json` exists with `strict: true`, `target: ES2022`, no `module`/`moduleResolution`/`lib` keys
+- [x] `/client/package.json` exists with `"name": "@aiflow/client"`
+- [x] `/server/package.json` exists with `"name": "@aiflow/server"`, `"type": "module"`
+- [x] `pnpm install` completes without errors
+- [x] `node_modules/` appears at root (hoisted)
+- [x] Root scripts are defined: `dev`, `build`, `lint`, `lint:fix`, `format`, `format:check`, `test`
+- [x] `husky`, `lint-staged`, `prettier`, `typescript` are in root `devDependencies`

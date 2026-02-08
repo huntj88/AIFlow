@@ -296,17 +296,17 @@ createRoot(document.getElementById('root')!).render(
 
 ## Validation Checklist
 
-- [ ] All directories created per folder structure above
-- [ ] `pnpm --filter @aiflow/client run dev` starts and serves at `http://localhost:5173`
-- [ ] Page shows header with "AIFlow" title and theme toggle button
-- [ ] Page shows "Welcome to AIFlow" heading on home route
-- [ ] Theme toggle cycles through `light → dark → system`
-- [ ] Dark mode: background goes dark, text goes light, `data-theme="dark"` appears on `<html>`
-- [ ] Light mode: background is white, `data-theme="light"` on `<html>`
-- [ ] System mode: follows OS preference
-- [ ] Theme preference persists across page reloads (localStorage key `aiflow-theme`)
-- [ ] Navigating to `/#/nonexistent` redirects to `/#/`
-- [ ] All text comes from translation keys (no hardcoded user-facing strings in components)
-- [ ] `npx tsc -b --noEmit` passes from `client/`
-- [ ] `pnpm --filter @aiflow/client run lint` passes
-- [ ] `@/*` imports resolve correctly in IDE and build
+- [x] All directories created per folder structure above
+- [x] `pnpm --filter @aiflow/client run dev` starts and serves at `http://localhost:5173`
+- [x] Page shows header with "AIFlow" title and theme toggle button
+- [x] Page shows "Welcome to AIFlow" heading on home route
+- [x] Theme toggle cycles through `light → dark → system`
+- [x] Dark mode: background goes dark, text goes light, `data-theme="dark"` appears on `<html>`
+- [x] Light mode: background is white, `data-theme="light"` on `<html>`
+- [x] System mode: follows OS preference
+- [x] Theme preference persists across page reloads (localStorage key `aiflow-theme`)
+- [x] Navigating to `/#/nonexistent` redirects to `/#/`
+- [x] All text comes from translation keys (no hardcoded user-facing strings in components)
+- [x] `npx tsc -b --noEmit` passes from `client/`
+- [x] `pnpm --filter @aiflow/client run lint` passes
+- [x] `@/*` imports resolve correctly in IDE and build
