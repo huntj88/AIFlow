@@ -72,6 +72,7 @@ interface ChildSpawnDefinition {
 interface TransitionRule {
   from: string; // State name
   to: string; // State name
+  label?: string; // Optional edge label for diagram rendering (e.g., "success", "retry")
   description?: string;
 }
 
@@ -84,6 +85,11 @@ interface TransitionRule {
 type JsonSchema = Record<string, unknown>;
 ```
 
+> **JSONPath vs JSON Schema** — This spec uses two distinct "JSON-something" technologies.
+> `jsonpath-plus` is for **data extraction** (evaluating `childInputMapping` expressions
+> to pull child input from parent context). `ajv` + JSON Schema is for **data validation**
+> (checking that `stateData` conforms to a schema). They serve orthogonal purposes.
+
 **Terminal states**: Every definition **must** include exactly three terminal states keyed
 as `"completed"`, `"cancelled"`, and `"error"`. These are auto-validated by the runner on
 startup — definitions missing any of the three are rejected. Terminal states have
@@ -93,8 +99,12 @@ Kotlin Flow, with `error` for unrecoverable failures.)
 
 #### Definition Validation
 
-The following rules are enforced when a definition is saved (via API) and re-checked
-by the runner before execution. Invalid definitions are rejected with `DefinitionError`.
+The following rules are enforced at two points: **at save time** (when a definition is
+created/updated via the REST API) and **at run time** (when the runner loads a definition
+before execution). Most rules are fully enforceable at both points. Rule 8 is
+**advisory at save time** since the `ActionRegistry` is mutable runtime state — an action
+may be registered or unregistered between save and execution. Run-time validation is
+always mandatory; invalid definitions are rejected with `DefinitionError`.
 
 1. `initialState` must reference an existing key in `states`
 2. All three required terminal states (`completed`, `cancelled`, `error`) must exist
@@ -105,6 +115,8 @@ by the runner before execution. Invalid definitions are rejected with `Definitio
 6. No orphan states — every state must be reachable from `initialState` via transitions
 7. `StateDefinition.name` must match its key in the `states` record
 8. `action` states must have an `actionId` that references a registered action
+   _(advisory at save time — the `ActionRegistry` may change between save and execution;
+   mandatory at run time)_
 9. `child_machine` states must have `actionId`, `childMachineDefId`, and `childInputMapping`
 10. `parallel_children` states must have `actionId` and a non-empty `children[]`
 11. `terminal` states must **not** have `actionId`, `childMachineDefId`, or `children`
@@ -162,7 +174,9 @@ interface NotFoundError {
   readonly id: string;
 }
 
-/** The definition itself is invalid (orphan states, missing terminals, etc.). */
+/** The definition itself is invalid (orphan states, missing terminals, etc.).
+ *  Also used at runtime when an action returns an illegal `nextState` that
+ *  violates the definition's `transitions[]`. */
 interface DefinitionError {
   readonly _tag: 'DefinitionError';
   readonly message: string;
@@ -258,11 +272,14 @@ interface StateLogger {
 }
 ```
 
-> **Note on services:** There is no `ServiceContainer` bag object. Actions that need
-> shared services (HTTP clients, database connections, etc.) access them through the
-> Effect context — the runner provides all required services via its Layer graph.
-> Actions declare additional service requirements by widening their `R` type parameter
-> as needed; the runner's Layer composition ensures they are satisfied at startup.
+> **Note on services:** There is no `ServiceContainer` bag object. The `ActionFunction`
+> type has `R = never` (no Effect service requirements) so that the `ActionRegistry` can
+> store all actions with a uniform type. Actions that need shared services (HTTP clients,
+> database connections, etc.) must **self-provide** them internally — e.g., wrap calls in
+> `Effect.provide(MyServiceLive)` or use `Effect.tryPromise` for Promise-based APIs.
+> Common utilities (HTTP client, config) can be bundled into a helper Layer that actions
+> import and provide themselves. This keeps the registry type-simple while still allowing
+> rich service access.
 
 Actions are **registered by ID** in an `ActionRegistry` on the server. The client can
 browse the registry when wiring up state machine definitions.
@@ -351,7 +368,8 @@ machines concurrently** and waits for **all** of them to complete before continu
 6. The collected results become the state's `stateData` for the transition action
 
 The parent's `status` is set to `'waiting_for_child'` while the children execute,
-and `childInstanceIds` on the `MachineInstance` tracks all running children.
+and `childInstanceIds` on the `MachineInstance` tracks all running children (keyed by
+each child's `key` from `ChildSpawnDefinition`).
 
 ```typescript
 /** What the action receives as `ctx.stateData` after parallel children complete. */
@@ -454,7 +472,7 @@ interface MachineInstance {
   error?: string; // Error message (when errored)
   parentInstanceId?: string; // If this is a child machine
   childInstanceId?: string; // If currently waiting on a single child
-  childInstanceIds?: string[]; // If currently waiting on parallel children
+  childInstanceIds?: Record<string, string>; // key → instanceId; if waiting on parallel children
   history: TransitionRecord[];
   logs: LogEntry[];
   artifacts: ArtifactRecord[]; // Files generated during this instance's run
@@ -471,7 +489,8 @@ interface TransitionRecord {
   durationMs: number; // How long the action took
   actionId?: string; // Which action was executed
   childInstanceId?: string; // If a single child machine was spawned
-  childInstanceIds?: string[]; // If parallel children were spawned
+  childDefinitionId?: string; // Definition ID of spawned child (for debugging)
+  childInstanceIds?: Record<string, string>; // key → instanceId; if parallel children were spawned
   middlewareResults?: Record<string, unknown>; // Data from middleware
 }
 
@@ -604,7 +623,7 @@ Clients connect to `ws://host/api/machines/live` and subscribe to instance event
 { type: 'transition_recorded', instanceId: string, data: TransitionRecord }
 { type: 'log_entry', instanceId: string, data: LogEntry }
 { type: 'machine_completed', instanceId: string, data: MachineResult }
-{ type: 'child_spawned', instanceId: string, data: { childInstanceId: string } }
+{ type: 'child_spawned', instanceId: string, data: { childInstanceId: string, childDefinitionId: string } }
 { type: 'child_completed', instanceId: string, data: { childInstanceId: string, result: MachineResult } }
 { type: 'children_spawned', instanceId: string, data: {
     childInstanceIds: Record<string, string>; // key → instanceId
@@ -821,10 +840,13 @@ const aggregateResults = (ctx: ActionContext): Effect.Effect<TransitionResult, A
   passed via `run(definition, input, { timeoutMs })`.
 - **Idempotency**: Starting a machine returns an instance ID. Repeated GETs are safe.
 - **Type safety**: Full TypeScript types for definitions, instances, actions, middleware.
-  Two validation layers: `Schema` from `effect` validates API payloads and internal
-  data structures (definition shape, instance shape). `ajv` validates user-provided
-  `inputSchema`/`outputSchema`/`dataSchema` JSON Schema definitions against state data
-  at runtime. Add `ajv` as a server dependency.
+  Two validation layers: `Schema` from `effect` (the main package — not `@effect/schema`,
+  which was consolidated in Effect v3.x) validates API payloads and internal data structures
+  on the **server**. `ajv` validates user-provided `inputSchema`/`outputSchema`/`dataSchema`
+  JSON Schema definitions against state data at runtime. Add `ajv` as a server dependency.
+  The **client** currently depends on the separate `@effect/schema` package; when adding
+  machine types in Phase 4, use the same import path the client already depends on, or
+  migrate to `Schema` from `effect` if the client's `effect` version supports it.
 
 ---
 
@@ -1219,7 +1241,9 @@ to connected clients filtered by their subscribed instance IDs.
 - `server/src/machines/StateMachineRunner.ts` — Emit events via `PubSub.publish` on each
   transition, child spawn/complete, and log entry
 - `server/src/lib/HttpServer.ts` — Mount WS upgrade handler on the underlying Node
-  `http.Server` (accessed via the `NodeHttpServer` Layer)
+  `http.Server` (accessed via the `NodeHttpServer` Layer). The WebSocket server shares
+  the same port as the HTTP server (default: 3001) — no separate port is needed.
+  The `ws` library handles the HTTP → WS upgrade on the `/api/machines/live` path.
 
 ---
 
@@ -1243,8 +1267,9 @@ rather than creating a parallel client.
 - `client/src/utils/apiClient.ts` — **Modified**: Add machine endpoint functions (`getDefinitions`,
   `createDefinition`, `getInstance`, `startInstance`, `cancelInstance`, `listArtifacts`,
   `downloadArtifact`, `getArtifactTree`, etc.) using the existing `makeRequest` pattern
-- `client/src/utils/machineSocket.ts` — WebSocket client with reconnection,
-  subscription management, event callbacks
+- `client/src/utils/machineSocket.ts` — WebSocket client with reconnection
+  (exponential backoff: 1s → 2s → 4s → … → 30s cap, with automatic re-subscribe
+  on reconnect), subscription management, event callbacks
 
 #### 4.2 State Management
 
