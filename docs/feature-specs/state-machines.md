@@ -49,12 +49,17 @@ interface StateMachineDefinition {
 interface StateDefinition {
   name: string; // Same as the key
   type: 'action' | 'child_machine' | 'parallel_children' | 'terminal';
-  actionId?: string; // Reference to a registered ActionFunction
+  actionId?: string; // Required for 'action', 'child_machine', and 'parallel_children'.
+  // For 'action': runs immediately on state entry.
+  // For 'child_machine' / 'parallel_children': runs AFTER child(ren)
+  //   complete, receiving child result(s) as stateData.
+  // Must be omitted for 'terminal'.
   childMachineDefId?: string; // For 'child_machine': reference to another StateMachineDefinition
   childInputMapping?: string; // JSONPath expression (via `jsonpath-plus`) to extract from parent context
   children?: ChildSpawnDefinition[]; // For 'parallel_children': list of children to spawn concurrently
   description?: string;
   dataSchema?: JsonSchema; // Schema for data this state carries
+  timeoutMs?: number; // Optional timeout for action execution (ms). Runner wraps in Effect.timeout.
 }
 
 /** Defines one child machine to spawn within a `parallel_children` state. */
@@ -69,6 +74,14 @@ interface TransitionRule {
   to: string; // State name
   description?: string;
 }
+
+/**
+ * JSON Schema object (Draft 2020-12 or compatible).
+ * Validated at runtime via `ajv`. Typed as a generic record here;
+ * use `ajv`'s `JSONSchemaType<T>` for stricter compile-time checking
+ * where the target type T is known.
+ */
+type JsonSchema = Record<string, unknown>;
 ```
 
 **Terminal states**: Every definition **must** include exactly three terminal states keyed
@@ -77,6 +90,29 @@ startup — definitions missing any of the three are rejected. Terminal states h
 `type: 'terminal'` and no `actionId`. The runner's main loop exits when it transitions
 into any terminal state. (Analogous to `FlowResult.Completed` and `FlowResult.Back` in
 Kotlin Flow, with `error` for unrecoverable failures.)
+
+#### Definition Validation
+
+The following rules are enforced when a definition is saved (via API) and re-checked
+by the runner before execution. Invalid definitions are rejected with `DefinitionError`.
+
+1. `initialState` must reference an existing key in `states`
+2. All three required terminal states (`completed`, `cancelled`, `error`) must exist
+   with `type: 'terminal'`
+3. No transitions may originate **from** a terminal state
+4. Every `from` and `to` in `transitions[]` must reference an existing state
+5. Every non-terminal state must have at least one outgoing transition in `transitions[]`
+6. No orphan states — every state must be reachable from `initialState` via transitions
+7. `StateDefinition.name` must match its key in the `states` record
+8. `action` states must have an `actionId` that references a registered action
+9. `child_machine` states must have `actionId`, `childMachineDefId`, and `childInputMapping`
+10. `parallel_children` states must have `actionId` and a non-empty `children[]`
+11. `terminal` states must **not** have `actionId`, `childMachineDefId`, or `children`
+12. `childMachineDefId` references (and `children[].machineDefId`) must not form cycles
+    (e.g., machine A → child B → child A)
+13. `inputSchema`, `outputSchema`, and all `dataSchema` values must be valid JSON Schema
+    documents (structural check via `ajv.validateSchema()`)
+14. All `key` values within a `parallel_children` state's `children[]` must be unique
 
 #### MachineResult
 
@@ -137,6 +173,45 @@ interface DefinitionError {
 All error types use the `_tag` discriminant pattern for idiomatic Effect
 `Effect.catchTag` / `Match.tag` usage throughout the codebase.
 
+#### MachineEvent
+
+Events emitted by the runner to the Effect `PubSub` for live client updates.
+The `WebSocketManager` (Phase 3) subscribes to the `PubSub` and forwards events
+to connected clients filtered by their subscribed instance IDs.
+
+```typescript
+type MachineEvent =
+  | {
+      type: 'state_changed';
+      instanceId: string;
+      data: { previousState: string; currentState: string; stateData: unknown; timestamp: string };
+    }
+  | { type: 'transition_recorded'; instanceId: string; data: TransitionRecord }
+  | { type: 'log_entry'; instanceId: string; data: LogEntry }
+  | { type: 'machine_completed'; instanceId: string; data: MachineResult }
+  | {
+      type: 'child_spawned';
+      instanceId: string;
+      data: { childInstanceId: string; childDefinitionId: string };
+    }
+  | {
+      type: 'child_completed';
+      instanceId: string;
+      data: { childInstanceId: string; result: MachineResult };
+    }
+  | {
+      type: 'children_spawned';
+      instanceId: string;
+      data: { childInstanceIds: Record<string, string> };
+    }
+  | {
+      type: 'children_completed';
+      instanceId: string;
+      data: { results: Record<string, MachineResult> };
+    }
+  | { type: 'artifact_created'; instanceId: string; data: ArtifactRecord };
+```
+
 ---
 
 ### 2. Action Functions (Server-Side)
@@ -172,6 +247,14 @@ interface ActionContext {
 interface TransitionResult {
   nextState: string; // Must be an allowed transition from current state
   data?: unknown; // Data to carry into the next state
+}
+
+/** Scoped logger for a single state execution. */
+interface StateLogger {
+  debug(message: string, data?: unknown): Effect.Effect<void, never>;
+  info(message: string, data?: unknown): Effect.Effect<void, never>;
+  warn(message: string, data?: unknown): Effect.Effect<void, never>;
+  error(message: string, data?: unknown): Effect.Effect<void, never>;
 }
 ```
 
@@ -213,12 +296,21 @@ The **StateMachineRunner** is the core execution engine on the server.
 │  3. Enter initialState                                       │
 │  4. Loop:                                                    │
 │     a. Run middleware chain (beforeTransition)                │
-│     b. Execute the state's action / spawn child machine      │
-│     c. Run middleware chain (afterTransition)                 │
-│     d. Record transition in history                          │
-│     e. Publish event to Effect PubSub                        │
-│     f. If result is terminal → resolve machine result        │
-│     g. Else → transition to next state, continue loop        │
+│     b. Execute the state:                                    │
+│        - 'action': run actionId immediately                  │
+│        - 'child_machine': spawn child → suspend → on         │
+│          completion set stateData to child result → run      │
+│          actionId                                            │
+│        - 'parallel_children': spawn all children → suspend → │
+│          on completion set stateData to collected results →   │
+│          run actionId                                        │
+│     c. Validate nextState is a legal transition per          │
+│        transitions[] (fail with DefinitionError if not)      │
+│     d. Run middleware chain (afterTransition)                 │
+│     e. Record transition in history                          │
+│     f. Publish event to Effect PubSub                        │
+│     g. If result is terminal → resolve machine result        │
+│     h. Else → transition to next state, continue loop        │
 │  5. Return MachineResult                                     │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -227,14 +319,22 @@ The **StateMachineRunner** is the core execution engine on the server.
 
 When a state has `type: 'child_machine'`, the runner:
 
-1. Maps the parent's current context to the child's input (via `childInputMapping`)
-2. Instantiates and runs the child machine (recursive call to the runner)
-3. The child's `MachineResult` is returned as the state's data
-4. The parent uses the child's result in its transition logic (the action function
-   on the parent state after child completes decides which transition to take)
+1. Evaluates `childInputMapping` (JSONPath via `jsonpath-plus`) against the parent's
+   current context to produce the child's input
+2. Sets the parent instance's `status` to `'waiting_for_child'`
+3. Releases the parent's semaphore permit (see "Global Execution Semaphore")
+4. Instantiates and runs the child machine (recursive call to the runner) —
+   the parent **suspends** here until the child reaches a terminal state
+5. On child completion, re-acquires the semaphore permit
+6. Sets `stateData` to the child's `MachineResult`
+7. Executes the state's `actionId` — the action receives the child result in
+   `ctx.stateData` and returns a `TransitionResult` deciding the next state
 
-This mirrors Kotlin Flow's `this.flow(ChildController::class.java, input)` pattern
-where the parent suspends until the child completes.
+The `actionId` is **required** on `child_machine` states. The action is the
+transition logic — it inspects the child's result and chooses the next state.
+This mirrors Kotlin Flow's `onStateName` handler calling
+`this.flow(ChildController::class.java, input)`, awaiting the result, and then
+returning the next state.
 
 #### Parallel Child Machine Spawning
 
@@ -386,6 +486,29 @@ interface LogEntry {
 }
 ```
 
+#### Cancellation
+
+When `POST /api/machines/instances/:id/cancel` is called, the runner:
+
+1. Looks up the instance and verifies it is in a cancellable status (`running` or
+   `waiting_for_child`). Instances already in a terminal state return a 409 Conflict.
+2. **Interrupts** the instance's Effect fiber via `Fiber.interrupt`. Effect fiber
+   interruption is cooperative — it takes effect at the next async yield point, which
+   is the standard Effect concurrency model.
+3. If the instance is `waiting_for_child`:
+   - **Single child**: the child's fiber is also interrupted (recursive cancellation).
+   - **Parallel children**: all children's fibers are interrupted.
+4. Interrupted fibers unwind cleanly — `Effect.onInterrupt` finalizers run, allowing
+   the runner to record the cancellation in the transition history and update the
+   instance status.
+5. The instance transitions to the `cancelled` terminal state.
+6. A `machine_completed` event (with status `cancelled`) is published to the PubSub.
+
+Child machines that are cancelled by their parent record their own status as `cancelled`
+and fire their own `machine_completed` events, so clients subscribed to child instances
+receive updates. The runner tracks each instance's fiber handle in memory (not persisted)
+to support cancellation dispatch.
+
 ---
 
 ### 4. Middleware System
@@ -430,8 +553,8 @@ const RunnerLive = StateMachineRunner.layer({
 
 **Built-in middleware:**
 
-- **ValidationMiddleware** — Validates stateData against the state's `dataSchema` before
-  entering (fails with `ValidationError` if invalid)
+- **ValidationMiddleware** — Validates stateData against the state's `dataSchema` (a JSON
+  Schema document) via `ajv` before entering (fails with `ValidationError` if invalid)
 - **LoggingMiddleware** — Structured logs for each state via `Effect.log` with annotations
 - **TelemetryMiddleware** — Records timing per transition using `Effect.logSpan`
 - **AuditMiddleware** — Immutable audit log of every transition with actor, timestamp, data
@@ -553,19 +676,21 @@ A state definition for this:
 {
   "name": "ProcessData",
   "type": "child_machine",
+  "actionId": "process-child-result",
   "childMachineDefId": "validation-pipeline-v2",
   "childInputMapping": "$.stateData.rawRecords"
 }
 ```
 
-After the child completes, an **action function** on the parent state handles the
-child's result and decides the transition:
+The runner spawns the child machine and suspends. When the child completes, the
+runner sets `stateData` to the child's `MachineResult` and executes the state's
+`actionId`. The action inspects the result and decides the transition:
 
 ```typescript
 import { Effect } from 'effect';
 
-// The "after child" action for ProcessData state
-const processDataAfterChild = (ctx: ActionContext): Effect.Effect<TransitionResult, ActionError> =>
+// actionId: 'process-child-result' — runs after the child machine completes
+const processChildResult = (ctx: ActionContext): Effect.Effect<TransitionResult, ActionError> =>
   Effect.gen(function* () {
     const childResult = ctx.stateData as MachineResult<{ validCount: number }>;
     if (childResult.status === 'completed' && childResult.output.validCount > 0) {
@@ -686,6 +811,14 @@ const aggregateResults = (ctx: ActionContext): Effect.Effect<TransitionResult, A
   `MAX_CONCURRENT_MACHINES` env var. See §3 "Global Execution Semaphore".
 - **Error handling**: If an action's Effect fails, the machine transitions to an error
   terminal state. Middleware `onError` hooks fire. The error is recorded in the instance.
+- **Safety limits**: The runner enforces a maximum child spawning depth (`maxDepth`,
+  default: 10, configurable via `MAX_MACHINE_DEPTH` env var) to prevent runaway
+  recursion from circular child references that slip past static validation (e.g.,
+  a definition updated after initial validation). When the depth limit is reached,
+  the runner fails with `DefinitionError`. Individual action execution can be bounded
+  by an optional `timeoutMs` on `StateDefinition` (default: none — unbounded); the
+  runner wraps the action in `Effect.timeout` when set. Machine-level timeout can be
+  passed via `run(definition, input, { timeoutMs })`.
 - **Idempotency**: Starting a machine returns an instance ID. Repeated GETs are safe.
 - **Type safety**: Full TypeScript types for definitions, instances, actions, middleware.
   Two validation layers: `Schema` from `effect` validates API payloads and internal
@@ -746,6 +879,9 @@ interface ArtifactStore {
   /**
    * Read a file from a child instance's artifact directory.
    * `childInstanceId` must be a direct or transitive child of this instance.
+   * Validated by querying the MachineStore for the child instance and walking
+   * `parentInstanceId` up to this instance — rejects with `NotFoundError` if
+   * the child is not a descendant. This prevents path traversal via forged IDs.
    */
   readChild(childInstanceId: string, name: string): Effect.Effect<Buffer, MachineError>;
 
@@ -849,14 +985,21 @@ Create the shared type definitions used by both server and client.
 
 **Files:**
 
-- `server/src/machines/types.ts` — All interfaces: `StateMachineDefinition`, `StateDefinition`,
-  `TransitionRule`, `MachineInstance`, `TransitionRecord`, `LogEntry`, `MachineResult`,
-  `ActionContext`, `TransitionResult`, `TransitionMiddleware`, `StateLogger`,
-  `ArtifactStore`, `ArtifactRecord`, `ArtifactMetadata`, `ArtifactTree`.
-  Error types: `MachineError`, `ActionError`, `ValidationError`, `StoreError`,
-  `NotFoundError`, `DefinitionError` (all with `_tag` discriminant for Effect `catchTag`).
-  `JsonSchema` (type alias for JSON Schema objects used in `inputSchema`/`outputSchema`/`dataSchema`
-  — validated at runtime via `ajv`; add `ajv` as a server dependency).
+- `server/src/machines/types.ts` — All interfaces and types:
+  - **Definition**: `StateMachineDefinition`, `StateDefinition`, `TransitionRule`,
+    `ChildSpawnDefinition`, `JsonSchema` (type alias — `Record<string, unknown>`,
+    validated at runtime via `ajv`; add `ajv` as a server dependency)
+  - **Runtime**: `MachineInstance`, `TransitionRecord`, `LogEntry`, `MachineResult`,
+    `ParallelChildrenResult`, `InstanceFilter`
+  - **Action**: `ActionFunction`, `ActionContext`, `TransitionResult`, `StateLogger`
+  - **Middleware**: `TransitionMiddleware`, `MiddlewareContext`
+  - **Artifacts**: `ArtifactStore`, `ArtifactRecord`, `ArtifactMetadata`, `ArtifactTree`
+  - **Events**: `MachineEvent` (tagged union of all runner-emitted events for PubSub /
+    WebSocket — `state_changed`, `transition_recorded`, `log_entry`, `machine_completed`,
+    `child_spawned`, `child_completed`, `children_spawned`, `children_completed`,
+    `artifact_created`)
+  - **Errors**: `MachineError`, `ActionError`, `ValidationError`, `StoreError`,
+    `NotFoundError`, `DefinitionError` (all with `_tag` discriminant for Effect `catchTag`)
 - `server/src/machines/schemas.ts` — `Schema` validators from `effect` (not `@effect/schema`,
   which was consolidated into the main `effect` package in v3.x) for all definition and
   instance types. Used to validate API request bodies, store operations, and definition
@@ -982,6 +1125,11 @@ Tests are co-located with source files, matching the established project pattern
   - Recursive single-child depth exceeding semaphore permits (no deadlock)
   - Mixed nesting: parallel children that themselves spawn children (no deadlock)
   - Error handling
+  - Transition legality rejection (action returns illegal `nextState` → `DefinitionError`)
+  - Max depth exceeded → `DefinitionError`
+  - Action timeout via `timeoutMs`
+  - Cancellation of running instance (fiber interrupted, terminal state reached)
+  - Cancellation propagation to single child and parallel children
   - Middleware execution order
   - Artifact creation during actions
   - Parent reading child artifacts after child and parallel children complete
