@@ -15,6 +15,11 @@ Based on [docs/PROJECT_BASE.md](PROJECT_BASE.md).
 | 5 | **Prettier config location** | **Root-level `.prettierrc`** (single file) | Identical formatting rules for both workspaces; no duplication. |
 | 6 | **husky / lint-staged location** | **Root-level** devDependencies | They operate on the Git repo, not individual workspaces. |
 | 7 | **Concurrent dev runner** | **`pnpm --parallel -r run dev`** | Built-in pnpm feature; no extra tool (Turborepo, concurrently, etc.) needed. |
+| 8 | **React Router package** | **`react-router`** (not `react-router-dom`) | v7 merged all packages into `react-router`. `react-router-dom` is a deprecated compat shim. All imports from `"react-router"`. |
+| 9 | **Effect HTTP Client** | **`HttpClient.filterStatusOk`** + `client.get()` | `HttpClient.fetchOk` no longer exists. Use the service pattern: `yield* HttpClient.HttpClient`, pipe with `filterStatusOk`, call `client.get(url)`. |
+| 10 | **Effect HTTP route testing** | **`HttpApp.toWebHandler(router)`** | `HttpRouter.toWebHandler` does not exist. `HttpApp.toWebHandler` converts a router to `(Request) => Promise<Response>`. |
+| 11 | **Effect NodeHttpServer.layer** | **`NodeHttpServer.layer(() => createServer(), { port })`** | Low-level API requires the first arg to be a factory function, not `createServer` directly. |
+| 12 | **ESLint react-hooks flat config** | **`reactHooks.configs.flat['recommended-latest']`** | v7 of `eslint-plugin-react-hooks` uses a `.flat.` namespace for flat config exports. |
 
 ---
 
@@ -51,7 +56,7 @@ Based on [docs/PROJECT_BASE.md](PROJECT_BASE.md).
 - [ ] Scaffold `client/` with Vite (React + TypeScript SWC template)
 - [ ] Create `client/package.json` with `name: "@aiflow/client"`
 - [ ] Install production dependencies:
-  - react, react-dom, react-router-dom
+  - react, react-dom, react-router
   - zustand, i18next, react-i18next, i18next-browser-languagedetector
   - effect, @effect/platform, @effect/schema
   - @headlessui/react, recharts, react-hot-toast

@@ -253,7 +253,7 @@ use packages newer than these
     "react-dom": "^19.2.0",
     "react-hot-toast": "^2.6.0",
     "react-i18next": "^16.5.3",
-    "react-router-dom": "^7.13.0",
+    "react-router": "^7.13.0",
     "recharts": "^3.7.0",
     "zustand": "^5.0.10"
   },
