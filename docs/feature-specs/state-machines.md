@@ -204,6 +204,11 @@ type MachineEvent =
   | { type: 'log_entry'; instanceId: string; data: LogEntry }
   | { type: 'machine_completed'; instanceId: string; data: MachineResult }
   | {
+      type: 'machine_resumed';
+      instanceId: string;
+      data: { previousState: string; resumedState: string; timestamp: string };
+    }
+  | {
       type: 'child_spawned';
       instanceId: string;
       data: { childInstanceId: string; childDefinitionId: string };
@@ -325,10 +330,19 @@ The **StateMachineRunner** is the core execution engine on the server.
 │        transitions[] (fail with DefinitionError if not)      │
 │     d. Run middleware chain (afterTransition)                 │
 │     e. Record transition in history                          │
+│     █ Checkpoint 3: persist history + logs + stateData       │
 │     f. Publish event to Effect PubSub                        │
 │     g. If result is terminal → resolve machine result        │
+│        █ Checkpoint 4: persist final status + output/error   │
 │     h. Else → transition to next state, continue loop        │
 │  5. Return MachineResult                                     │
+│                                                              │
+│  resume():                                                   │
+│  1. Load suspended instance from MachineStore                │
+│  2. Load + validate definition (version must match)          │
+│  3. Recursively resume any suspended children                │
+│  4. Re-enter currentState (re-execute its action)            │
+│  5. Continue at run() step 4 (normal loop)                   │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -464,7 +478,7 @@ interface MachineInstance {
   id: string; // UUID
   definitionId: string;
   definitionVersion: number;
-  status: 'running' | 'completed' | 'cancelled' | 'error' | 'waiting_for_child';
+  status: 'running' | 'completed' | 'cancelled' | 'error' | 'waiting_for_child' | 'suspended';
   currentState: string;
   stateData: unknown; // Data in the current state
   input: unknown; // Original input
@@ -526,7 +540,167 @@ When `POST /api/machines/instances/:id/cancel` is called, the runner:
 Child machines that are cancelled by their parent record their own status as `cancelled`
 and fire their own `machine_completed` events, so clients subscribed to child instances
 receive updates. The runner tracks each instance's fiber handle in memory (not persisted)
-to support cancellation dispatch.
+to support cancellation and suspension dispatch.
+
+#### Resumability
+
+The runner supports **resuming** machine instances that were interrupted by server
+shutdown or crash. This ensures long-running machines are not lost when the server
+restarts. Resume works by re-entering the last state whose action did not complete.
+
+##### Persistence Checkpoints
+
+To support resumability, the runner persists the `MachineInstance` to the `MachineStore`
+at defined **checkpoint** points during execution:
+
+1. **Instance creation** — Immediately after creating the `MachineInstance` record
+   (status: `running`, currentState: `initialState`).
+2. **Before entering each state** — After updating `currentState` and `stateData`
+   but **before** executing the action. This is the critical checkpoint: if the server
+   crashes during action execution, the instance's persisted `currentState` reflects
+   the state whose action did not complete.
+3. **After each completed transition** — `history[]` is appended with the
+   `TransitionRecord`, `logs[]` updated, `stateData` set to the transition result's
+   `data`. This captures completed work.
+4. **On terminal state** — Final status, output/error written.
+5. **On suspend** — Status set to `'suspended'` during graceful shutdown.
+
+The minimum data that must be persisted per checkpoint for resumability:
+
+| Field               | Checkpoint | Purpose                                                 |
+| ------------------- | ---------- | ------------------------------------------------------- |
+| `id`                | 1          | Instance identity                                       |
+| `definitionId`      | 1          | Which definition to reload on resume                    |
+| `definitionVersion` | 1          | Exact version the instance was started with             |
+| `status`            | 1–5        | Distinguishes resumable (`suspended`) from terminal     |
+| `currentState`      | 2          | The state to re-enter on resume                         |
+| `stateData`         | 2, 3       | Data the current state needs (action input)             |
+| `input`             | 1          | Original machine input (needed by `ActionContext`)      |
+| `output`            | 4          | Terminal output (if completed)                          |
+| `error`             | 4          | Terminal error message (if errored)                     |
+| `parentInstanceId`  | 1          | Reconstructs parent-child hierarchy on resume           |
+| `childInstanceId`   | 2          | Identifies suspended single child to resume first       |
+| `childInstanceIds`  | 2          | Identifies suspended parallel children                  |
+| `history`           | 3          | Completed transitions (avoids re-executing done states) |
+| `logs`              | 3          | Preserves log entries across restarts                   |
+| `artifacts`         | 3          | Artifact metadata (files already on disk)               |
+| `createdAt`         | 1          | Original creation time                                  |
+| `updatedAt`         | 1–5        | Last checkpoint time                                    |
+
+> **Note on the in-memory store:** The `InMemoryMachineStore` (Phase 1) satisfies the
+> `MachineStore` interface but does **not** survive process restarts — resumability
+> requires a durable store (SQLite/Postgres). The in-memory store is sufficient for
+> development and testing of the resume protocol itself (suspend → resume within a
+> single process lifetime). True crash recovery requires swapping in a durable
+> `MachineStore` implementation.
+
+##### Graceful Shutdown
+
+When the server receives a shutdown signal (`SIGTERM`, `SIGINT`), the runner:
+
+1. Stops accepting new `run()` requests.
+2. For each in-flight instance (status `running` or `waiting_for_child`):
+   a. **Interrupts** the instance's Effect fiber (same mechanism as cancellation).
+   b. The `Effect.onInterrupt` finalizer sets the instance status to `'suspended'`
+   (not `'cancelled'`) and persists it via `MachineStore.updateInstance`.
+   c. If the instance has running children, they are also suspended recursively —
+   each child's status is set to `'suspended'` independently.
+3. Waits for all finalizers to complete (bounded by a shutdown timeout, default: 10s,
+   configurable via `SHUTDOWN_TIMEOUT_MS` env var).
+4. Proceeds with server shutdown.
+
+The distinction between `'suspended'` and `'cancelled'` is critical: suspended instances
+are **intended to be resumed**, while cancelled instances are **permanently terminated**
+by explicit user request.
+
+##### Resume Protocol
+
+When `POST /api/machines/instances/:id/resume` is called (or on automatic startup
+recovery), the runner:
+
+1. Loads the `MachineInstance` from the store and verifies `status === 'suspended'`.
+   Instances in any other status return 409 Conflict.
+2. Loads the `StateMachineDefinition` by `definitionId`. If the definition has been
+   deleted or its current version differs from `definitionVersion`, the resume fails
+   with `DefinitionError` (the definition may have changed incompatibly).
+3. Re-validates the definition (same validation as a fresh `run()`).
+4. **Handles child resumption first:**
+   - If `childInstanceId` is set (single child was in progress), the runner checks
+     the child's status. If `suspended`, it recursively resumes the child first. The
+     parent remains `waiting_for_child` until the child completes. If the child already
+     reached a terminal state before shutdown, its `MachineResult` is read from the
+     store and used directly.
+   - If `childInstanceIds` is set (parallel children were in progress), each child's
+     status is checked. Suspended children are resumed; children already in a terminal
+     state are not re-run. The parent waits for all children to reach a terminal state.
+5. Sets instance status back to `'running'`.
+6. **Re-enters `currentState`** — the runner re-executes the state as if entering it
+   for the first time. The persisted `currentState` is the state whose action did not
+   finish (thanks to checkpoint 2 being written _before_ action execution). For
+   `child_machine` / `parallel_children` states where children have now completed
+   (either they finished before shutdown or were just resumed), the runner picks up
+   at the post-child action execution with `stateData` set to the child result(s).
+7. The normal state loop continues from there.
+8. A `machine_resumed` event is published to the PubSub.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  Resume Protocol                                                 │
+│                                                                  │
+│  Store: instance.currentState = "ProcessData" (suspended)        │
+│         instance.history = [GatherData → ProcessData]            │
+│                                                                  │
+│  1. Load instance (status: suspended) ✓                          │
+│  2. Load definition (version match) ✓                            │
+│  3. Validate definition ✓                                        │
+│  4. Check children: childInstanceId set?                         │
+│     ├─ child suspended → resume child first                      │
+│     └─ child completed → use stored result                       │
+│  5. Set status → running                                         │
+│  6. Re-enter "ProcessData" → execute action                      │
+│     (action sees stateData from checkpoint 2)                    │
+│  7. Continue state loop: ProcessData → next → ... → terminal     │
+│  8. Publish machine_resumed event                                │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+##### Action Idempotency
+
+Because resume re-executes the action for `currentState`, actions that have
+**side effects** (HTTP requests, database writes, file creation) should be designed
+for **idempotency** or **at-least-once** semantics. The `ActionContext` provides
+enough information for actions to detect whether their work was already partially done:
+
+- `ctx.artifacts.list()` — Check if an output file already exists before writing
+- `ctx.stateData` — May contain markers from a previous partial run
+- External systems — Use idempotency keys derived from
+  `ctx.machineInstanceId + ctx.stateName`
+
+The runner does **not** guarantee exactly-once execution of actions. It guarantees that
+a resumed machine will not **skip** a state or **re-execute** states that already
+completed successfully (completed transitions are recorded in `history[]` and the runner
+resumes from `currentState`, not `initialState`).
+
+##### Startup Recovery
+
+On server startup, the runner can optionally scan the `MachineStore` for instances
+with `status === 'suspended'` and automatically resume them. This is controlled by
+the `AUTO_RESUME_ON_STARTUP` environment variable (default: `false`). When enabled:
+
+1. The runner queries `listInstances({ status: 'suspended' })`.
+2. **Top-level instances first**: only instances with no `parentInstanceId` (or whose
+   parent is not itself suspended) are resumed directly. Child instances are resumed
+   by their parent's resume protocol (step 4 above), preserving the hierarchy.
+3. Instances are sorted by `updatedAt` (oldest first) to respect original ordering.
+4. Each top-level instance is resumed sequentially during startup (to avoid overwhelming
+   the server). Once all are submitted, the semaphore governs concurrent execution
+   as normal.
+5. Instances that fail to resume (e.g., definition deleted, version mismatch) are moved
+   to `'error'` status with a descriptive error message.
+
+When `AUTO_RESUME_ON_STARTUP` is `false`, suspended instances remain in the store
+and must be resumed manually via the REST API. The dashboard (§6c) shows suspended
+instances with a "Resume" button.
 
 ---
 
@@ -600,6 +774,7 @@ const RunnerLive = StateMachineRunner.layer({
 | `GET`    | `/api/machines/instances/:id/logs`                | Get logs for an instance         |
 | `GET`    | `/api/machines/instances/:id/logs?state=X`        | Get logs filtered by state       |
 | `POST`   | `/api/machines/instances/:id/cancel`              | Cancel a running instance        |
+| `POST`   | `/api/machines/instances/:id/resume`              | Resume a suspended instance      |
 | `GET`    | `/api/machines/instances/:id/artifacts`           | List artifacts for an instance   |
 | `GET`    | `/api/machines/instances/:id/artifacts/:name`     | Download an artifact file        |
 | `GET`    | `/api/machines/instances/:id/artifacts?tree=true` | Artifact tree (incl. children)   |
@@ -632,6 +807,11 @@ Clients connect to `ws://host/api/machines/live` and subscribe to instance event
     results: Record<string, MachineResult>;   // key → result
 }}
 { type: 'artifact_created', instanceId: string, data: ArtifactRecord }
+{ type: 'machine_resumed', instanceId: string, data: {
+    previousState: string;   // state at time of suspend
+    resumedState: string;    // state being re-entered
+    timestamp: string;
+}}
 ```
 
 ---
@@ -662,7 +842,8 @@ Clients connect to `ws://host/api/machines/live` and subscribe to instance event
 #### 6c. Dashboard
 
 - List of all definitions (with create/edit/delete)
-- List of running / recent instances
+- List of running / suspended / recent instances
+- Suspended instances show a **Resume** button (calls `POST /api/machines/instances/:id/resume`)
 - Quick-start: pick a definition, provide input, launch
 
 ---
@@ -817,7 +998,17 @@ const aggregateResults = (ctx: ActionContext): Effect.Effect<TransitionResult, A
 ### 8. Non-Functional Requirements
 
 - **Persistence**: In-memory store initially, with a clean interface for plugging in
-  SQLite/Postgres later. Definitions and instances are stored server-side.
+  SQLite/Postgres later. Definitions and instances are stored server-side. The runner
+  writes **persistence checkpoints** at defined points during execution (instance
+  creation, before each state entry, after each transition, on terminal/suspend) —
+  see §3 "Persistence Checkpoints". A durable `MachineStore` implementation is required
+  for resumability across server restarts.
+- **Resumability**: Machine instances interrupted by server shutdown are marked
+  `'suspended'` and can be resumed — the runner re-enters the last state whose action
+  did not complete. Child machines are resumed recursively before their parent. Actions
+  should be designed for idempotency since resume re-executes the interrupted action.
+  Automatic resume on startup is opt-in via `AUTO_RESUME_ON_STARTUP` env var. See §3
+  "Resumability".
 - **Artifact storage**: Generated files are written to the local filesystem in a
   hierarchy that mirrors instance parent/child relationships. Artifact metadata
   (name, size, state, timestamp) is tracked on the `MachineInstance`. The filesystem
@@ -1054,6 +1245,10 @@ The execution engine. **New server dependency required**: `jsonpath-plus` (for e
 
 - `server/src/machines/StateMachineRunner.ts` — Core runner Effect Service
   - `run(definition, input, opts?)` → `Effect<MachineResult, MachineError>`
+  - `resume(instanceId)` → `Effect<MachineResult, MachineError>` — loads a suspended
+    instance from the store, recursively resumes children, re-enters `currentState`
+  - `suspendAll()` → `Effect<void, MachineError>` — graceful shutdown: interrupts all
+    in-flight fibers, sets status to `suspended`, persists checkpoint
   - Manages the state loop, action dispatch, child machine spawning
   - Handles `parallel_children` states: spawns N children via `Effect.all` /
     `Effect.allSettled` (based on `parallelMode`), releasing the parent's semaphore
@@ -1062,6 +1257,8 @@ The execution engine. **New server dependency required**: `jsonpath-plus` (for e
     via `jsonpath-plus`
   - Calls middleware hooks around each transition
   - Records transition history and logs on the instance
+  - Writes persistence checkpoints to `MachineStore` at each phase of the state loop
+    (see §3 "Persistence Checkpoints") to support resumability
   - Emits `MachineEvent` to Effect `PubSub` on each transition (consumed by WebSocket in Phase 3)
   - Implemented as an Effect Layer, taking `ActionRegistry`, `MachineStore`,
     `PubSub<MachineEvent>`, and `Semaphore` (global execution limiter) as dependencies
@@ -1155,6 +1352,16 @@ Tests are co-located with source files, matching the established project pattern
   - Middleware execution order
   - Artifact creation during actions
   - Parent reading child artifacts after child and parallel children complete
+  - Suspend and resume of a simple linear machine (re-enters `currentState`)
+  - Suspend and resume of a machine with a running single child (child resumed first)
+  - Suspend and resume of parallel children (mix of suspended and already-completed)
+  - Resume rejects non-suspended instances (409 Conflict)
+  - Resume rejects when definition version has changed (`DefinitionError`)
+  - Resume rejects when definition has been deleted (`NotFoundError`)
+  - Graceful shutdown suspends all in-flight instances
+  - Startup recovery with `AUTO_RESUME_ON_STARTUP` (top-level instances only)
+  - Action idempotency: resumed action can detect prior partial work via artifacts
+  - Persistence checkpoints: instance state correct after each checkpoint
 - `server/src/machines/ActionRegistry.test.ts`
 - `server/src/machines/middleware/middleware.test.ts`
 - `server/src/machines/artifacts/ArtifactStore.test.ts` — Write, read, list,
@@ -1173,7 +1380,7 @@ Tests are co-located with source files, matching the established project pattern
 - `server/src/routes/machines/index.ts` — Combined router, merges sub-routers
 - `server/src/routes/machines/definitions.ts` — CRUD for StateMachineDefinition
 - `server/src/routes/machines/actions.ts` — List / get registered actions
-- `server/src/routes/machines/instances.ts` — Start, list, get, cancel instances;
+- `server/src/routes/machines/instances.ts` — Start, list, get, cancel, resume instances;
   get history, logs, and artifacts (list, download, tree)
 
 #### 2.2 Wire into HttpServer
@@ -1226,8 +1433,8 @@ from the Effect context (they don't import singletons — everything flows throu
   events. Subscribes to the runner's Effect `PubSub` and forwards matching events to
   connected clients.
 - `server/src/machines/live/events.ts` — Event types: `state_changed`, `transition_recorded`,
-  `log_entry`, `machine_completed`, `child_spawned`, `child_completed`, `children_spawned`,
-  `children_completed`, `artifact_created`
+  `log_entry`, `machine_completed`, `machine_resumed`, `child_spawned`, `child_completed`,
+  `children_spawned`, `children_completed`, `artifact_created`
 
 #### 3.2 Hook into Runner
 
@@ -1403,3 +1610,16 @@ Phase 1 (Core Engine)
    permits — only the deepest active machine holds a permit at any time). One knob
    (`MAX_CONCURRENT_MACHINES`) controls all active concurrency. Two error modes:
    `all_or_interrupt` (fail-fast, interrupt siblings) and `all_settled` (wait for all).
+
+8. **Resumability via checkpoint-and-replay** — The runner persists the `MachineInstance`
+   to the `MachineStore` at defined checkpoint points during execution. The critical
+   checkpoint is **before entering each state** (checkpoint 2): `currentState` and
+   `stateData` are written before the action runs, so a crash mid-action leaves the
+   instance pointing at the unfinished state. On resume, the runner re-enters
+   `currentState` and re-executes its action — it never skips states or replays
+   completed ones (those are in `history[]`). This is a **checkpoint-and-replay**
+   strategy (not event sourcing or WAL). The tradeoff is that actions must tolerate
+   at-least-once execution (idempotency). Graceful shutdown uses Effect fiber
+   interruption to transition all in-flight instances to `'suspended'` status before
+   the process exits. Automatic resume on startup is opt-in (`AUTO_RESUME_ON_STARTUP`)
+   to avoid surprising behavior in development.
