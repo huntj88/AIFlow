@@ -72,9 +72,9 @@ Not `@effect/schema` — that package was consolidated into `effect` v3.x.
 
 ## Validation Checklist
 
-- [ ] `server/src/machines/schemas.ts` exists and compiles
-- [ ] `CreateDefinitionRequestSchema` rejects payloads missing required fields (name, states, initialState, transitions)
-- [ ] `StartInstanceRequestSchema` requires `definitionId` and `input`
-- [ ] Schema decode functions return `Effect` with typed parse errors
-- [ ] All schemas align with the interfaces defined in Task 01
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
+- [x] `server/src/machines/schemas.ts` exists and compiles
+- [x] `CreateDefinitionRequestSchema` rejects payloads missing required fields (name, states, initialState, transitions)
+- [x] `StartInstanceRequestSchema` requires `definitionId` and `input`
+- [x] Schema decode functions return `Effect` with typed parse errors
+- [x] All schemas align with the interfaces defined in Task 01
+- [x] `pnpm --filter @aiflow/server run build` succeeds

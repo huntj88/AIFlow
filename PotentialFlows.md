@@ -12,3 +12,5 @@ separate flow to mark checklist items.
 flow after planning to create questions to ask user for further plan refinement
 
 "Create an implementation plan for state machine feature. This is a complex feature so break down the plan into many tasks under the state-machines task folder. Ensure task don't have circular dependencies. Ensure every aspect of the feature spec and behavior spec is taken into account. ultrathink."
+
+"validate was fully implemented and check off validation items"
