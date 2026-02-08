@@ -737,6 +737,13 @@ order (first registered = first to run `beforeTransition`, last to run `afterTra
 like an onion). Middleware **cannot** short-circuit a transition; it can only observe, validate,
 or fail with an error (which sends the machine to the error terminal state).
 
+The middleware chain applies to **every transition in every machine**, including child machines
+and parallel children. Child machines use the same runner instance (and therefore the same
+middleware array) as the parent. If a child machine executes 5 transitions, each middleware
+fires 5 times for that child — independently of the parent's transitions. The
+`MiddlewareContext` carries the specific `instance` and `stateName`, so middleware can
+distinguish parent from child transitions via `instance.parentInstanceId`.
+
 ```typescript
 // At Layer construction
 const RunnerLive = StateMachineRunner.layer({
