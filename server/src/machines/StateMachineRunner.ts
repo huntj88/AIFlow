@@ -13,7 +13,7 @@
  */
 
 import AjvModule from 'ajv';
-import { Context, Effect, Layer } from 'effect';
+import { Context, Duration, Effect, Layer } from 'effect';
 
 import { ActionRegistry } from './ActionRegistry.js';
 import { validateDefinition } from './DefinitionValidator.js';
@@ -28,6 +28,7 @@ import type {
   MachineResult,
   StateMachineDefinition,
   TransitionRecord,
+  TransitionResult,
   TransitionRule,
 } from './types.js';
 import { mkActionError, mkDefinitionError, mkValidationError } from './types.js';
@@ -124,6 +125,27 @@ export const StateMachineRunnerLive = Layer.effect(
           yield* validateDefinition(definition, 'runtime', syncRegistry);
 
           // ──────────────────────────────────────────────────────────────
+          // 1b. Enforce max depth (MAX_MACHINE_DEPTH)
+          // ──────────────────────────────────────────────────────────────
+
+          /* eslint-disable @typescript-eslint/dot-notation */
+          const MAX_MACHINE_DEPTH = parseInt(process.env['MAX_MACHINE_DEPTH'] ?? '10', 10);
+          /* eslint-enable @typescript-eslint/dot-notation */
+          const depth = opts?.depth ?? 0;
+
+          if (depth > MAX_MACHINE_DEPTH) {
+            return yield* Effect.fail(
+              mkDefinitionError({
+                message: `Maximum machine nesting depth (${String(MAX_MACHINE_DEPTH)}) exceeded`,
+                details: [
+                  `Current depth: ${String(depth)}`,
+                  `Maximum allowed: ${String(MAX_MACHINE_DEPTH)}`,
+                ],
+              }),
+            );
+          }
+
+          // ──────────────────────────────────────────────────────────────
           // 2. Validate input against definition.inputSchema
           // ──────────────────────────────────────────────────────────────
 
@@ -178,177 +200,266 @@ export const StateMachineRunnerLive = Layer.effect(
           let stateData: unknown = input;
           let history: TransitionRecord[] = [];
           let allLogs = savedInstance.logs;
+          let errorResult: MachineResult | null = null;
 
-          while (definition.states[currentState].type !== 'terminal') {
-            const stateDef = definition.states[currentState];
+          // ── Helper: persist error terminal state and build MachineResult ──
+          const persistError = (
+            errorMessage: string,
+            actionId: string | undefined,
+            durationMs: number,
+          ) =>
+            Effect.gen(function* () {
+              const errorTransitionRecord: TransitionRecord = {
+                id: crypto.randomUUID(),
+                fromState: currentState,
+                toState: 'error',
+                timestamp: new Date().toISOString(),
+                durationMs,
+                actionId,
+              };
 
-            // ── a. Checkpoint 2: Persist BEFORE action runs ──
-            yield* store.updateInstance(instanceId, {
-              currentState,
-              stateData,
-              history,
-              updatedAt: new Date().toISOString(),
+              history = [...history, errorTransitionRecord];
+
+              yield* store.updateInstance(instanceId, {
+                status: 'error',
+                currentState: 'error',
+                stateData,
+                error: errorMessage,
+                history,
+                logs: allLogs,
+                updatedAt: new Date().toISOString(),
+              });
+
+              errorResult = {
+                status: 'error',
+                error: errorMessage,
+                instanceId,
+              };
             });
 
-            // ── b. Create scoped StateLogger and ArtifactStore ──
-            const loggerFactory = createStateLoggerFactory();
-            const logger = loggerFactory.create(instanceId, currentState);
-            const artifacts = artifactFactory.makeScoped(
-              instanceId,
-              currentState,
-              opts?.parentInstanceId,
-            );
+          // ── The core state loop as a separate Effect (for machine-level timeout) ──
+          const stateLoop = Effect.gen(function* () {
+            while (definition.states[currentState].type !== 'terminal') {
+              const stateDef = definition.states[currentState];
 
-            // ── c. Build ActionContext ──
-            const actionCtx: ActionContext = {
-              machineInstanceId: instanceId,
-              machineDefId: definition.id,
-              stateName: currentState,
-              stateData,
-              machineInput: input,
-              parentContext,
-              logger,
-              artifacts,
-            };
+              // ── a. Checkpoint 2: Persist BEFORE action runs ──
+              yield* store.updateInstance(instanceId, {
+                currentState,
+                stateData,
+                history,
+                updatedAt: new Date().toISOString(),
+              });
 
-            // ── d. Run middleware beforeTransition ──
-            // Fetch latest instance for middleware context
-            const latestInstance = yield* store.getInstance(instanceId);
-            const middlewareCtx = {
-              instance: latestInstance,
-              stateName: currentState,
-              stateData,
-              definition,
-            };
-
-            yield* middlewareExec.runBefore(middlewareCtx);
-
-            // ── e. Look up actionId in ActionRegistry ──
-            const actionId = stateDef.actionId;
-            if (!actionId) {
-              return yield* Effect.fail(
-                mkDefinitionError({
-                  message: `State "${currentState}" of type "action" has no actionId`,
-                }),
+              // ── b. Create scoped StateLogger and ArtifactStore ──
+              const loggerFactory = createStateLoggerFactory();
+              const logger = loggerFactory.create(instanceId, currentState);
+              const artifacts = artifactFactory.makeScoped(
+                instanceId,
+                currentState,
+                opts?.parentInstanceId,
               );
+
+              // ── c. Build ActionContext ──
+              const actionCtx: ActionContext = {
+                machineInstanceId: instanceId,
+                machineDefId: definition.id,
+                stateName: currentState,
+                stateData,
+                machineInput: input,
+                parentContext,
+                logger,
+                artifacts,
+              };
+
+              // ── d. Run middleware beforeTransition ──
+              const latestInstance = yield* store.getInstance(instanceId);
+              const middlewareCtx = {
+                instance: latestInstance,
+                stateName: currentState,
+                stateData,
+                definition,
+              };
+
+              yield* middlewareExec.runBefore(middlewareCtx);
+
+              // ── e. Look up actionId in ActionRegistry ──
+              const actionId = stateDef.actionId;
+              if (!actionId) {
+                return yield* Effect.fail(
+                  mkDefinitionError({
+                    message: `State "${currentState}" of type "action" has no actionId`,
+                  }),
+                );
+              }
+
+              const { fn: actionFn } = yield* registry.get(actionId);
+
+              // ── f. Execute the action → get TransitionResult ──
+              const startTime = Date.now();
+
+              // Apply per-state timeout if configured
+              const rawAction = actionFn(actionCtx);
+              const timedAction = stateDef.timeoutMs
+                ? rawAction.pipe(
+                    Effect.timeoutFail({
+                      duration: Duration.millis(stateDef.timeoutMs),
+                      onTimeout: () =>
+                        mkActionError({
+                          actionId,
+                          stateName: currentState,
+                          cause: 'timeout',
+                        }),
+                    }),
+                  )
+                : rawAction;
+
+              const transitionResult = yield* timedAction.pipe(
+                Effect.catchAll((actionError: ActionError) =>
+                  Effect.gen(function* () {
+                    // Build the MachineError
+                    const machineError: MachineError = mkActionError({
+                      actionId,
+                      stateName: currentState,
+                      cause: actionError.cause ?? actionError,
+                    });
+
+                    // Run middleware onError (never fails)
+                    yield* middlewareExec.runOnError({
+                      ...middlewareCtx,
+                      error: machineError,
+                    });
+
+                    // Collect logs from the failed action
+                    const errorLogs = [...loggerFactory.getEntries()];
+                    allLogs = [...allLogs, ...errorLogs];
+
+                    // Build descriptive error message
+                    const isTimeout = actionError.cause === 'timeout';
+                    const errorMessage = isTimeout
+                      ? `Action '${actionId}' in state '${currentState}' timed out after ${String(stateDef.timeoutMs ?? 0)}ms`
+                      : actionError.cause instanceof Error
+                        ? actionError.cause.message
+                        : typeof actionError.cause === 'string'
+                          ? actionError.cause
+                          : `Action "${actionId}" failed in state "${currentState}"`;
+
+                    const durationMs = Date.now() - startTime;
+
+                    // Persist error terminal state + set errorResult
+                    yield* persistError(errorMessage, actionId, durationMs);
+
+                    // Return a dummy TransitionResult (not used — errorResult is checked)
+                    return { nextState: 'error' } as TransitionResult;
+                  }),
+                ),
+              );
+
+              // If an error occurred, break out of the loop
+              if (errorResult) return;
+
+              const durationMs = Date.now() - startTime;
+
+              // ── g. Validate nextState is a legal transition ──
+              if (
+                !isLegalTransition(currentState, transitionResult.nextState, definition.transitions)
+              ) {
+                return yield* Effect.fail(
+                  mkDefinitionError({
+                    message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
+                    details: [
+                      `Action "${actionId}" returned nextState "${transitionResult.nextState}" which is not in the definition's transitions`,
+                    ],
+                  }),
+                );
+              }
+
+              // ── h. Run middleware afterTransition ──
+              yield* middlewareExec.runAfter({
+                ...middlewareCtx,
+                result: transitionResult,
+              });
+
+              // ── i. Record TransitionRecord in history ──
+              const transitionRecord: TransitionRecord = {
+                id: crypto.randomUUID(),
+                fromState: currentState,
+                toState: transitionResult.nextState,
+                data: transitionResult.data,
+                timestamp: new Date().toISOString(),
+                durationMs,
+                actionId,
+              };
+
+              history = [...history, transitionRecord];
+
+              // ── j. Collect log entries from StateLogger ──
+              const logEntries = [...loggerFactory.getEntries()];
+              allLogs = [...allLogs, ...logEntries];
+
+              // ── k. Checkpoint 3: Persist history + logs + advance state ──
+              const nextState = transitionResult.nextState;
+              const nextStateData = transitionResult.data ?? stateData;
+
+              yield* store.updateInstance(instanceId, {
+                currentState: nextState,
+                stateData: nextStateData,
+                history,
+                logs: allLogs,
+                updatedAt: new Date().toISOString(),
+              });
+
+              // Advance loop variables
+              currentState = nextState;
+              stateData = nextStateData;
             }
+          });
 
-            const { fn: actionFn } = yield* registry.get(actionId);
+          // ── Apply machine-level timeout if configured ──
+          const timedStateLoop = opts?.timeoutMs
+            ? stateLoop.pipe(
+                Effect.timeoutFail({
+                  duration: Duration.millis(opts.timeoutMs),
+                  onTimeout: () =>
+                    mkActionError({
+                      actionId: 'machine',
+                      stateName: currentState,
+                      cause: 'machine_timeout',
+                    }),
+                }),
+              )
+            : stateLoop;
 
-            // ── f. Execute the action → get TransitionResult ──
-            const startTime = Date.now();
+          // Execute the state loop, handling machine-level timeout
+          yield* timedStateLoop.pipe(
+            Effect.catchAll((err: MachineError) =>
+              Effect.gen(function* () {
+                if (err._tag === 'ActionError' && err.cause === 'machine_timeout') {
+                  const timeoutVal = opts?.timeoutMs ?? 0;
+                  const errorMessage = `Machine execution timed out after ${String(timeoutVal)}ms`;
 
-            const transitionResult = yield* actionFn(actionCtx).pipe(
-              Effect.catchAll((actionError: ActionError) =>
-                Effect.gen(function* () {
-                  // Run middleware onError
-                  const machineError: MachineError = mkActionError({
-                    actionId: actionId,
-                    stateName: currentState,
-                    cause: actionError.cause ?? actionError,
-                  });
-
+                  // Run middleware onError (never fails)
                   yield* middlewareExec.runOnError({
-                    ...middlewareCtx,
-                    error: machineError,
-                  });
-
-                  // Collect logs from the failed action
-                  const errorLogs = [...loggerFactory.getEntries()];
-                  allLogs = [...allLogs, ...errorLogs];
-
-                  // Transition to error terminal state
-                  const errorMessage =
-                    actionError.cause instanceof Error
-                      ? actionError.cause.message
-                      : typeof actionError.cause === 'string'
-                        ? actionError.cause
-                        : `Action "${actionId}" failed in state "${currentState}"`;
-
-                  const durationMs = Date.now() - startTime;
-
-                  // Record the error transition in history
-                  const errorTransitionRecord: TransitionRecord = {
-                    id: crypto.randomUUID(),
-                    fromState: currentState,
-                    toState: 'error',
-                    timestamp: new Date().toISOString(),
-                    durationMs,
-                    actionId,
-                  };
-
-                  history = [...history, errorTransitionRecord];
-
-                  // Checkpoint 4: Persist final error status
-                  yield* store.updateInstance(instanceId, {
-                    status: 'error',
-                    currentState: 'error',
+                    instance: yield* store.getInstance(instanceId),
+                    stateName: currentState,
                     stateData,
-                    error: errorMessage,
-                    history,
-                    logs: allLogs,
-                    updatedAt: new Date().toISOString(),
+                    definition,
+                    error: err,
                   });
 
-                  return yield* Effect.fail(machineError);
-                }),
-              ),
-            );
+                  yield* persistError(errorMessage, undefined, timeoutVal);
+                  return;
+                }
+                // Re-throw non-timeout errors
+                return yield* Effect.fail(err);
+              }),
+            ),
+          );
 
-            const durationMs = Date.now() - startTime;
-
-            // ── g. Validate nextState is a legal transition ──
-            if (
-              !isLegalTransition(currentState, transitionResult.nextState, definition.transitions)
-            ) {
-              return yield* Effect.fail(
-                mkDefinitionError({
-                  message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
-                  details: [
-                    `Action "${actionId}" returned nextState "${transitionResult.nextState}" which is not in the definition's transitions`,
-                  ],
-                }),
-              );
-            }
-
-            // ── h. Run middleware afterTransition ──
-            yield* middlewareExec.runAfter({
-              ...middlewareCtx,
-              result: transitionResult,
-            });
-
-            // ── i. Record TransitionRecord in history ──
-            const transitionRecord: TransitionRecord = {
-              id: crypto.randomUUID(),
-              fromState: currentState,
-              toState: transitionResult.nextState,
-              data: transitionResult.data,
-              timestamp: new Date().toISOString(),
-              durationMs,
-              actionId,
-            };
-
-            history = [...history, transitionRecord];
-
-            // ── j. Collect log entries from StateLogger ──
-            const logEntries = [...loggerFactory.getEntries()];
-            allLogs = [...allLogs, ...logEntries];
-
-            // ── k. Checkpoint 3: Persist history + logs + advance state ──
-            const nextState = transitionResult.nextState;
-            const nextStateData = transitionResult.data ?? stateData;
-
-            yield* store.updateInstance(instanceId, {
-              currentState: nextState,
-              stateData: nextStateData,
-              history,
-              logs: allLogs,
-              updatedAt: new Date().toISOString(),
-            });
-
-            // Advance loop variables
-            currentState = nextState;
-            stateData = nextStateData;
+          // If any error occurred during the loop, return the error result
+          // (errorResult is mutated inside Effect closures — TS can't track it)
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          if (errorResult) {
+            return errorResult;
           }
 
           // ──────────────────────────────────────────────────────────────
