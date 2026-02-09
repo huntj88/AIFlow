@@ -83,6 +83,9 @@ export const InstancesRouter = HttpRouter.empty.pipe(
       const runner = yield* StateMachineRunner;
       yield* Effect.fork(runner.run(definition, body.input));
 
+      // Yield to the scheduler so the forked fiber can save the instance
+      yield* Effect.yieldNow();
+
       // Query the store for the most recently created instance for this definition
       const instances = yield* store.listInstances({
         definitionId: body.definitionId,

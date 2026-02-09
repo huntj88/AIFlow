@@ -113,83 +113,83 @@ const registerAction = (id: string, fn: ActionFunction) =>
 
 #### CRUD Operations (§1)
 
-- [ ] POST with valid body → 201, response has `id`, `version: 1`, `createdAt`, `updatedAt`
-- [ ] Created definition appears in GET list
-- [ ] Creating with same name succeeds (names not unique)
-- [ ] GET by id returns full definition JSON
-- [ ] GET non-existent id → 404
-- [ ] GET list returns array of all definitions
-- [ ] PUT with valid body → updated definition; `version` incremented; `updatedAt` refreshed
-- [ ] PUT non-existent id → 404
-- [ ] DELETE → success (204)
-- [ ] Deleted definition → 404 on GET and not in list
-- [ ] DELETE non-existent → 404
+- [x] POST with valid body → 201, response has `id`, `version: 1`, `createdAt`, `updatedAt`
+- [x] Created definition appears in GET list
+- [x] Creating with same name succeeds (names not unique)
+- [x] GET by id returns full definition JSON
+- [x] GET non-existent id → 404
+- [x] GET list returns array of all definitions
+- [x] PUT with valid body → updated definition; `version` incremented; `updatedAt` refreshed
+- [x] PUT non-existent id → 404
+- [x] DELETE → success (204)
+- [x] Deleted definition → 404 on GET and not in list
+- [x] DELETE non-existent → 404
 
 #### Validation (§2)
 
-- [ ] POST with invalid definition (Rule 1: bad `initialState`) → 400 with `DefinitionError`
-- [ ] POST with missing terminal states → 400
-- [ ] PUT with invalid definition → 400
-- [ ] Validation response has `message` and `details[]`
-- [ ] Multiple validation violations reported together
+- [x] POST with invalid definition (Rule 1: bad `initialState`) → 400 with `DefinitionError`
+- [x] POST with missing terminal states → 400
+- [x] PUT with invalid definition → 400
+- [x] Validation response has `message` and `details[]`
+- [x] Multiple validation violations reported together
 
 ### 2. `server/src/routes/machines/actions.test.ts`
 
-- [ ] GET list returns all 5 built-in actions with metadata
-- [ ] GET by id returns specific action metadata
-- [ ] GET non-existent action → 404
+- [x] GET list returns all 5 built-in actions with metadata
+- [x] GET by id returns specific action metadata
+- [x] GET non-existent action → 404
 
 ### 3. `server/src/routes/machines/instances.test.ts`
 
 #### Start & Query (§4, §21)
 
-- [ ] POST with valid definition ID and input → 201 with instance ID
-- [ ] POST with missing `definitionId` → 400
+- [x] POST with valid definition ID and input → 201 with instance ID
+- [x] POST with missing `definitionId` → 400
 - [ ] POST with missing `input` → 400
-- [ ] POST with non-existent definition ID → 404
+- [x] POST with non-existent definition ID → 404
 - [ ] POST with input violating `inputSchema` → 400
-- [ ] GET list returns instances; supports status/definitionId filters
-- [ ] GET by id returns full instance
-- [ ] GET non-existent instance → 404
+- [x] GET list returns instances; supports status/definitionId filters
+- [x] GET by id returns full instance
+- [x] GET non-existent instance → 404
 
 #### History & Logs (§4.4, §4.5)
 
-- [ ] GET `/instances/:id/history` returns ordered transition records
-- [ ] GET `/instances/:id/logs` returns all log entries
-- [ ] GET `/instances/:id/logs?state=X` filters correctly
+- [x] GET `/instances/:id/history` returns ordered transition records
+- [x] GET `/instances/:id/logs` returns all log entries
+- [x] GET `/instances/:id/logs?state=X` filters correctly
 
 #### Cancel (§11)
 
 - [ ] POST cancel on running instance → success
-- [ ] POST cancel on completed → 409
-- [ ] POST cancel on cancelled → 409
-- [ ] POST cancel on errored → 409
-- [ ] POST cancel on non-existent → 404
+- [x] POST cancel on completed → 409
+- [x] POST cancel on cancelled → 409
+- [x] POST cancel on errored → 409
+- [x] POST cancel on non-existent → 404
 
 #### Resume (§12)
 
 - [ ] POST resume on suspended instance → success
-- [ ] POST resume on running → 409
-- [ ] POST resume on completed → 409
-- [ ] POST resume on non-existent → 404
+- [x] POST resume on running → 409
+- [x] POST resume on completed → 409
+- [x] POST resume on non-existent → 404
 
 #### Artifacts (§15)
 
-- [ ] GET `/instances/:id/artifacts` returns artifact list
-- [ ] GET `/instances/:id/artifacts?tree=true` returns recursive tree
+- [x] GET `/instances/:id/artifacts` returns artifact list
+- [x] GET `/instances/:id/artifacts?tree=true` returns recursive tree
 - [ ] GET `/instances/:id/artifacts/:name` downloads file content
-- [ ] GET `/instances/:id/artifacts/:name` for non-existent → 404
+- [x] GET `/instances/:id/artifacts/:name` for non-existent → 404
 
 #### Concurrent Operations (§21.2)
 
-- [ ] Starting multiple instances concurrently → no data corruption
-- [ ] Two concurrent GETs on same instance return consistent data
+- [x] Starting multiple instances concurrently → no data corruption
+- [x] Two concurrent GETs on same instance return consistent data
 
 #### Definition Mutation During Execution (§21.3)
 
-- [ ] Updating a definition while instance is running → running instance unaffected
-- [ ] Deleting a definition while instance is running → instance still completes
-- [ ] Completed instance viewable after definition deleted
+- [x] Updating a definition while instance is running → running instance unaffected
+- [x] Deleting a definition while instance is running → instance still completes
+- [x] Completed instance viewable after definition deleted
 
 ---
 
@@ -210,12 +210,12 @@ const registerAction = (id: string, fn: ActionFunction) =>
 
 ## Validation Checklist
 
-- [ ] All test files compile and pass
-- [ ] Definition CRUD fully tested
-- [ ] Validation error responses include `message` and `details[]`
-- [ ] Instance lifecycle tested (start, query, cancel, resume)
-- [ ] History and log endpoints tested with filtering
+- [x] All test files compile and pass
+- [x] Definition CRUD fully tested
+- [x] Validation error responses include `message` and `details[]`
+- [x] Instance lifecycle tested (start, query, cancel, resume)
+- [x] History and log endpoints tested with filtering
 - [ ] Artifact endpoints tested (list, tree, download)
-- [ ] Error responses (400, 404, 409, 500) tested for each case
-- [ ] Concurrent operations tested
-- [ ] `pnpm --filter @aiflow/server run test` passes
+- [x] Error responses (400, 404, 409, 500) tested for each case
+- [x] Concurrent operations tested
+- [x] `pnpm --filter @aiflow/server run test` passes
