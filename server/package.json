@@ -19,12 +19,14 @@
     "@effect/platform-node": "^0.104.1",
     "ajv": "^8.17.1",
     "effect": "^3.19.16",
-    "jsonpath-plus": "^10.3.0"
+    "jsonpath-plus": "^10.3.0",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "@types/jsonpath-plus": "^5.0.5",
     "@types/node": "^25.2.2",
+    "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.0.18",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",

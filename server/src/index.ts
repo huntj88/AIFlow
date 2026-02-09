@@ -10,7 +10,8 @@ import { StateMachineRunner } from '@/machines/StateMachineRunner.js';
  * Main server entry point.
  *
  * 1. Launch the HTTP server with all machine service layers
- * 2. Wire SIGTERM / SIGINT handlers for graceful shutdown via `suspendAll()`
+ * 2. WebSocket server is started as part of the HttpLive layer (Task 23)
+ * 3. Wire SIGTERM / SIGINT handlers for graceful shutdown via `suspendAll()`
  *
  * `NodeRuntime.runMain` handles SIGTERM/SIGINT by interrupting the running
  * Effect, which triggers the `onInterrupt` finalizer chain. We also register

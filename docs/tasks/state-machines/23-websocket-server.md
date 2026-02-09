@@ -351,13 +351,13 @@ Define the event serialization format (JSON). This file can re-export event type
 
 ## Validation Checklist
 
-- [ ] `ws` and `@types/ws` added to server dependencies
-- [ ] `server/src/machines/live/WebSocketManager.ts` implemented as Effect Layer
-- [ ] WS server mounted on same HTTP server at `/api/machines/live`
-- [ ] Subscribe/unsubscribe messages handled correctly
-- [ ] Events filtered by subscription before sending
-- [ ] All 10 event types forwarded
-- [ ] Malformed messages handled gracefully
-- [ ] Connection cleanup on close
-- [ ] Unit tests pass
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
+- [x] `ws` and `@types/ws` added to server dependencies
+- [x] `server/src/machines/live/WebSocketManager.ts` implemented as Effect Layer
+- [x] WS server mounted on same HTTP server at `/api/machines/live`
+- [x] Subscribe/unsubscribe messages handled correctly
+- [x] Events filtered by subscription before sending
+- [x] All 10 event types forwarded
+- [x] Malformed messages handled gracefully
+- [x] Connection cleanup on close
+- [x] Unit tests pass
+- [x] `pnpm --filter @aiflow/server run build` succeeds
