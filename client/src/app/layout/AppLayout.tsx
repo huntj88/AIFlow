@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Outlet } from 'react-router';
+import { NavLink, Outlet } from 'react-router';
 
 import { useThemeStore } from '@/hooks/useThemeStore';
 
@@ -13,10 +13,27 @@ export function AppLayout() {
     setPreference(next);
   };
 
+  const linkClass = ({ isActive }: { isActive: boolean }) =>
+    `rounded-md px-3 py-1.5 text-sm transition-colors ${
+      isActive
+        ? 'bg-[var(--color-accent)] text-white'
+        : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]'
+    }`;
+
   return (
     <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
       <header className="flex items-center justify-between border-b border-[var(--color-border)] px-6 py-4">
-        <h1 className="text-xl font-bold">{t('app.title')}</h1>
+        <div className="flex items-center gap-6">
+          <h1 className="text-xl font-bold">{t('app.title')}</h1>
+          <nav className="flex items-center gap-1" data-testid="main-nav">
+            <NavLink to="/" end className={linkClass} data-testid="nav-home">
+              {t('nav.home')}
+            </NavLink>
+            <NavLink to="/machines" className={linkClass} data-testid="nav-machines">
+              {t('nav.machines')}
+            </NavLink>
+          </nav>
+        </div>
         <button
           onClick={cycleTheme}
           className="rounded-md bg-[var(--color-surface)] px-3 py-1.5 text-sm"

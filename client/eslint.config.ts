@@ -64,6 +64,14 @@ export default tseslint.config(
     },
   },
 
+  // Allow default exports in page files (required for React.lazy)
+  {
+    files: ['src/pages/**/*.tsx'],
+    rules: {
+      'import/no-default-export': 'off',
+    },
+  },
+
   // Prettier compat (must be last)
   prettier,
 );

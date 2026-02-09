@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
 import type { MachineInstance } from '@/types/machines';
+import { machineRoutes } from '@/utils/machineRoutes';
 
 import { StatusBadge } from './StatusBadge';
 
@@ -65,7 +66,7 @@ export function ChildMachineTree({
   }
 
   const handleNavigate = (instanceId: string) => {
-    void navigate(`/machines/instances/${instanceId}`);
+    void navigate(machineRoutes.viewInstance(instanceId));
   };
 
   if (children.length === 0) {

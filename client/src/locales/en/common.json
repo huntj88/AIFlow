@@ -1,6 +1,7 @@
 {
   "app.title": "AIFlow",
   "nav.home": "Home",
+  "nav.machines": "Machines",
   "home.heading": "Welcome to AIFlow",
   "home.hello_button": "Say Hello",
   "home.response_label": "Server says:",
@@ -57,5 +58,8 @@
   "machines.instance.logs_autoscroll": "Auto-scroll",
   "machines.instance.children_empty": "No child machines spawned.",
   "machines.instance.children_parent": "Parent Instance",
-  "machines.instance.artifacts_empty": "No artifacts created."
+  "machines.instance.artifacts_empty": "No artifacts created.",
+  "machines.definition_editor.title_new": "New Definition",
+  "machines.definition_editor.title_edit": "Edit Definition",
+  "machines.definition_editor.placeholder": "Definition editor coming soon."
 }

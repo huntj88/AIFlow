@@ -176,10 +176,10 @@ Ensure these navigation flows work:
 
 ## Validation Checklist
 
-- [ ] `client/src/app/router/routes.ts` updated with machine routes
-- [ ] `client/src/app/router/AppRouter.tsx` updated with lazy-loaded routes
-- [ ] Navigation link added to app layout
-- [ ] URL parameter helpers created
-- [ ] All navigation flows work (dashboard ↔ editor ↔ viewer)
-- [ ] Child instance navigation works
-- [ ] `pnpm --filter @aiflow/client run build` succeeds
+- [x] `client/src/app/router/routes.ts` updated with machine routes
+- [x] `client/src/app/router/AppRouter.tsx` updated with lazy-loaded routes
+- [x] Navigation link added to app layout
+- [x] URL parameter helpers created
+- [x] All navigation flows work (dashboard ↔ editor ↔ viewer)
+- [x] Child instance navigation works
+- [x] `pnpm --filter @aiflow/client run build` succeeds

@@ -8,6 +8,7 @@ import { QuickStartPanel } from '@/components/machines/QuickStartPanel';
 import { useMachineDefinitions } from '@/hooks/useMachineDefinitions';
 import { useMachineInstances } from '@/hooks/useMachineInstances';
 import type { MachineInstance } from '@/types/machines';
+import { machineRoutes } from '@/utils/machineRoutes';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Status filter type
@@ -77,7 +78,7 @@ export function MachinesPage() {
   const handleEditDefinition = useCallback(
     (_id: string) => {
       // Task 30 will implement the editor route; for now navigate to a placeholder
-      void navigate(`/machines/definitions/${_id}/edit`);
+      void navigate(machineRoutes.editDefinition(_id));
     },
     [navigate],
   );
@@ -91,12 +92,12 @@ export function MachinesPage() {
   );
 
   const handleCreateDefinition = useCallback(() => {
-    void navigate('/machines/definitions/new');
+    void navigate(machineRoutes.newDefinition());
   }, [navigate]);
 
   const handleSelectInstance = useCallback(
     (id: string) => {
-      void navigate(`/machines/instances/${id}`);
+      void navigate(machineRoutes.viewInstance(id));
     },
     [navigate],
   );
@@ -113,7 +114,7 @@ export function MachinesPage() {
     async (definitionId: string, input: unknown) => {
       try {
         const instance = await instancesStore.startInstance(definitionId, input);
-        void navigate(`/machines/instances/${instance.id}`);
+        void navigate(machineRoutes.viewInstance(instance.id));
       } catch {
         // Error is already set in the store
       }
@@ -263,3 +264,5 @@ export function MachinesPage() {
     </div>
   );
 }
+
+export default MachinesPage;

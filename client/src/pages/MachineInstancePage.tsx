@@ -336,3 +336,5 @@ export function MachineInstancePage() {
     </div>
   );
 }
+
+export default MachineInstancePage;
