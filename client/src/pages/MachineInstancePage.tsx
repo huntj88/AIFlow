@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { SkeletonHeader } from '@/components/common/Skeleton';
 import { ArtifactViewer } from '@/components/machines/ArtifactViewer';
 import { ChildMachineTree } from '@/components/machines/ChildMachineTree';
 import { LogViewer } from '@/components/machines/LogViewer';
@@ -14,6 +17,7 @@ import { useMachineInstances } from '@/hooks/useMachineInstances';
 import { useMachineLogs } from '@/hooks/useMachineLogs';
 import { useMachineSocket } from '@/hooks/useMachineSocket';
 import type { MachineEvent, MachineInstance } from '@/types/machines';
+import { machineRoutes } from '@/utils/machineRoutes';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Tab type
@@ -29,6 +33,8 @@ const TABS: Tab[] = ['diagram', 'history', 'logs', 'children', 'artifacts'];
 
 export function MachineInstancePage() {
   const { instanceId } = useParams<{ instanceId: string }>();
+  const [searchParams] = useSearchParams();
+  const parentId = searchParams.get('parent');
   const { t } = useTranslation();
 
   // ── Stores ─────────────────────────────────────────────────────────────
@@ -48,6 +54,7 @@ export function MachineInstancePage() {
   const [definitionMissing, setDefinitionMissing] = useState(false);
   const [childStatuses, setChildStatuses] = useState<Record<string, MachineInstance['status']>>({});
   const [childDefNames] = useState<Record<string, string>>({});
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   // ── Fetch initial data ─────────────────────────────────────────────────
 
@@ -194,11 +201,9 @@ export function MachineInstancePage() {
 
   if (isLoading && !instance) {
     return (
-      <div
-        className="p-6 text-center text-[var(--color-text-muted)]"
-        data-testid="instance-loading"
-      >
-        {t('machines.instance.loading')}
+      <div className="p-6" data-testid="instance-loading">
+        <SkeletonHeader />
+        <div className="mt-4 h-[500px] animate-pulse rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]" />
       </div>
     );
   }
@@ -231,6 +236,20 @@ export function MachineInstancePage() {
 
   return (
     <div className="flex h-full flex-col" data-testid="machine-instance-page">
+      {/* ── Parent breadcrumb ─────────────────────────────────────────── */}
+      {parentId && (
+        <div className="mb-2 text-sm" data-testid="parent-breadcrumb">
+          <Link
+            to={machineRoutes.viewInstance(parentId)}
+            className="text-[var(--color-accent)] hover:underline"
+          >
+            {t('machines.instance.parentBreadcrumb', { id: parentId.slice(0, 8) + '…' })}
+          </Link>
+          <span className="mx-1 text-[var(--color-text-muted)]">›</span>
+          <span>{instance.id.slice(0, 8)}…</span>
+        </div>
+      )}
+
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <header className="flex flex-wrap items-center gap-3 border-b border-[var(--color-border)] pb-4">
         <h2 className="text-xl font-semibold">{definitionName}</h2>
@@ -246,7 +265,20 @@ export function MachineInstancePage() {
         <div className="ml-auto flex gap-2">
           {canResume && (
             <button
-              onClick={() => void instancesStore.resumeInstance(instance.id)}
+              onClick={() => {
+                void instancesStore
+                  .resumeInstance(instance.id)
+                  .then(() => {
+                    toast.success(t('machines.toast.instanceResumed'));
+                  })
+                  .catch((err: unknown) => {
+                    toast.error(
+                      t('machines.toast.error', {
+                        message: err instanceof Error ? err.message : String(err),
+                      }),
+                    );
+                  });
+              }}
               className="rounded-md bg-amber-500 px-4 py-1.5 text-sm text-white hover:bg-amber-600"
               data-testid="resume-button"
             >
@@ -255,7 +287,9 @@ export function MachineInstancePage() {
           )}
           {canCancel && (
             <button
-              onClick={() => void instancesStore.cancelInstance(instance.id)}
+              onClick={() => {
+                setShowCancelConfirm(true);
+              }}
               className="rounded-md bg-red-500 px-4 py-1.5 text-sm text-white hover:bg-red-600"
               data-testid="cancel-button"
             >
@@ -333,6 +367,32 @@ export function MachineInstancePage() {
           />
         )}
       </div>
+
+      {/* ── Cancel confirmation ─────────────────────────────────────────── */}
+      <ConfirmDialog
+        open={showCancelConfirm}
+        title={t('machines.instance.cancel')}
+        message={t('machines.confirm.cancelInstance')}
+        variant="danger"
+        onConfirm={() => {
+          setShowCancelConfirm(false);
+          void instancesStore
+            .cancelInstance(instance.id)
+            .then(() => {
+              toast.success(t('machines.toast.instanceCancelled'));
+            })
+            .catch((err: unknown) => {
+              toast.error(
+                t('machines.toast.error', {
+                  message: err instanceof Error ? err.message : String(err),
+                }),
+              );
+            });
+        }}
+        onCancel={() => {
+          setShowCancelConfirm(false);
+        }}
+      />
     </div>
   );
 }

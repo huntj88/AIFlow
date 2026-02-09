@@ -12,10 +12,7 @@ export function DefinitionCard({ definition, onEdit, onDelete }: DefinitionCardP
   const { t } = useTranslation();
 
   const handleDelete = () => {
-    const msg = t('machines.definitions.delete_confirm', { name: definition.name });
-    if (window.confirm(msg)) {
-      onDelete(definition.id);
-    }
+    onDelete(definition.id);
   };
 
   return (

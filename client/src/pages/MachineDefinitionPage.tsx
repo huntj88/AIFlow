@@ -53,11 +53,9 @@ export function MachineDefinitionPage() {
 
   if (isLoading) {
     return (
-      <div
-        className="flex items-center justify-center py-12 text-[var(--color-text-muted)]"
-        data-testid="machine-definition-page"
-      >
-        {t('machines.editor.loading')}
+      <div className="flex h-[calc(100vh-4rem)] flex-col p-6" data-testid="machine-definition-page">
+        <div className="mb-4 h-6 w-48 animate-pulse rounded bg-[var(--color-border)]" />
+        <div className="flex-1 animate-pulse rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]" />
       </div>
     );
   }

@@ -66,7 +66,7 @@ export function ChildMachineTree({
   }
 
   const handleNavigate = (instanceId: string) => {
-    void navigate(machineRoutes.viewInstance(instanceId));
+    void navigate(`${machineRoutes.viewInstance(instanceId)}?parent=${parentInstanceId}`);
   };
 
   if (children.length === 0) {

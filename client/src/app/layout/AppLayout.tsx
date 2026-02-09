@@ -1,6 +1,8 @@
+import { Toaster } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { NavLink, Outlet } from 'react-router';
 
+import { ConnectionStatus } from '@/components/common/ConnectionStatus';
 import { useThemeStore } from '@/hooks/useThemeStore';
 
 export function AppLayout() {
@@ -34,16 +36,30 @@ export function AppLayout() {
             </NavLink>
           </nav>
         </div>
-        <button
-          onClick={cycleTheme}
-          className="rounded-md bg-[var(--color-surface)] px-3 py-1.5 text-sm"
-        >
-          {t('theme.toggle')} ({preference})
-        </button>
+        <div className="flex items-center gap-3">
+          <ConnectionStatus />
+          <button
+            onClick={cycleTheme}
+            className="rounded-md bg-[var(--color-surface)] px-3 py-1.5 text-sm"
+          >
+            {t('theme.toggle')} ({preference})
+          </button>
+        </div>
       </header>
       <main className="p-6">
         <Outlet />
       </main>
+      <Toaster
+        position="bottom-right"
+        toastOptions={{
+          duration: 5000,
+          style: {
+            background: 'var(--color-surface)',
+            color: 'var(--color-text)',
+            border: '1px solid var(--color-border)',
+          },
+        }}
+      />
     </div>
   );
 }

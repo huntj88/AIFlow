@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
+import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { SkeletonCard, SkeletonRow } from '@/components/common/Skeleton';
 import { DefinitionCard } from '@/components/machines/DefinitionCard';
 import { InstanceRow } from '@/components/machines/InstanceRow';
 import { QuickStartPanel } from '@/components/machines/QuickStartPanel';
@@ -54,6 +57,7 @@ export function MachinesPage() {
   // ── Local state ────────────────────────────────────────────────────────
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
 
   // ── Initial fetch + auto-refresh instances ─────────────────────────────
 
@@ -85,11 +89,26 @@ export function MachinesPage() {
 
   const handleDeleteDefinition = useCallback(
     (id: string) => {
-      void defsStore.deleteDefinition(id);
+      const def = definitions.find((d) => d.id === id);
+      setDeleteTarget({ id, name: def?.name ?? id });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [definitions],
   );
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
+    try {
+      await defsStore.deleteDefinition(deleteTarget.id);
+      toast.success(t('machines.toast.definitionDeleted'));
+    } catch (err) {
+      toast.error(
+        t('machines.toast.error', { message: err instanceof Error ? err.message : String(err) }),
+      );
+    } finally {
+      setDeleteTarget(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deleteTarget, t]);
 
   const handleCreateDefinition = useCallback(() => {
     void navigate(machineRoutes.newDefinition());
@@ -104,23 +123,37 @@ export function MachinesPage() {
 
   const handleResumeInstance = useCallback(
     (id: string) => {
-      void instancesStore.resumeInstance(id);
+      void instancesStore
+        .resumeInstance(id)
+        .then(() => {
+          toast.success(t('machines.toast.instanceResumed'));
+        })
+        .catch((err: unknown) => {
+          toast.error(
+            t('machines.toast.error', {
+              message: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [t],
   );
 
   const handleLaunch = useCallback(
     async (definitionId: string, input: unknown) => {
       try {
         const instance = await instancesStore.startInstance(definitionId, input);
+        toast.success(t('machines.toast.instanceStarted'));
         void navigate(machineRoutes.viewInstance(instance.id));
-      } catch {
-        // Error is already set in the store
+      } catch (err) {
+        toast.error(
+          t('machines.toast.error', { message: err instanceof Error ? err.message : String(err) }),
+        );
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [navigate],
+    [navigate, t],
   );
 
   // ── Filtered instances ─────────────────────────────────────────────────
@@ -162,7 +195,10 @@ export function MachinesPage() {
             </div>
 
             {defsLoading && definitions.length === 0 ? (
-              <p className="text-sm text-[var(--color-text-muted)]">Loading…</p>
+              <div className="grid gap-3 sm:grid-cols-2" data-testid="definitions-skeleton">
+                <SkeletonCard />
+                <SkeletonCard />
+              </div>
             ) : definitions.length === 0 ? (
               <p className="text-sm text-[var(--color-text-muted)]" data-testid="definitions-empty">
                 {t('machines.definitions.empty')}
@@ -206,7 +242,32 @@ export function MachinesPage() {
             </div>
 
             {instancesLoading && instances.length === 0 ? (
-              <p className="text-sm text-[var(--color-text-muted)]">Loading…</p>
+              <div className="overflow-x-auto rounded-lg border border-[var(--color-border)]">
+                <table className="w-full text-left">
+                  <thead className="bg-[var(--color-surface)]">
+                    <tr className="border-b border-[var(--color-border)]">
+                      <th className="px-4 py-2 text-xs font-medium text-[var(--color-text-muted)]">
+                        Definition
+                      </th>
+                      <th className="px-4 py-2 text-xs font-medium text-[var(--color-text-muted)]">
+                        Status
+                      </th>
+                      <th className="px-4 py-2 text-xs font-medium text-[var(--color-text-muted)]">
+                        Current State
+                      </th>
+                      <th className="px-4 py-2 text-xs font-medium text-[var(--color-text-muted)]">
+                        Created
+                      </th>
+                      <th className="px-4 py-2 text-xs font-medium text-[var(--color-text-muted)]"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <SkeletonRow />
+                    <SkeletonRow />
+                    <SkeletonRow />
+                  </tbody>
+                </table>
+              </div>
             ) : filteredInstances.length === 0 ? (
               <p className="text-sm text-[var(--color-text-muted)]" data-testid="instances-empty">
                 {t('machines.instances.empty')}
@@ -261,6 +322,19 @@ export function MachinesPage() {
           />
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title={t('machines.definitions.delete')}
+        message={t('machines.definitions.delete_confirm', { name: deleteTarget?.name ?? '' })}
+        variant="danger"
+        onConfirm={() => {
+          void confirmDelete();
+        }}
+        onCancel={() => {
+          setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 }

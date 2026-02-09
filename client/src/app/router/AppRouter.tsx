@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { HashRouter, Navigate, Route, Routes } from 'react-router';
 
 import { AppLayout } from '@/app/layout/AppLayout';
+import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import { HomePage } from '@/pages/HomePage';
 
 import { ROUTES } from './routes';
@@ -31,11 +32,46 @@ export function AppRouter() {
         <Routes>
           <Route element={<AppLayout />}>
             <Route path={ROUTES.HOME} element={<HomePage />} />
-            <Route path={ROUTES.MACHINES} element={<MachinesPage />} />
-            <Route path={ROUTES.MACHINE_DEFINITION_NEW} element={<MachineDefinitionPage />} />
-            <Route path={ROUTES.MACHINE_DEFINITION_EDIT} element={<MachineDefinitionPage />} />
-            <Route path={ROUTES.MACHINE_DEFINITION} element={<MachineDefinitionPage />} />
-            <Route path={ROUTES.MACHINE_INSTANCE} element={<MachineInstancePage />} />
+            <Route
+              path={ROUTES.MACHINES}
+              element={
+                <ErrorBoundary>
+                  <MachinesPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path={ROUTES.MACHINE_DEFINITION_NEW}
+              element={
+                <ErrorBoundary>
+                  <MachineDefinitionPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path={ROUTES.MACHINE_DEFINITION_EDIT}
+              element={
+                <ErrorBoundary>
+                  <MachineDefinitionPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path={ROUTES.MACHINE_DEFINITION}
+              element={
+                <ErrorBoundary>
+                  <MachineDefinitionPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path={ROUTES.MACHINE_INSTANCE}
+              element={
+                <ErrorBoundary>
+                  <MachineInstancePage />
+                </ErrorBoundary>
+              }
+            />
           </Route>
           <Route path="*" element={<Navigate to={ROUTES.HOME} replace />} />
         </Routes>

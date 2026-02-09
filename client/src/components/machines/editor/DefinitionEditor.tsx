@@ -21,7 +21,9 @@ import '@xyflow/react/dist/style.css';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router';
 
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { type EditorEdge, type EditorNode, useDefinitionEditor } from '@/hooks/useDefinitionEditor';
 import { useMachineDefinitions } from '@/hooks/useMachineDefinitions';
 import type { ActionMetadata, StateMachineDefinition } from '@/types/machines';
@@ -61,6 +63,7 @@ interface DefinitionEditorProps {
 function DefinitionEditorInner({ existingDefinition }: DefinitionEditorProps) {
   const { t } = useTranslation();
   const { fitView } = useReactFlow();
+  const navigate = useNavigate();
 
   // ── Store selectors ────────────────────────────────────────────────────
   const nodes = useDefinitionEditor((s) => s.nodes);
@@ -102,6 +105,7 @@ function DefinitionEditorInner({ existingDefinition }: DefinitionEditorProps) {
   const [definitions, setDefinitions] = useState<StateMachineDefinition[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Load existing definition on mount ──────────────────────────────────
@@ -204,37 +208,6 @@ function DefinitionEditorInner({ existingDefinition }: DefinitionEditorProps) {
     setSelectedEdge(null);
   }, [setSelectedNode, setSelectedEdge]);
 
-  // ── Keyboard shortcuts ─────────────────────────────────────────────────
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // Delete selected edge
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        const sel = useDefinitionEditor.getState().selectedEdgeId;
-        if (sel) {
-          removeTransition(sel);
-          return;
-        }
-      }
-      // Undo/Redo
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        undo();
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
-        e.preventDefault();
-        redo();
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'y') {
-        e.preventDefault();
-        redo();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => {
-      window.removeEventListener('keydown', handler);
-    };
-  }, [undo, redo, removeTransition]);
-
   // ── Toolbar handlers ───────────────────────────────────────────────────
 
   const handleAddState = useCallback(() => {
@@ -264,6 +237,7 @@ function DefinitionEditorInner({ existingDefinition }: DefinitionEditorProps) {
       const def = toDefinition();
       if (definitionId) {
         await updateDef(definitionId, def);
+        toast.success(t('machines.toast.definitionSaved'));
       } else {
         const created = await createDef(def);
         // Update editor state with new ID
@@ -272,16 +246,61 @@ function DefinitionEditorInner({ existingDefinition }: DefinitionEditorProps) {
           definitionVersion: created.version,
           isDirty: false,
         });
+        toast.success(t('machines.toast.definitionSaved'));
+        // Redirect to edit URL with the new ID
+        void navigate(`/machines/definitions/${created.id}/edit`, { replace: true });
       }
       useDefinitionEditor.setState({ isDirty: false });
-      toast.success(t('machines.editor.saveSuccess'));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(`${t('machines.editor.saveError')}: ${msg}`);
     } finally {
       setIsSaving(false);
     }
-  }, [validate, toDefinition, definitionId, createDef, updateDef, t]);
+  }, [validate, toDefinition, definitionId, createDef, updateDef, t, navigate]);
+
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Save: Ctrl+S / Cmd+S
+      if ((e.metaKey || e.ctrlKey) && e.key === 's' && !e.shiftKey) {
+        e.preventDefault();
+        void handleSave();
+        return;
+      }
+      // Delete selected edge
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const sel = useDefinitionEditor.getState().selectedEdgeId;
+        if (sel) {
+          removeTransition(sel);
+          return;
+        }
+      }
+      // Escape — deselect
+      if (e.key === 'Escape') {
+        setSelectedNode(null);
+        setSelectedEdge(null);
+        return;
+      }
+      // Undo/Redo
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
+        e.preventDefault();
+        redo();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'y') {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => {
+      window.removeEventListener('keydown', handler);
+    };
+  }, [undo, redo, removeTransition, setSelectedNode, setSelectedEdge, handleSave]);
 
   const handleExport = useCallback(() => {
     const def = toDefinition();
@@ -324,7 +343,7 @@ function DefinitionEditorInner({ existingDefinition }: DefinitionEditorProps) {
             },
           });
           useDefinitionEditor.setState({ isDirty: true, definitionId: null });
-          toast.success('Definition imported');
+          toast.success(t('machines.editor.importSuccess'));
         } catch {
           toast.error(t('machines.editor.importError'));
         }
@@ -335,6 +354,24 @@ function DefinitionEditorInner({ existingDefinition }: DefinitionEditorProps) {
     },
     [loadDefinition, t],
   );
+
+  const handleBack = useCallback(() => {
+    if (isDirty && !window.confirm(t('machines.confirm.unsavedChanges'))) return;
+    void navigate('/machines');
+  }, [isDirty, navigate, t]);
+
+  const handleDeleteDefinition = useCallback(async () => {
+    if (!definitionId) return;
+    setShowDeleteConfirm(false);
+    try {
+      await useMachineDefinitions.getState().deleteDefinition(definitionId);
+      toast.success(t('machines.toast.definitionDeleted'));
+      void navigate('/machines');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(t('machines.toast.error', { message: msg }));
+    }
+  }, [definitionId, navigate, t]);
 
   // ── Render ─────────────────────────────────────────────────────────────
 
@@ -397,6 +434,16 @@ function DefinitionEditorInner({ existingDefinition }: DefinitionEditorProps) {
 
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2">
+        <button
+          onClick={handleBack}
+          className="rounded border border-[var(--color-border)] px-3 py-1 text-xs"
+          data-testid="back-btn"
+        >
+          {t('machines.editor.backToDashboard')}
+        </button>
+
+        <div className="h-4 w-px bg-[var(--color-border)]" />
+
         <button
           onClick={handleAddState}
           className="rounded bg-[var(--color-accent)] px-3 py-1 text-xs text-white"
@@ -466,11 +513,40 @@ function DefinitionEditorInner({ existingDefinition }: DefinitionEditorProps) {
 
         {/* Dirty indicator */}
         {isDirty && (
-          <span className="ml-auto text-xs text-amber-500" data-testid="dirty-indicator">
-            ● unsaved
+          <span className="text-xs text-amber-500" data-testid="dirty-indicator">
+            ● {t('machines.editor.unsaved')}
           </span>
         )}
+
+        {definitionId && (
+          <>
+            <div className="h-4 w-px bg-[var(--color-border)]" />
+            <button
+              onClick={() => {
+                setShowDeleteConfirm(true);
+              }}
+              className="rounded bg-red-500 px-3 py-1 text-xs text-white"
+              data-testid="delete-definition-btn"
+            >
+              {t('machines.editor.deleteDefinition')}
+            </button>
+          </>
+        )}
       </div>
+
+      {/* ── Delete confirmation ──────────────────────────────────────────── */}
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title={t('machines.editor.deleteDefinition')}
+        message={t('machines.editor.deleteDefinitionConfirm')}
+        variant="danger"
+        onConfirm={() => {
+          void handleDeleteDefinition();
+        }}
+        onCancel={() => {
+          setShowDeleteConfirm(false);
+        }}
+      />
 
       {/* ── Validation errors ───────────────────────────────────────────── */}
       {showValidation && validationErrors.length > 0 && (

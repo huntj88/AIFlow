@@ -217,18 +217,18 @@ Ensure all new UI text uses i18n keys. Add any missing keys:
 
 ## Validation Checklist
 
-- [ ] Launch instance from dashboard → redirects to viewer
-- [ ] Save new definition → redirects to edit URL with ID
-- [ ] Delete definition → redirects to dashboard
-- [ ] Child machine links navigate correctly
-- [ ] Parent breadcrumb works in child instance viewer
-- [ ] Error boundaries catch and display errors gracefully
-- [ ] Loading skeletons shown during data fetching
-- [ ] Empty states shown when no data exists
-- [ ] Toast notifications appear for all actions
-- [ ] WebSocket status indicator reflects connection state
-- [ ] Keyboard shortcuts work in editor
-- [ ] Confirm dialogs shown for destructive actions
-- [ ] All UI text uses i18n keys
-- [ ] `pnpm --filter @aiflow/client run build` succeeds
-- [ ] `pnpm --filter @aiflow/client run test` passes
+- [x] Launch instance from dashboard → redirects to viewer
+- [x] Save new definition → redirects to edit URL with ID
+- [x] Delete definition → redirects to dashboard
+- [x] Child machine links navigate correctly
+- [x] Parent breadcrumb works in child instance viewer
+- [x] Error boundaries catch and display errors gracefully
+- [x] Loading skeletons shown during data fetching
+- [x] Empty states shown when no data exists
+- [x] Toast notifications appear for all actions
+- [x] WebSocket status indicator reflects connection state
+- [x] Keyboard shortcuts work in editor
+- [x] Confirm dialogs shown for destructive actions
+- [x] All UI text uses i18n keys
+- [x] `pnpm --filter @aiflow/client run build` succeeds
+- [x] `pnpm --filter @aiflow/client run test` passes

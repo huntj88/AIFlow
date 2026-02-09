@@ -9,10 +9,10 @@ import { MachinesPage } from './MachinesPage';
 // ── Mock the stores ────────────────────────────────────────────────────────
 
 const mockFetchDefinitions = vi.fn();
-const mockDeleteDefinition = vi.fn();
+const mockDeleteDefinition = vi.fn().mockResolvedValue(undefined);
 const mockFetchInstances = vi.fn();
 const mockStartInstance = vi.fn();
-const mockResumeInstance = vi.fn();
+const mockResumeInstance = vi.fn().mockResolvedValue(undefined);
 
 const MOCK_DEFINITION: StateMachineDefinition = {
   id: 'def-1',
@@ -172,10 +172,15 @@ describe('MachinesPage', () => {
     });
   });
 
-  it('calls deleteDefinition when delete is confirmed', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('opens confirm dialog when delete is clicked and deletes on confirm', async () => {
     renderWithProviders(<MachinesPage />);
     fireEvent.click(screen.getByTestId('delete-definition-def-1'));
-    expect(mockDeleteDefinition).toHaveBeenCalledWith('def-1');
+    // Confirm dialog should appear
+    expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument();
+    // Click confirm
+    fireEvent.click(screen.getByTestId('confirm-dialog-confirm'));
+    await waitFor(() => {
+      expect(mockDeleteDefinition).toHaveBeenCalledWith('def-1');
+    });
   });
 });
