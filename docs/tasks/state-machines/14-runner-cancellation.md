@@ -142,13 +142,13 @@ Each cancelled child machine:
 
 ## Validation Checklist
 
-- [ ] `cancel()` method added to `StateMachineRunner`
-- [ ] Fiber handle tracking map maintained for running instances
-- [ ] `running` instance → fiber interrupted → `cancelled`
-- [ ] `waiting_for_child` → child(ren) also cancelled recursively
-- [ ] `suspended` → direct transition (no fiber) → `cancelled`
-- [ ] Terminal states → 409 Conflict
-- [ ] `Effect.onInterrupt` finalizer persists cancellation state
-- [ ] Cancellation recorded in transition history
-- [ ] Fiber handles cleaned up after terminal state
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
+- [x] `cancel()` method added to `StateMachineRunner`
+- [x] Fiber handle tracking map maintained for running instances
+- [x] `running` instance → fiber interrupted → `cancelled`
+- [x] `waiting_for_child` → child(ren) also cancelled recursively
+- [x] `suspended` → direct transition (no fiber) → `cancelled`
+- [x] Terminal states → 409 Conflict
+- [x] `Effect.onInterrupt` finalizer persists cancellation state
+- [x] Cancellation recorded in transition history
+- [x] Fiber handles cleaned up after terminal state
+- [x] `pnpm --filter @aiflow/server run build` succeeds
