@@ -120,11 +120,11 @@ export const defaultMiddleware: TransitionMiddleware[] = [
 
 ## Validation Checklist
 
-- [ ] `server/src/machines/middleware/MiddlewareExecutor.ts` exists and compiles
-- [ ] All 4 built-in middleware are implemented
-- [ ] Execution order: before = registration order, after = reverse order
-- [ ] `ValidationMiddleware` uses `ajv` to validate `dataSchema`
-- [ ] `AuditMiddleware` produces immutable records
-- [ ] `onError` hooks are called on failures
-- [ ] Unit tests cover execution order, validation, and error propagation
-- [ ] `pnpm --filter @aiflow/server run test` passes
+- [x] `server/src/machines/middleware/MiddlewareExecutor.ts` exists and compiles
+- [x] All 4 built-in middleware are implemented
+- [x] Execution order: before = registration order, after = reverse order
+- [x] `ValidationMiddleware` uses `ajv` to validate `dataSchema`
+- [x] `AuditMiddleware` produces immutable records
+- [x] `onError` hooks are called on failures
+- [x] Unit tests cover execution order, validation, and error propagation
+- [x] `pnpm --filter @aiflow/server run test` passes
