@@ -17,4 +17,4 @@ flow after planning to create questions to ask user for further plan refinement
 
 "validate was fully implemented and check off validation items"
 
-"Review the <feature> tasks that have been done starting from task <number>. Were there any decisions or implementation details that would affect later tasks? Update later tasks with details that emerged from tasks done so far. Think really hard on this."
+"Review the <feature> tasks that have been done starting from task <number>. Were there any decisions or implementation details that would affect later tasks? Update later tasks with relevant details that emerged from tasks done so far. Think really hard on this."

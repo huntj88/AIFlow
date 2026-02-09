@@ -14,20 +14,53 @@ Integrate Effect `PubSub` into the `StateMachineRunner` for publishing `MachineE
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–09 and affect this task's implementation.
+> These details emerged from Tasks 01–15 and Task 17 and affect this task's implementation.
 
 - **`MachineEvent` uses `type` as discriminant** (NOT `_tag`). Example: `{ type: 'state_changed', instanceId: '...', data: { ... } }`. The `type` field is a string union; `_tag` is used only for errors.
 - **`MachineResult` uses `status` as discriminant**: `{ status: 'completed', output, instanceId }`.
 - **Effect Service pattern**: Use `Context.GenericTag<PubSub.PubSub<MachineEvent>>('MachineEventPubSub')` for the PubSub tag.
 - **`PubSub`** is available from `effect` directly: `import { PubSub } from 'effect';`.
 
-### Runner does NOT currently depend on PubSub (Task 09)
+### CRITICAL: Runner is 2480 lines with DUPLICATED state loops (Tasks 09–15)
 
-`StateMachineRunnerLive` currently depends on: `MachineStore`, `ActionRegistry`, `ArtifactStoreFactory`, `MiddlewareExecutor`. **PubSub must be added as a new dependency** in the Layer:
+`StateMachineRunner.ts` is now **2480 lines**. The `run()` method and `resume()` method each contain their OWN copies of:
+
+- `persistError` helper
+- `executeAction` helper (with timeout, error handling, middleware `onError`)
+- `runPreamble` helper (checkpoint 2, create logger/artifacts, build ActionContext, middleware `beforeTransition`)
+- The full state loop with all three type branches (`action`, `child_machine`, `parallel_children`)
+- Terminal state resolution (Checkpoint 4)
+- `Effect.onInterrupt` finalizer
+
+**Event publishing must be added in BOTH `run()` AND `resume()` code paths.** Consider refactoring shared helpers to reduce duplication before adding events, or ensure every publish call is added in both places.
+
+### Runner depends on 5 services (not 4)
+
+`StateMachineRunnerLive` currently depends on: `MachineStore`, `ActionRegistry`, `ArtifactStoreFactory`, `MiddlewareExecutor`, **`ExecutionSemaphore`** (added in Task 13). PubSub will be the 6th dependency:
 
 ```typescript
+const store = yield * MachineStore;
+const registry = yield * ActionRegistry;
+const artifactFactory = yield * ArtifactStoreFactory;
+const middlewareExec = yield * MiddlewareExecutor;
+const semaphore = yield * ExecutionSemaphore;
+// Add:
 const pubsub = yield * MachineEventPubSub;
 ```
+
+### `ExecutionSemaphore` uses `Effect.Semaphore` (not `Semaphore.Semaphore`)
+
+The semaphore tag is `Context.GenericTag<Effect.Semaphore>('ExecutionSemaphore')` and uses `Effect.makeSemaphore()`. Follow the same pattern for PubSub.
+
+### Runner error handling: `errorResult` pattern (Task 10)
+
+Action errors no longer fail the Effect. Instead, a mutable `let errorResult: MachineResult | null = null` is set, and the loop checks `if (errorResult) return;` after each step. **Events like `machine_completed` with `status: 'error'` must be published before these `return` points.**
+
+The `persistError` helper (inside both `run()` and `resume()`) is where error terminal state is persisted. Add `machine_completed` event publishing inside this helper, or immediately after it.
+
+### Semaphore `withPermits(1)` wraps each active step
+
+Active computation (action execution, middleware, persistence) is wrapped in `semaphore.withPermits(1)(Effect.gen(...))`. PubSub `publish` calls should go **inside** these permit-guarded blocks (they are part of active computation), except for child-related events which happen outside the permit.
 
 ### StateLogger is a per-state factory function, not a Service (Task 06)
 
@@ -68,9 +101,11 @@ const artifacts: ArtifactStore = {
 };
 ```
 
-### Event publishing insertion points in the runner loop (Task 09)
+### Event publishing insertion points — BOTH `run()` AND `resume()`
 
-The current loop has clear insertion points for events:
+The runner has TWO separate state loops. Events must be added in both. The insertion points are identical in structure:
+
+**Inside the `action` branch (within `semaphore.withPermits(1)(...)`)**:
 
 | After this line in the runner                                       | Event to publish            |
 | ------------------------------------------------------------------- | --------------------------- |
@@ -79,6 +114,36 @@ The current loop has clear insertion points for events:
 | After `loggerFactory.getEntries()` collection                       | `log_entry` (one per entry) |
 | After terminal state resolution (Checkpoint 4)                      | `machine_completed`         |
 | After artifact write (wrapped store)                                | `artifact_created`          |
+
+**Inside the `child_machine` branch**:
+
+| Point                                                | Event                 |
+| ---------------------------------------------------- | --------------------- |
+| After child instance is spawned (Phase 2, no permit) | `child_spawned`       |
+| After child completes (before Phase 3)               | `child_completed`     |
+| Inside Phase 3 `withPermits(1)` after Checkpoint 3   | `state_changed`       |
+| Inside Phase 3 after recording transition            | `transition_recorded` |
+
+**Inside the `parallel_children` branch**:
+
+| Point                                                   | Event                 |
+| ------------------------------------------------------- | --------------------- |
+| After all child fibers are spawned (Phase 2, no permit) | `children_spawned`    |
+| After all children complete (before Phase 3)            | `children_completed`  |
+| Inside Phase 3 `withPermits(1)` after Checkpoint 3      | `state_changed`       |
+| Inside Phase 3 after recording transition               | `transition_recorded` |
+
+**Error path** (inside `persistError` helper):
+
+| Point                                 | Event                                        |
+| ------------------------------------- | -------------------------------------------- |
+| After persisting error terminal state | `machine_completed` (with `status: 'error'`) |
+
+**Resume-specific**:
+
+| Point                                            | Event             |
+| ------------------------------------------------ | ----------------- |
+| After `store.updateInstance` sets status=running | `machine_resumed` |
 
 ---
 

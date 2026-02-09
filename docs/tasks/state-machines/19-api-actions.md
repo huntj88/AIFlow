@@ -14,7 +14,7 @@ Implement REST API routes for browsing the action registry. These routes allow t
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and affect this task’s implementation.
+> These details emerged from Tasks 01–17 and affect this task's implementation.
 
 ### ActionRegistry access in route handlers
 
@@ -31,14 +31,51 @@ Effect.gen(function* () {
 
 - `registry.list()` returns `Effect.Effect<ActionMetadata[]>` — metadata only (no function references). Each item has `{ id, description?, inputSchema?, outputSchema? }`.
 - `registry.get(id)` returns `Effect.Effect<{ fn: ActionFunction; metadata: ActionMetadata }, NotFoundError>`. For the API response, return only `metadata` (not `fn`).
+- `registry.has(id)` returns `Effect.Effect<boolean>` — quick existence check.
+
+### ActionRegistryLive (pre-loaded with 5 built-in actions)
+
+`ActionRegistryLive` from `'@/machines/ActionRegistry.js'` is a `Layer.effect(...)` that:
+
+1. Creates an in-memory registry
+2. Dynamically imports `registerBuiltinActions` from `'./actions/index.js'`
+3. Registers all 5 built-in actions
+
+The 5 built-in actions and their IDs:
+
+- `http-request` — "Make an HTTP request"
+- `delay` — "Wait for a specified duration"
+- `transform-data` — "Apply JSONPath transform"
+- `log-message` — "Log a message and pass through"
+- `conditional-branch` — "Branch based on condition"
+
+Note: `inputSchema` and `outputSchema` are NOT set for built-in actions — the metadata objects will have `{ id, description, inputSchema: undefined, outputSchema: undefined }`.
 
 ### Route composition pattern
 
-Follow the `HelloRouter` pattern from `server/src/routes/hello.ts` using `@effect/platform` `HttpRouter`.
+Follow the `HelloRouter` pattern from `server/src/routes/hello.ts` using `@effect/platform` `HttpRouter`:
+
+```typescript
+export const ActionsRouter = HttpRouter.empty.pipe(
+  HttpRouter.get('/api/machines/actions', Effect.gen(function* () { ... })),
+  HttpRouter.get('/api/machines/actions/:id', Effect.gen(function* () { ... })),
+);
+```
+
+The route handler Effect can access services from context (e.g., `yield* ActionRegistry`). These services will be provided when the router is composed into the main server layer.
 
 ### Error constructors
 
 `mkNotFoundError({ entityType: 'action', id })` — imported from `'@/machines/types.js'`.
+
+### Route parameter extraction
+
+Use `HttpRouter.params` from `@effect/platform` to extract `:id` from the URL:
+
+```typescript
+const params = yield * HttpRouter.params;
+const id = params.id;
+```
 
 ---
 

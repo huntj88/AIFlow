@@ -14,7 +14,7 @@ Wire together all client and server components into a cohesive, polished experie
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and from the existing client scaffold.
+> These details emerged from Tasks 01–17 and from the existing client scaffold.
 
 1. **HashRouter** — Client uses `HashRouter`. All URLs are hash-based: `/#/machines`, `/#/machines/instances/:id`, etc. Navigation helpers should generate paths without the `#` prefix (react-router handles it).
 2. **AppLayout.tsx** — Current layout has a `<header>` with app title + theme toggle, then `<Outlet />`. Nav links (Step 3 child machine navigation, Step 1 redirect) should integrate with this layout.

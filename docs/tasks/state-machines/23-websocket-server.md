@@ -16,25 +16,45 @@ Implement the WebSocket server for real-time event streaming to clients. Clients
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and affect this task's implementation.
+> These details emerged from Tasks 01–17 and affect this task's implementation.
 
 ### Accessing the underlying Node HTTP server
 
-The current `HttpLive` in `server/src/lib/HttpServer.ts` creates the Node server via:
+The current `HttpLive` in `server/src/lib/HttpServer.ts` creates the Node server inline:
 
 ```typescript
 const ServerLive = NodeHttpServer.layer(() => createServer(), { port: PORT });
+
+export const HttpLive = HelloRouter.pipe(
+  HttpServer.serve(HttpMiddleware.logger),
+  HttpServer.withLogAddress,
+  Layer.provide(ServerLive),
+);
+
+export const startServer = Layer.launch(HttpLive).pipe(
+  Effect.tap(() => Effect.log(`Server starting on port ${String(PORT)}`)),
+);
 ```
 
-The `createServer()` return value is the raw `http.Server` needed for the WebSocket upgrade handler. To share it:
+The `createServer()` return value is NOT currently accessible outside this Layer. To share it for WS upgrade:
 
-- Extract `createServer()` to a module-level variable, OR
-- Use `NodeHttpServer` platform APIs to access the underlying server from the Effect context
-- The `ws` library's `noServer: true` + manual `handleUpgrade` is the recommended approach
+1. **Option A**: Extract `createServer()` result to a module-level variable
+2. **Option B**: Create a shared `HttpServerRef` Effect service that holds the `http.Server`
+3. **Option C**: Use `NodeHttpServer` platform APIs to access the server from context — `@effect/platform-node` may provide this via `NodeHttpServer.HttpServer`
 
-### MachineEvent structure
+The `ws` library's `noServer: true` + manual `handleUpgrade` is the recommended approach.
 
-`MachineEvent` (from `types.ts`) uses **`type`** as the discriminant (NOT `_tag`):
+### Current server entry point (`index.ts`)
+
+```typescript
+startServer.pipe(Effect.provide(ServerLoggerLive), NodeRuntime.runMain);
+```
+
+Shutdown handlers exist (`SIGINT`, `SIGTERM`) but currently only log — they do NOT yet call `suspendAll()` or close WS connections.
+
+### MachineEvent structure (CONFIRMED from types.ts)
+
+`MachineEvent` uses **`type`** as the discriminant (NOT `_tag`):
 
 ```typescript
 { type: 'state_changed', instanceId: '...', data: { previousState, currentState, stateData, timestamp } }
@@ -42,11 +62,34 @@ The `createServer()` return value is the raw `http.Server` needed for the WebSoc
 // etc.
 ```
 
-All 10 event types have `type` + `instanceId` + `data` at the top level.
+All 10 event types have `{ type, instanceId, data }` at the top level. The `type` field values are:
+`state_changed`, `transition_recorded`, `log_entry`, `machine_completed`, `machine_resumed`, `child_spawned`, `child_completed`, `children_spawned`, `children_completed`, `artifact_created`
 
-### PubSub access
+### PubSub access (depends on Task 16 — NOT YET IMPLEMENTED)
 
-The `MachineEventPubSub` (from Task 16) is a `Context.GenericTag<PubSub.PubSub<MachineEvent>>('MachineEventPubSub')`. Subscribe via `PubSub.subscribe(pubsub)` which returns a `Queue.Dequeue<MachineEvent>`.
+`MachineEventPubSub` will be created in Task 16 following the same pattern as `ExecutionSemaphore`:
+
+```typescript
+// ExecutionSemaphore pattern (CONFIRMED — use as template for PubSub):
+export const ExecutionSemaphore = Context.GenericTag<Effect.Semaphore>('ExecutionSemaphore');
+export const ExecutionSemaphoreLive = Layer.effect(
+  ExecutionSemaphore,
+  Effect.makeSemaphore(MAX_CONCURRENT_MACHINES),
+);
+```
+
+The PubSub equivalent will likely be:
+
+```typescript
+export const MachineEventPubSub =
+  Context.GenericTag<PubSub.PubSub<MachineEvent>>('MachineEventPubSub');
+```
+
+Subscribe via `PubSub.subscribe(pubsub)` which returns a `Queue.Dequeue<MachineEvent>`.
+
+### WebSocket service should NOT be a runner dependency
+
+The WS manager subscribes to PubSub events — it does NOT need to be a dependency of `StateMachineRunnerLive`. The data flow is: Runner → PubSub → WebSocketManager → Clients. This keeps the runner independent of the transport layer.
 
 ---
 

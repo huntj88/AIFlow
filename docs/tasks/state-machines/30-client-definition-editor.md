@@ -14,7 +14,7 @@ Build a visual state-machine definition editor using React Flow (`@xyflow/react`
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and from the existing client scaffold.
+> These details emerged from Tasks 01–17 and from the existing client scaffold.
 
 1. **i18n flat key format** — `client/src/locales/en/common.json` uses **flat keys** (e.g. `"machines.editor.title": "Definition Editor"`), NOT nested JSON objects. The i18n examples below (Step 12) show nested JSON; convert to flat keys when implementing.
 2. **HashRouter** — Client uses `HashRouter`, so all machine URLs are hash-based (e.g. `http://localhost:5173/#/machines/definitions/new`). Route params work the same way with `useParams()`.

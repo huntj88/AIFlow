@@ -14,7 +14,7 @@ Implement the REST API routes for state machine definition CRUD operations. Thes
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and affect this task’s implementation.
+> These details emerged from Tasks 01–15 and affect this task's implementation.
 
 ### Route composition pattern
 
@@ -44,9 +44,33 @@ if (Either.isLeft(decoded)) {
 const body = decoded.right;
 ```
 
+**All decode utilities available from `schemas.ts`:**
+
+- `decodeCreateDefinition` — for POST body
+- `decodeUpdateDefinition` — for PUT body (currently same schema as create)
+- `decodeStartInstance` — for POST `/instances` body
+- `decodeInstanceFilter` — for GET `/instances` query params
+
 Alternatively, use `Schema.decodeUnknown(CreateDefinitionRequestSchema)` directly in Effect context for an effectful version.
 
-### Store method signatures
+### Accessing Effect services in route handlers
+
+Route handlers need to access `MachineStore` from the Effect context. The `@effect/platform` `HttpRouter` handler receives an Effect that can access services:
+
+```typescript
+HttpRouter.get(
+  '/api/machines/definitions',
+  Effect.gen(function* () {
+    const store = yield* MachineStore;
+    const definitions = yield* store.listDefinitions();
+    return yield* HttpServerResponse.json(definitions);
+  }),
+);
+```
+
+The services must be provided via layers in the server composition (Task 21).
+
+### Store method signatures (CONFIRMED)
 
 - **`saveDefinition`** takes `Omit<StateMachineDefinition, 'id' | 'version' | 'metadata'> & { metadata?: Partial<...> }` — the store auto-generates `id`, sets `version: 1`, populates `createdAt`/`updatedAt`.
 - **`updateDefinition(id, patch)`** — `patch` is `Partial<Omit<...>>` with partial metadata. Store auto-increments `version` and refreshes `updatedAt`.
@@ -67,6 +91,8 @@ import { validateDefinition } from '@/machines/DefinitionValidator.js';
 - Validate the request body by constructing a temporary full definition with placeholder id/version/metadata, OR
 - Save first, then validate, and delete if invalid (simpler but creates then deletes)
 - OR restructure the validator to accept the partial create request shape
+
+The simplest approach: save first, then validate, then delete if invalid.
 
 ### Error constructors
 

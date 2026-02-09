@@ -14,7 +14,7 @@ Implement the REST API routes for machine instance lifecycle: starting, listing,
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–09 and affect this task's implementation.
+> These details emerged from Tasks 01–15 and affect this task's implementation.
 
 ### Schema decoding
 
@@ -30,9 +30,15 @@ if (Either.isLeft(decoded)) {
 
 Or use `Schema.decodeUnknown(StartInstanceRequestSchema)` for an effectful version.
 
-### Store method signatures
+**All decode utilities available from `schemas.ts`:**
 
-- **`MachineStore.listInstances(filter?)`** — filter supports `status`, `definitionId`, `parentInstanceId`, `limit`, `offset`. All optional.
+- `decodeStartInstance` — for POST `/instances` body (`{ definitionId, input }`)
+- `decodeInstanceFilter` — for GET `/instances` query params (`{ status?, definitionId?, parentInstanceId?, limit?, offset? }`)
+- `decodeCreateDefinition`, `decodeUpdateDefinition` — for definition routes (Task 18)
+
+### Store method signatures (CONFIRMED from implementation)
+
+- **`MachineStore.listInstances(filter?)`** — filter supports `status`, `definitionId`, `parentInstanceId`, `limit`, `offset`. All optional. Returns `Effect.Effect<MachineInstance[], StoreError>`.
 - **`MachineStore.getInstance(id)`** returns `Effect.Effect<MachineInstance, NotFoundError>`.
 - **`MachineStore.getDefinition(id)`** returns `Effect.Effect<StateMachineDefinition, NotFoundError>`. Use to verify definition exists before starting.
 
@@ -40,38 +46,85 @@ Or use `Schema.decodeUnknown(StartInstanceRequestSchema)` for an effectful versi
 
 `mkNotFoundError({ entityType: 'instance', id })`, `mkDefinitionError({ message })` — from `'@/machines/types.js'`.
 
-### Runner access
+### Runner interface (CONFIRMED — all 4 methods)
 
-The `StateMachineRunner` is an Effect Service:
+The `StateMachineRunner` is an Effect Service with these methods:
 
 ```typescript
-import { StateMachineRunner } from '@/machines/StateMachineRunner.js';
-const runner = yield * StateMachineRunner;
-yield * runner.run(definition, input);
+interface StateMachineRunner {
+  run(definition, input, opts?): Effect.Effect<MachineResult, MachineError>;
+  cancel(instanceId: string): Effect.Effect<void, NotFoundError | DefinitionError>;
+  resume(instanceId: string): Effect.Effect<MachineResult, MachineError>;
+  suspendAll(): Effect.Effect<void, MachineError>;
+}
 ```
+
+### Critical: `run()` and `resume()` BLOCK until completion — must fork
+
+Both `runner.run()` and `runner.resume()` internally fork fibers but **call `Fiber.await(fiber)` before returning**, so they block the calling Effect until the machine reaches a terminal state. **The API route MUST fork these as background fibers** so the HTTP response returns immediately:
+
+```typescript
+// POST /api/machines/instances
+Effect.gen(function* () {
+  const runner = yield* StateMachineRunner;
+  const store = yield* MachineStore;
+  const definition = yield* store.getDefinition(body.definitionId);
+
+  // Fork the run — returns immediately; machine executes in background
+  yield* Effect.fork(runner.run(definition, body.input));
+
+  // The instance was already created inside run() at Checkpoint 1.
+  // But since run() is forked, we can't get the instanceId from its return value.
+  // Instead, query the store for the most recently created instance for this definition.
+  // Alternatively, create the instance BEFORE calling run() and pass it in,
+  // or modify the approach to capture the instance ID.
+
+  // Simplest approach: query the latest instance
+  const instances = yield* store.listInstances({ definitionId: body.definitionId });
+  const newest = instances.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  return yield* HttpServerResponse.json(newest, { status: 201 });
+});
+```
+
+**Alternative approach**: Since `run()` creates the instance internally (Checkpoint 1), and the fiber runs asynchronously, you could:
+
+1. Use a `Deferred<string>` to pass the instance ID out of the forked fiber before it blocks on the state loop.
+2. Or modify the runner's `run()` to accept a pre-created instance ID.
+3. Or let the first few steps of `run()` be synchronous (validation + instance creation), then fork only the state loop. However, the current implementation validates and creates inside `run()` before forking internally.
+
+**Note**: The runner already validates input, validates definition, and enforces depth limits BEFORE creating the instance. If any of these fail, the forked Effect will fail silently (no HTTP error response). Consider catching early validation errors synchronously:
+
+```typescript
+// Validate input first (before forking):
+yield * validateDefinition(definition, 'runtime', syncRegistry);
+// Validate inputSchema:
+if (Object.keys(definition.inputSchema).length > 0) {
+  /* ajv check */
+}
+// Then fork:
+yield * Effect.fork(runner.run(definition, body.input));
+```
+
+### `cancel()` error semantics (CONFIRMED from implementation)
+
+- **Success** → `Effect.Effect<void>` (returns nothing)
+- **Not found** → fails with `NotFoundError` (from `store.getInstance`)
+- **Already terminal** (`completed`, `cancelled`, `error`) → fails with `DefinitionError` with message `"Cannot cancel instance with status: ${status}"`
+- **`waiting_for_child`** → recursively cancels children first, then interrupts parent fiber
+- **`suspended`** → direct store transition (no fiber to interrupt), writes cancellation record to history
+
+### `resume()` error semantics (CONFIRMED from implementation)
+
+- **Success** → returns `MachineResult` (but blocks — must fork)
+- **Not found** → fails with `NotFoundError`
+- **Not suspended** → fails with `DefinitionError` with message `"Cannot resume instance with status: ${status}"` and details `['Only suspended instances can be resumed']`
+- **Definition deleted** → fails with `NotFoundError` (entityType: 'definition')
+- **Definition version changed** → fails with `DefinitionError` with message `"Definition version changed since suspension"` and details showing old/new versions
+- **Server shutting down** → fails with `DefinitionError` with message `"Server is shutting down — not accepting resume requests"`
 
 ### Instance filter query params
 
-For `GET /api/machines/instances`, use `decodeInstanceFilter` from `schemas.ts` or parse query params manually. The `InstanceFilterSchema` validates `status`, `definitionId`, `parentInstanceId`, `limit`, `offset`.
-
-### Critical: `run()` is a blocking Effect — must fork as fiber (Task 09)
-
-The current `runner.run()` returns `Effect.Effect<MachineResult, MachineError>` and runs the entire state loop synchronously within the Effect. **The API route must fork it as a background fiber** so the HTTP response returns immediately:
-
-```typescript
-// DON'T block the request:
-// const result = yield* runner.run(definition, input);
-
-// DO fork as a background fiber:
-yield * Effect.fork(runner.run(definition, input));
-// Return 201 immediately with the instance ID
-```
-
-After Task 14 (cancellation), the runner will internally manage fiber tracking. But the API layer still needs to fork the execution to avoid blocking the HTTP response.
-
-### `run()` failure mode — depends on Task 10
-
-After Task 10, `run()` should return `MachineResult.error` for action errors (not fail the Effect). However, `ValidationError` (bad input schema) and `NotFoundError` (missing action) will still fail the Effect. The forked fiber should handle these gracefully — persist error status on the instance if the Effect fails for non-action reasons.
+For `GET /api/machines/instances`, use `decodeInstanceFilter` from `schemas.ts`. The `InstanceFilterSchema` validates `status`, `definitionId`, `parentInstanceId`, `limit`, `offset`.
 
 ### Artifact download requires `ArtifactStoreFactory` (Task 08)
 
@@ -85,6 +138,18 @@ const content = yield * artifactStore.read(name);
 ```
 
 Note: `makeScoped` takes `stateName` as the second argument, but for reading it doesn't matter — the directory is resolved by `instanceId` and `parentInstanceId` only. Pass empty string for read-only access.
+
+### Artifact tree builder (Task 08)
+
+For `?tree=true`, use the standalone function:
+
+```typescript
+import { buildArtifactTree } from '@/machines/artifacts/ArtifactTreeBuilder.js';
+// Returns Effect.Effect<ArtifactTree, NotFoundError | StoreError>
+const tree = yield * buildArtifactTree(instanceId, store);
+```
+
+This recursively walks child instances via `store.listInstances({ parentInstanceId })` and builds the tree.
 
 ---
 

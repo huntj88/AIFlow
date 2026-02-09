@@ -14,7 +14,7 @@ Write comprehensive unit and integration tests for the entire core engine. Tests
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–09 and affect test setup.
+> These details emerged from Tasks 01–15 and affect test setup.
 
 ### Layer names for test composition
 
@@ -51,18 +51,19 @@ Use `mk*` constructors: `mkActionError`, `mkDefinitionError`, `mkValidationError
 Expect the effect to fail with an error where error._tag === 'DefinitionError'
 ```
 
-### Existing test patterns
+### Existing test patterns (established in Task 17 implementation)
 
-See `server/src/machines/DefinitionValidator.test.ts`, `ActionRegistry.test.ts`, `store/InMemoryMachineStore.test.ts`, and `actions/actions.test.ts` for established test patterns and helpers.
+See `server/src/machines/DefinitionValidator.test.ts`, `ActionRegistry.test.ts`, `store/InMemoryMachineStore.test.ts`, `actions/actions.test.ts`, `StateMachineRunner.test.ts`, and `StateMachineRunner.suspend-resume.test.ts` for established test patterns and helpers.
 
-### Critical: Layer composition for runner tests (Tasks 06–09)
+### Critical: Layer composition for runner tests — **FIVE** dependencies (Tasks 06–15)
 
-The `StateMachineRunnerLive` Layer requires **four dependencies**:
+The `StateMachineRunnerLive` Layer requires **five dependencies** (not four — `ExecutionSemaphore` was added in Task 13):
 
 1. `MachineStore` — use `InMemoryMachineStoreLive`
 2. `ActionRegistry` — use `InMemoryActionRegistryLive` (register custom test actions)
 3. `ArtifactStoreFactory` — use `FsArtifactStoreLive` (which itself requires `MachineStore`)
 4. `MiddlewareExecutor` — use `makeMiddlewareExecutorLayer([])` (empty middleware for most tests)
+5. `ExecutionSemaphore` — use `ExecutionSemaphoreLive` (from `'../ExecutionSemaphore.js'`)
 
 **There is no `MiddlewareExecutorLive` export.** Use the factory function:
 
@@ -71,40 +72,66 @@ import { makeMiddlewareExecutorLayer } from '../middleware/MiddlewareExecutor.js
 const TestMiddlewareLayer = makeMiddlewareExecutorLayer([]); // no middleware
 ```
 
-Layer composition example:
+**Actual working test layer composition** (from the existing test files):
 
 ```typescript
-const TestLayer = StateMachineRunnerLive.pipe(
-  Layer.provide(InMemoryMachineStoreLive),
-  Layer.provide(InMemoryActionRegistryLive),
-  Layer.provide(FsArtifactStoreLive), // depends on MachineStore
-  Layer.provide(makeMiddlewareExecutorLayer([])),
-);
+import { ExecutionSemaphoreLive } from './ExecutionSemaphore.js';
+
+const makeTestLayer = (middleware: readonly TransitionMiddleware[] = []) =>
+  StateMachineRunnerLive.pipe(
+    Layer.provide(InMemoryMachineStoreLive),
+    Layer.provide(InMemoryActionRegistryLive),
+    Layer.provide(FsArtifactStoreLive.pipe(Layer.provide(InMemoryMachineStoreLive))),
+    Layer.provide(middleware.length > 0 ? makeMiddlewareExecutorLayer(middleware) : NoMiddleware),
+    Layer.provide(ExecutionSemaphoreLive),
+    // Merge MachineStore + ActionRegistry so they are accessible in tests
+    Layer.provideMerge(InMemoryMachineStoreLive),
+    Layer.provideMerge(InMemoryActionRegistryLive),
+  );
 ```
 
-Note: `FsArtifactStoreLive` has type `Layer.Layer<ArtifactStoreFactory, never, MachineStore>` — it requires `MachineStore` in its environment. Use `Layer.provideMerge` or ensure `InMemoryMachineStoreLive` is provided to both the runner and the artifact store.
+Note: `FsArtifactStoreLive` has type `Layer.Layer<ArtifactStoreFactory, never, MachineStore>` — it requires `MachineStore` in its environment. The pattern `FsArtifactStoreLive.pipe(Layer.provide(InMemoryMachineStoreLive))` satisfies this. The `Layer.provideMerge` calls at the end expose `MachineStore` and `ActionRegistry` to test code via `yield* MachineStore` and `yield* ActionRegistry`.
 
-### `stateData` in the first state is set to `input` (Task 09)
+### `stateData` in the first state is set to `input` (Task 09 — CONFIRMED)
 
-**Correction to §4.2 test expectation:** The runner sets `stateData = input` for the first state (both in the `ActionContext` and the persisted instance). The first action receives `ctx.stateData === input` AND `ctx.machineInput === input`. The task spec coverage says "stateData in first state is empty/undefined" but the actual implementation passes `input` as initial `stateData`. **Tests should verify `ctx.stateData === input` in the first state.**
+The runner sets `stateData = input` for the first state (both in the `ActionContext` and the persisted instance). The first action receives `ctx.stateData === input` AND `ctx.machineInput === input`. **Tests should verify `ctx.stateData === input` in the first state.**
 
-### `run()` failure mode — depends on Task 10 fix
+### `run()` returns `MachineResult` on ALL outcomes (Task 10 — CONFIRMED)
 
-Currently `run()` Effect **fails** on action errors (returns `Effect.fail(machineError)`). After Task 10 fixes this, `run()` should return `MachineResult.error` instead. Tests should use `Effect.either` or `Effect.exit` to inspect outcomes:
+`run()` returns `MachineResult` for both success and error via a mutable `errorResult` pattern:
 
 ```typescript
-// Before Task 10 fix:
-const exit = yield * runner.run(def, input).pipe(Effect.exit);
-// exit is Exit.Failure with MachineError for action errors
-
-// After Task 10 fix:
+// Action errors → MachineResult returned (Effect does NOT fail):
 const result = yield * runner.run(def, input);
-// result is MachineResult { status: 'error', ... } for action errors
+// result is MachineResult { status: 'error', error: '...', instanceId: '...' }
+
+// Validation errors (bad inputSchema) → Effect FAILS with MachineError:
+const exit = yield * runner.run(def, badInput).pipe(Effect.either);
+// exit._tag === 'Left', exit.left._tag === 'ValidationError'
 ```
+
+Note: `run()` still fails the Effect for pre-execution validation errors (`ValidationError`, `DefinitionError`, depth exceeded) and store errors. Only in-loop action errors return `MachineResult.error`.
 
 ### `StateLoggerFactory` is per-state, not a service (Task 06)
 
 The runner creates a new `createStateLoggerFactory()` inside each loop iteration. In tests, you observe logs via the persisted `instance.logs` array (fetched from the store after completion), not by inspecting the factory directly.
+
+### Test helper factories (established in existing test files)
+
+The existing `StateMachineRunner.test.ts` has these helper functions already:
+
+- `registerAction(registry, actionId, nextState, data?)` — simple pass-through action
+- `registerBranchAction(registry, actionId, fn)` — custom branching logic
+- `registerFailAction(registry, actionId)` — always-failing action
+- `registerDelayAction(registry, actionId, delayMs, nextState)` — slow action for timeout tests
+- `registerLoggingAction(registry, actionId, nextState, messages)` — action that writes logs
+- `makeLinearDef(overrides?)` — A → B → C → completed
+- `makeSimpleDef(overrides?)` — start → completed
+- `makeBranchingDef(overrides?)` — init → (branch-a | branch-b) → completed | error
+
+### Suspension & resume tests are in a SEPARATE file
+
+`StateMachineRunner.suspend-resume.test.ts` contains all §12 tests (suspend, resume, startup recovery). The main `StateMachineRunner.test.ts` covers §4–§11, §13–§15.
 
 ---
 

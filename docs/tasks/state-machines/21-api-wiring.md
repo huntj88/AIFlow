@@ -14,7 +14,7 @@ Wire all machine routes into the existing `HttpServer`, compose the full Effect 
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and affect this task’s implementation **significantly**.
+> These details emerged from Tasks 01–15 and affect this task's implementation **significantly**.
 
 ### Current server architecture (as built)
 
@@ -64,28 +64,35 @@ startServer.pipe(Effect.provide(ServerLoggerLive), NodeRuntime.runMain);
 4. `ServerLoggerLive` provides structured logging — all new layers should be compatible.
 5. Service layers must be provided BEFORE `Layer.launch(HttpLive)` in the composition chain.
 
-### Actual layer names from completed tasks
+### Actual layer names from completed tasks (ALL confirmed)
 
-| Layer                        | Import Path                                                                   | Description                        |
-| ---------------------------- | ----------------------------------------------------------------------------- | ---------------------------------- |
-| `InMemoryMachineStoreLive`   | `'@/machines/store/index.js'` or `'@/machines/store/InMemoryMachineStore.js'` | Implements MachineStore            |
-| `ActionRegistryLive`         | `'@/machines/ActionRegistry.js'`                                              | Pre-loaded with 5 built-in actions |
-| `InMemoryActionRegistryLive` | `'@/machines/ActionRegistry.js'`                                              | Bare empty registry (for tests)    |
+| Layer                               | Import Path                                                                   | Description                        |
+| ----------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------- |
+| `InMemoryMachineStoreLive`          | `'@/machines/store/index.js'` or `'@/machines/store/InMemoryMachineStore.js'` | Implements MachineStore            |
+| `ActionRegistryLive`                | `'@/machines/ActionRegistry.js'`                                              | Pre-loaded with 5 built-in actions |
+| `InMemoryActionRegistryLive`        | `'@/machines/ActionRegistry.js'`                                              | Bare empty registry (for tests)    |
+| `StateMachineRunnerLive`            | `'@/machines/StateMachineRunner.js'`                                          | Core runner service                |
+| `FsArtifactStoreLive`               | `'@/machines/artifacts/FsArtifactStore.js'`                                   | Filesystem `ArtifactStoreFactory`  |
+| `makeMiddlewareExecutorLayer(mw[])` | `'@/machines/middleware/MiddlewareExecutor.js'`                               | Middleware executor from array     |
+| `ExecutionSemaphoreLive`            | `'@/machines/ExecutionSemaphore.js'`                                          | Global concurrency semaphore       |
 
-### Layer names from Tasks 06–09 (built)
+### Layer dependencies (CONFIRMED from implementation)
 
-| Layer                               | Import Path                                     | Description                       | Dependencies                                                                   |
-| ----------------------------------- | ----------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------ |
-| `StateMachineRunnerLive`            | `'@/machines/StateMachineRunner.js'`            | Core runner service               | `MachineStore`, `ActionRegistry`, `ArtifactStoreFactory`, `MiddlewareExecutor` |
-| `FsArtifactStoreLive`               | `'@/machines/artifacts/FsArtifactStore.js'`     | Filesystem `ArtifactStoreFactory` | **`MachineStore`** (for descendant validation)                                 |
-| `makeMiddlewareExecutorLayer(mw[])` | `'@/machines/middleware/MiddlewareExecutor.js'` | Middleware executor from array    | None                                                                           |
+| Layer                              | Dependencies                                                                                         |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `StateMachineRunnerLive`           | `MachineStore`, `ActionRegistry`, `ArtifactStoreFactory`, `MiddlewareExecutor`, `ExecutionSemaphore` |
+| `FsArtifactStoreLive`              | `MachineStore`                                                                                       |
+| `ExecutionSemaphoreLive`           | None                                                                                                 |
+| `InMemoryMachineStoreLive`         | None                                                                                                 |
+| `ActionRegistryLive`               | None                                                                                                 |
+| `makeMiddlewareExecutorLayer(...)` | None                                                                                                 |
 
-### Layers from Tasks 13, 16 (to be built)
+### Layers from Tasks 13, 16 (built / to be built)
 
-| Layer                    | Import Path                          | Description                  |
-| ------------------------ | ------------------------------------ | ---------------------------- |
-| `ExecutionSemaphoreLive` | `'@/machines/ExecutionSemaphore.js'` | Global concurrency semaphore |
-| `MachineEventPubSubLive` | `'@/machines/EventPubSub.js'`        | PubSub for machine events    |
+| Layer                    | Import Path                          | Description                  | Status             |
+| ------------------------ | ------------------------------------ | ---------------------------- | ------------------ |
+| `ExecutionSemaphoreLive` | `'@/machines/ExecutionSemaphore.js'` | Global concurrency semaphore | ✅ Built (Task 13) |
+| `MachineEventPubSubLive` | `'@/machines/EventPubSub.js'`        | PubSub for machine events    | ❌ Task 16         |
 
 ### Critical: No `MiddlewareExecutorLive` export — use factory (Task 07)
 

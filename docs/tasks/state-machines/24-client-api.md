@@ -14,7 +14,7 @@ Extend the existing `client/src/utils/apiClient.ts` with machine-specific API fu
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from the existing client codebase.
+> These details emerged from the existing client codebase and Tasks 01–21.
 
 ### Current `apiClient.ts` pattern
 
@@ -48,6 +48,14 @@ Key patterns to follow:
 - `Effect.scoped` + `FetchHttpClient.layer` provided inline
 - `Effect.tap` for logging, `Effect.withLogSpan` for tracing
 - Each method returns a typed `Effect.Effect<ResponseType, Error>`
+
+### Important: Instance start is asynchronous
+
+The server's `StateMachineRunner.run()` BLOCKS until the machine completes (it forks a fiber internally but awaits it). The API route (Task 20) must fork `run()` into a background fiber and return `201 Created` with the `instanceId` immediately. This means:
+
+- `startInstance()` returns the response BEFORE the machine finishes — it only contains the `instanceId`
+- To get the final result, poll `getInstance(id)` or subscribe via WebSocket
+- The `status` field on the instance object tracks progress: `running` → `completed` / `error` / `cancelled` / `suspended`
 
 ### Extending for POST/PUT/DELETE
 

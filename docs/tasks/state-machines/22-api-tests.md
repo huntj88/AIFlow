@@ -14,23 +14,96 @@ Write integration tests for all machine REST API endpoints. Tests should make re
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and affect test setup.
+> These details emerged from Tasks 01–17 and affect test setup.
 
-### Layer composition for test harness
+### Test harness pattern (CONFIRMED from hello.test.ts)
 
-Use `InMemoryMachineStoreLive` and `ActionRegistryLive` in the test layer. The existing test files (e.g., `store/InMemoryMachineStore.test.ts`, `ActionRegistry.test.ts`) show how to compose layers with `Effect.provide(...)` and `Effect.runPromise()`.
+The existing `hello.test.ts` uses `HttpApp.toWebHandler()` — NOT `HttpClient.fetch`:
 
-### Effect test client pattern
+```typescript
+import { HttpApp } from '@effect/platform';
+import { describe, expect, it } from 'vitest';
 
-`@effect/platform` provides `HttpClient.fetch` for in-process testing without starting a real server. Alternatively, start the full `HttpLive` layer in tests and make real HTTP requests.
+import { HelloRouter } from './hello.js';
 
-### Existing route test pattern
+describe('HelloRouter', () => {
+  it('GET /api/hello returns hello world', async () => {
+    const handler = HttpApp.toWebHandler(HelloRouter);
+    const response = await handler(new Request('http://localhost/api/hello'));
+    const body = (await response.json()) as { message: string };
+    expect(body).toEqual({ message: 'hello world' });
+  });
+});
+```
 
-See `server/src/routes/hello.test.ts` for the existing test pattern.
+This pattern does NOT start a real HTTP server — it creates an in-process handler. **However**, the `HelloRouter` has no Effect dependencies. Routes that depend on services (e.g., `MachineStore`, `ActionRegistry`) will need layers provided before conversion to a web handler.
 
-### Schema decode returns `Either`
+### Providing layers for route tests
 
-When checking response bodies in tests, remember the schemas return `Either`. For test assertions, parse with `JSON.parse` and assert structure directly.
+For routes that access Effect services, you must provide layers before calling `toWebHandler`. The pattern:
+
+```typescript
+import { HttpApp, HttpRouter } from '@effect/platform';
+import { Layer, ManagedRuntime } from 'effect';
+
+// Compose all layers needed by the router
+const TestLayer = Layer.mergeAll(
+  InMemoryMachineStoreLive,
+  ActionRegistryLive,
+  ExecutionSemaphoreLive,
+  makeMiddlewareExecutorLayer([]),
+).pipe(
+  Layer.provideMerge(FsArtifactStoreLive),  // FsArtifactStoreLive depends on MachineStore
+  Layer.provideMerge(StateMachineRunnerLive), // Runner depends on all 5 services
+);
+
+// Option A: Provide to router, then toWebHandler
+const app = DefinitionsRouter.pipe(HttpRouter.provideServiceEffect(...));
+const handler = HttpApp.toWebHandler(app);
+
+// Option B: Use ManagedRuntime for more control
+const runtime = ManagedRuntime.make(TestLayer);
+```
+
+### Layer composition (5 dependencies for StateMachineRunnerLive)
+
+The runner requires ALL 5 services:
+
+1. `MachineStore` — use `InMemoryMachineStoreLive`
+2. `ActionRegistry` — use `ActionRegistryLive` (pre-loaded with 5 built-ins) or `InMemoryActionRegistryLive` (empty)
+3. `ArtifactStoreFactory` — use `FsArtifactStoreLive` (depends on MachineStore)
+4. `MiddlewareExecutor` — use `makeMiddlewareExecutorLayer([])`
+5. `ExecutionSemaphore` — use `ExecutionSemaphoreLive`
+
+This is the same 5-layer pattern used in `StateMachineRunner.test.ts`.
+
+### Critical: `run()` blocks until completion
+
+`StateMachineRunner.run()` internally forks a fiber but blocks via `Fiber.await()`. In API tests:
+
+- Simple machines (1-2 states) will complete quickly — test can await the response
+- For cancel/resume tests, use `delay` action to keep machine running, then cancel/resume from another fiber
+- The API route itself should fork run() into a background fiber and return 201 immediately
+
+### run() error semantics
+
+- Action errors → `MachineResult` with `status: 'error'` (NOT an Effect failure)
+- Definition not found → Effect fails with `NotFoundError`
+- Invalid input (schema violation) → Effect fails with `ValidationError`
+- Instance already running → Effect fails with `DefinitionError`
+
+### Existing test patterns from StateMachineRunner.test.ts
+
+The runner test file uses helper functions for definition creation and action registration — consider extracting shared test fixtures:
+
+```typescript
+// Registration helper pattern from existing tests
+const registerAction = (id: string, fn: ActionFunction) =>
+  Effect.gen(function* () {
+    const registry = yield* ActionRegistry;
+    yield* registry.register(id, fn);
+  });
+```
 
 ---
 
