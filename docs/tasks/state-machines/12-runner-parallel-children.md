@@ -12,6 +12,28 @@ Extend the `StateMachineRunner` to handle `parallel_children` state type. The ru
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 06–09 and affect this task's implementation.
+
+### Runner state loop branching (Task 09 → modified in Task 11)
+
+By Task 11, the state loop will have a type-based branch (`action` / `child_machine` / `parallel_children`). This task adds the `parallel_children` branch. Follow the same pattern established in Task 11.
+
+### Runner `run()` returns `MachineResult` (fixed in Task 10)
+
+By Task 10, `run()` should return `MachineResult` on both success and error (never fail the Effect for action errors). This means each child's `run()` call always resolves to a `MachineResult`, making `all_settled` straightforward — use `Effect.forEach` and each child returns a result. For `all_or_interrupt`, catch `MachineError` failures from validation/store errors and interrupt siblings.
+
+### `ArtifactStoreFactory.makeScoped` is synchronous (Task 08)
+
+`makeScoped(instanceId, stateName, parentInstanceId?)` returns an `ArtifactStore` directly (not an Effect). Each child gets its own scoped store with the parent instance ID for hierarchical directory layout.
+
+### `MiddlewareExecutor` runs independently per state (Task 07)
+
+Middleware fires per state transition. Each child machine runs its own middleware hooks. The parent's middleware runs when the parent's action executes after children complete.
+
+---
+
 ## Steps
 
 ### 1. Implement `parallel_children` handling in the state loop

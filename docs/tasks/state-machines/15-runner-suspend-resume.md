@@ -14,13 +14,40 @@ Implement graceful shutdown (suspend all running instances), the resume protocol
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and affect this task's implementation.
+> These details emerged from Tasks 01–09 and affect this task's implementation.
 
 - **`MachineStore.listInstances`** supports `{ status: 'suspended' }` filter for startup recovery. Also supports `parentInstanceId` filter to find children.
 - **`MachineStore.getDefinition`** returns `Effect.Effect<StateMachineDefinition, NotFoundError>`. Use to verify definition still exists and version matches.
 - **`MachineStore.updateInstance`** takes `Partial<Omit<MachineInstance, 'id' | 'createdAt'>>`. The store auto-refreshes `updatedAt`.
 - **Error constructors**: `mkNotFoundError({ entityType: 'definition' | 'instance', id })`, `mkDefinitionError({ message: 'definition version changed' })`.
 - **Server entry** (`server/src/index.ts`): Currently uses `NodeRuntime.runMain` with `ServerLoggerLive`. Shutdown handlers for SIGTERM/SIGINT need to integrate with this existing startup pattern.
+
+### Runner `currentState` is the key to resume (Task 09)
+
+The runner persists `currentState` and `stateData` at **Checkpoint 2** (before action execution). On suspension, the instance will have `currentState` pointing to the state whose action was interrupted. Resume needs to re-enter this state and re-execute the action.
+
+The `history[]` array contains all **completed** transitions. Any transition in history was fully persisted (Checkpoint 3). Resume must NOT re-execute states that have a transition record in history.
+
+### `StateLoggerFactory` is created per-state (Task 09)
+
+The runner creates `createStateLoggerFactory()` inside each loop iteration. On resume, a fresh factory is created for the resumed state — previous log entries were already persisted on the instance.
+
+### Fiber tracking from Task 14 is prerequisite
+
+`suspendAll()` depends on the fiber handle map from Task 14. Each running instance's fiber can be interrupted. The `Effect.onInterrupt` finalizer (from Task 14) needs to be extended to distinguish `'suspended'` from `'cancelled'`.
+
+### `StateMachineRunner` interface additions
+
+After this task, the interface will have all three methods:
+
+```typescript
+interface StateMachineRunner {
+  run(definition, input, opts?): Effect.Effect<MachineResult, MachineError>;
+  cancel(instanceId: string): Effect.Effect<void, NotFoundError | DefinitionError>;
+  resume(instanceId: string): Effect.Effect<MachineResult, MachineError>;
+  suspendAll(): Effect.Effect<void, MachineError>;
+}
+```
 
 ---
 

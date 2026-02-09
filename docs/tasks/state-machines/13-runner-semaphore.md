@@ -14,10 +14,41 @@ Implement the global `Semaphore`-based concurrency control for machine execution
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and affect this task's implementation.
+> These details emerged from Tasks 01–09 and affect this task's implementation.
 
 - **Effect Service pattern**: Use `Context.GenericTag<Semaphore.Semaphore>('ExecutionSemaphore')` — same pattern as `MachineStore` and `ActionRegistry`. Both the tag and the interface can share a variable name.
 - **`Semaphore`** is available from `effect` package directly: `import { Semaphore } from 'effect';`.
+
+### Runner Layer does NOT currently depend on the semaphore (Task 09)
+
+`StateMachineRunnerLive` currently depends on: `MachineStore`, `ActionRegistry`, `ArtifactStoreFactory`, `MiddlewareExecutor`. **The semaphore must be added as a new dependency.** Either:
+
+- Add `ExecutionSemaphore` to the `yield*` block in `StateMachineRunnerLive`, or
+- Wrap the state loop externally with `semaphore.withPermits(1)(...)`
+
+The state loop in the runner is a single `while` loop inside `Effect.gen`. To wrap individual steps in `withPermits`, the loop body needs to be extracted into a separate function that can be wrapped.
+
+### Active computation scope in the runner (Task 09)
+
+The current loop body includes these steps per state:
+
+1. Checkpoint 2 (persist) — **active**
+2. Create StateLogger and ArtifactStore — **active**
+3. Build ActionContext — **active**
+4. Fetch latest instance for middleware — **active**
+5. Run middleware `beforeTransition` — **active**
+6. Look up action — **active**
+7. Execute action — **active**
+8. Validate transition — **active**
+9. Run middleware `afterTransition` — **active**
+10. Record history, collect logs — **active**
+11. Checkpoint 3 (persist) — **active**
+
+All of these are "active computation" and should hold the semaphore permit. The permit is released only when waiting for children (Tasks 11/12).
+
+### Middleware `runOnError` never fails (Task 07)
+
+`MiddlewareExecutor.runOnError()` returns `Effect.Effect<void>` with no error channel — individual hook errors are swallowed. Safe to call inside semaphore-protected blocks.
 
 ---
 

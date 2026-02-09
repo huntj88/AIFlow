@@ -14,7 +14,7 @@ Write comprehensive unit and integration tests for the entire core engine. Tests
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and affect test setup.
+> These details emerged from Tasks 01–09 and affect test setup.
 
 ### Layer names for test composition
 
@@ -54,6 +54,57 @@ Expect the effect to fail with an error where error._tag === 'DefinitionError'
 ### Existing test patterns
 
 See `server/src/machines/DefinitionValidator.test.ts`, `ActionRegistry.test.ts`, `store/InMemoryMachineStore.test.ts`, and `actions/actions.test.ts` for established test patterns and helpers.
+
+### Critical: Layer composition for runner tests (Tasks 06–09)
+
+The `StateMachineRunnerLive` Layer requires **four dependencies**:
+
+1. `MachineStore` — use `InMemoryMachineStoreLive`
+2. `ActionRegistry` — use `InMemoryActionRegistryLive` (register custom test actions)
+3. `ArtifactStoreFactory` — use `FsArtifactStoreLive` (which itself requires `MachineStore`)
+4. `MiddlewareExecutor` — use `makeMiddlewareExecutorLayer([])` (empty middleware for most tests)
+
+**There is no `MiddlewareExecutorLive` export.** Use the factory function:
+
+```typescript
+import { makeMiddlewareExecutorLayer } from '../middleware/MiddlewareExecutor.js';
+const TestMiddlewareLayer = makeMiddlewareExecutorLayer([]); // no middleware
+```
+
+Layer composition example:
+
+```typescript
+const TestLayer = StateMachineRunnerLive.pipe(
+  Layer.provide(InMemoryMachineStoreLive),
+  Layer.provide(InMemoryActionRegistryLive),
+  Layer.provide(FsArtifactStoreLive), // depends on MachineStore
+  Layer.provide(makeMiddlewareExecutorLayer([])),
+);
+```
+
+Note: `FsArtifactStoreLive` has type `Layer.Layer<ArtifactStoreFactory, never, MachineStore>` — it requires `MachineStore` in its environment. Use `Layer.provideMerge` or ensure `InMemoryMachineStoreLive` is provided to both the runner and the artifact store.
+
+### `stateData` in the first state is set to `input` (Task 09)
+
+**Correction to §4.2 test expectation:** The runner sets `stateData = input` for the first state (both in the `ActionContext` and the persisted instance). The first action receives `ctx.stateData === input` AND `ctx.machineInput === input`. The task spec coverage says "stateData in first state is empty/undefined" but the actual implementation passes `input` as initial `stateData`. **Tests should verify `ctx.stateData === input` in the first state.**
+
+### `run()` failure mode — depends on Task 10 fix
+
+Currently `run()` Effect **fails** on action errors (returns `Effect.fail(machineError)`). After Task 10 fixes this, `run()` should return `MachineResult.error` instead. Tests should use `Effect.either` or `Effect.exit` to inspect outcomes:
+
+```typescript
+// Before Task 10 fix:
+const exit = yield * runner.run(def, input).pipe(Effect.exit);
+// exit is Exit.Failure with MachineError for action errors
+
+// After Task 10 fix:
+const result = yield * runner.run(def, input);
+// result is MachineResult { status: 'error', ... } for action errors
+```
+
+### `StateLoggerFactory` is per-state, not a service (Task 06)
+
+The runner creates a new `createStateLoggerFactory()` inside each loop iteration. In tests, you observe logs via the persisted `instance.logs` array (fetched from the store after completion), not by inspecting the factory directly.
 
 ---
 

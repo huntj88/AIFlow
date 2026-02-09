@@ -16,7 +16,7 @@ Extend the `StateMachineRunner` to handle `child_machine` state type. When the r
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and affect this task's implementation.
+> These details emerged from Tasks 01–09 and affect this task's implementation.
 
 - **`jsonpath-plus` is ALREADY installed** as a dependency from Task 05 (`transform-data` action). `@types/jsonpath-plus` is also already a devDependency. **Skip Step 1 (install).**
 - Import as: `import { JSONPath } from 'jsonpath-plus';` — same as in `server/src/machines/actions/transform-data.ts`.
@@ -24,6 +24,38 @@ Extend the `StateMachineRunner` to handle `child_machine` state type. When the r
 - **`MachineStore.updateInstance`** takes `Partial<Omit<MachineInstance, 'id' | 'createdAt'>>`. Use this to set `status: 'waiting_for_child'` and `childInstanceId` on the parent.
 - **`MachineStore.getDefinition`** returns `Effect.Effect<StateMachineDefinition, NotFoundError>`. Use to load the child definition by `childMachineDefId`.
 - **Error constructors**: `mkActionError({ actionId, stateName, cause })`, `mkNotFoundError({ entityType: 'definition', id })` — imported from `'../machines/types.js'`.
+
+### Critical: Runner state loop only handles `action` type (Task 09)
+
+The current state loop in `StateMachineRunner.ts` assumes every non-terminal state is an `action` type. It directly accesses `stateDef.actionId` and fails if missing. **The loop must be extended with a type-based branch:**
+
+```typescript
+while (definition.states[currentState].type !== 'terminal') {
+  const stateDef = definition.states[currentState];
+
+  if (stateDef.type === 'child_machine') {
+    // → child machine spawning logic (this task)
+  } else if (stateDef.type === 'parallel_children') {
+    // → parallel children logic (Task 12)
+  } else {
+    // → existing action execution logic
+  }
+}
+```
+
+### Critical: Runner `run()` failure mode (Task 09 → fix in Task 10)
+
+**Currently, the runner's `run()` Effect FAILS on action errors** (via `Effect.fail(machineError)`) instead of returning `MachineResult.error`. Task 10 must fix this so that `run()` always returns a `MachineResult`, because the parent needs to receive child `MachineResult.error` as `stateData` — not catch a failed Effect.
+
+After Task 10 fixes this, a child error will produce `MachineResult { status: 'error' }` which the parent action can inspect and decide the transition.
+
+### `parentContext` and artifact scoping already wired (Task 09)
+
+The runner already builds `parentContext` from `opts?.parentInstanceId` and `opts.parentStateName` and passes it in the `ActionContext`. Artifacts are already scoped with `artifactFactory.makeScoped(instanceId, currentState, opts?.parentInstanceId)` — child machines automatically get parent-scoped artifact directories.
+
+### Import style: relative imports
+
+All files in `server/src/machines/` use **relative imports** (e.g., `'./types.js'`, `'../store/MachineStore.js'`), NOT `@/` aliases. Follow the same pattern.
 
 ---
 

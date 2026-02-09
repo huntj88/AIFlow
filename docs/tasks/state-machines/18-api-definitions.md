@@ -74,7 +74,7 @@ Use `mk*` constructors: `mkNotFoundError({ entityType: 'definition', id })`, `mk
 
 ### Import paths
 
-The server uses `@/` path aliases:
+The server uses `@/` path aliases for route files. **However**, files inside `server/src/machines/` use **relative imports** (e.g., `'./types.js'`, `'../store/MachineStore.js'`). Route files in `server/src/routes/` should use `@/` aliases:
 
 - `import { MachineStore } from '@/machines/store/index.js';`
 - `import { validateDefinition } from '@/machines/DefinitionValidator.js';`

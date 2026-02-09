@@ -72,7 +72,44 @@ startServer.pipe(Effect.provide(ServerLoggerLive), NodeRuntime.runMain);
 | `ActionRegistryLive`         | `'@/machines/ActionRegistry.js'`                                              | Pre-loaded with 5 built-in actions |
 | `InMemoryActionRegistryLive` | `'@/machines/ActionRegistry.js'`                                              | Bare empty registry (for tests)    |
 
-Layers from Tasks 06–16 (to be built): `StateMachineRunnerLive`, `ExecutionSemaphoreLive`, `FsArtifactStoreLive`, `MachineEventPubSubLive`, `MiddlewareExecutorLive`.
+### Layer names from Tasks 06–09 (built)
+
+| Layer                               | Import Path                                     | Description                       | Dependencies                                                                   |
+| ----------------------------------- | ----------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------ |
+| `StateMachineRunnerLive`            | `'@/machines/StateMachineRunner.js'`            | Core runner service               | `MachineStore`, `ActionRegistry`, `ArtifactStoreFactory`, `MiddlewareExecutor` |
+| `FsArtifactStoreLive`               | `'@/machines/artifacts/FsArtifactStore.js'`     | Filesystem `ArtifactStoreFactory` | **`MachineStore`** (for descendant validation)                                 |
+| `makeMiddlewareExecutorLayer(mw[])` | `'@/machines/middleware/MiddlewareExecutor.js'` | Middleware executor from array    | None                                                                           |
+
+### Layers from Tasks 13, 16 (to be built)
+
+| Layer                    | Import Path                          | Description                  |
+| ------------------------ | ------------------------------------ | ---------------------------- |
+| `ExecutionSemaphoreLive` | `'@/machines/ExecutionSemaphore.js'` | Global concurrency semaphore |
+| `MachineEventPubSubLive` | `'@/machines/EventPubSub.js'`        | PubSub for machine events    |
+
+### Critical: No `MiddlewareExecutorLive` export — use factory (Task 07)
+
+**There is no pre-built `MiddlewareExecutorLive` Layer.** The export is a factory function:
+
+```typescript
+import { makeMiddlewareExecutorLayer } from '@/machines/middleware/MiddlewareExecutor.js';
+// For production with no middleware:
+const MiddlewareLayer = makeMiddlewareExecutorLayer([]);
+// For production with custom middleware:
+const MiddlewareLayer = makeMiddlewareExecutorLayer([loggingMiddleware, metricsMiddleware]);
+```
+
+### Critical: `FsArtifactStoreLive` requires `MachineStore` (Task 08)
+
+`FsArtifactStoreLive` has type `Layer.Layer<ArtifactStoreFactory, never, MachineStore>` — it requires `MachineStore` in its environment. This affects composition order. `InMemoryMachineStoreLive` must be provided to both the runner and the artifact store.
+
+### `StateLoggerFactory` is NOT a Layer (Task 06)
+
+`createStateLoggerFactory()` is a plain function, not an Effect Service. The runner creates it per-state inside the loop. It does NOT need to be in the Layer composition graph.
+
+### Import style in machines/ vs routes/
+
+All files in `server/src/machines/` use **relative imports** (e.g., `'./types.js'`). Files in `server/src/routes/` may use `@/` aliases. Be consistent within each directory.
 
 ### Service access in routes
 
@@ -145,15 +182,16 @@ HttpLive
   = AppRouter (HelloRouter + MachineRouter)
   |> HttpServer.serve(HttpMiddleware.logger)
   |> HttpServer.withLogAddress
-  |> Layer.provide(ServerLive)                 // NodeHttpServer.layer(() => createServer(), { port: 3001 })
-  |> Layer.provide(ActionRegistryLive)         // Built-in actions pre-registered
-  |> Layer.provide(StateMachineRunnerLive)     // Depends on: ActionRegistry, MachineStore,
-  |                                            //   Semaphore, PubSub, Middleware, ArtifactStoreFactory
-  |> Layer.provide(ExecutionSemaphoreLive)     // Global Semaphore(MAX_CONCURRENT_MACHINES)
-  |> Layer.provide(InMemoryMachineStoreLive)   // Implements MachineStore
-  |> Layer.provide(FsArtifactStoreLive)        // Implements ArtifactStoreFactory
-  |> Layer.provide(MachineEventPubSubLive)     // PubSub<MachineEvent>
-  |> Layer.provide(MiddlewareExecutorLive)     // Default middleware stack
+  |> Layer.provide(ServerLive)                       // NodeHttpServer.layer(() => createServer(), { port: 3001 })
+  |> Layer.provide(ActionRegistryLive)               // Built-in actions pre-registered
+  |> Layer.provide(StateMachineRunnerLive)           // Depends on: ActionRegistry, MachineStore,
+  |                                                  //   ArtifactStoreFactory, MiddlewareExecutor
+  |                                                  //   (+ Semaphore from Task 13, PubSub from Task 16)
+  |> Layer.provide(InMemoryMachineStoreLive)         // Implements MachineStore
+  |> Layer.provide(FsArtifactStoreLive)              // Implements ArtifactStoreFactory; DEPENDS on MachineStore
+  |> Layer.provide(makeMiddlewareExecutorLayer([]))  // Default empty middleware stack
+  |> Layer.provide(ExecutionSemaphoreLive)           // Global Semaphore (added in Task 13)
+  |> Layer.provide(MachineEventPubSubLive)           // PubSub<MachineEvent> (added in Task 16)
 
 startServer = Layer.launch(HttpLive).pipe(
   Effect.tap(() => Effect.log('Server starting on port ...')),
@@ -163,7 +201,16 @@ startServer = Layer.launch(HttpLive).pipe(
 startServer.pipe(Effect.provide(ServerLoggerLive), NodeRuntime.runMain);
 ```
 
-**Important**: Layer ordering matters — dependent layers must be provided after their dependents. If `StateMachineRunnerLive` needs `MachineStore`, provide `InMemoryMachineStoreLive` before or alongside it. Use `Layer.merge` or `Layer.provideMerge` for complex graphs.
+**Important**: Layer ordering matters — dependent layers must be provided after their dependents. Use `Layer.merge` or `Layer.provideMerge` for complex graphs.
+
+**Critical composition note for `FsArtifactStoreLive`**: Since it requires `MachineStore`, and the runner also requires `MachineStore`, you may need to build a merged base layer:
+
+```typescript
+const BaseLayers = Layer.merge(InMemoryMachineStoreLive, ActionRegistryLive);
+const ArtifactLayer = FsArtifactStoreLive.pipe(Layer.provide(InMemoryMachineStoreLive));
+const RunnerDeps = Layer.mergeAll(BaseLayers, ArtifactLayer, makeMiddlewareExecutorLayer([]));
+const RunnerLayer = StateMachineRunnerLive.pipe(Layer.provide(RunnerDeps));
+```
 
 ### 4. Service access in routes
 

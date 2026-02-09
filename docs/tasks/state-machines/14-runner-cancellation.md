@@ -14,12 +14,39 @@ Implement machine instance cancellation. When `cancel(instanceId)` is called, th
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and affect this task's implementation.
+> These details emerged from Tasks 01–09 and affect this task's implementation.
 
 - **`MachineStore.getInstance`** returns `Effect.Effect<MachineInstance, NotFoundError>`. Use to verify instance status before cancellation.
 - **`MachineStore.updateInstance`** takes `Partial<Omit<MachineInstance, 'id' | 'createdAt'>>`. The store auto-refreshes `updatedAt`.
 - **Error constructors**: `mkNotFoundError({ entityType: 'instance', id })`, `mkDefinitionError({ message })` for 409 Conflict scenarios.
 - **For 409 Conflict** on already-terminal instances: Use `mkDefinitionError({ message: 'Cannot cancel instance with status: completed' })` or create a custom error — the API layer (Task 20) maps `DefinitionError` to 400/409 as needed.
+
+### Current runner has NO fiber tracking (Task 09)
+
+The current `run()` is a plain `Effect.Effect<MachineResult, MachineError>` — it is not forked as a fiber. There is no mechanism to interrupt a running machine from outside. **This task must:**
+
+1. Change `run()` to internally fork the execution as a `Fiber.RuntimeFiber` and store the handle in a `Map<string, Fiber.RuntimeFiber<MachineResult, MachineError>>`.
+2. Add `Effect.onInterrupt` finalizer to the forked fiber to handle cancellation cleanup.
+3. The public `run()` may need to return the instance ID immediately and join the fiber for the result, OR the fiber tracking can be internal to the runner while `run()` still returns `Effect.Effect<MachineResult, MachineError>`.
+
+### `StateMachineRunner` interface changes
+
+The current interface only has `run()`. This task adds `cancel()`. The interface in `StateMachineRunner.ts` must be extended:
+
+```typescript
+interface StateMachineRunner {
+  run(definition, input, opts?): Effect.Effect<MachineResult, MachineError>;
+  cancel(instanceId: string): Effect.Effect<void, NotFoundError | DefinitionError>;
+}
+```
+
+### Runner error handling after Task 10
+
+After Task 10, `run()` should return `MachineResult.error` instead of failing the Effect for action errors. However, validation errors, store errors, etc. may still fail the Effect. The `onInterrupt` finalizer should handle interruption regardless of the current error state.
+
+### `MiddlewareExecutor.runOnError()` is safe to call in finalizers (Task 07)
+
+`runOnError()` returns `Effect.Effect<void>` — never fails. Individual hook errors are swallowed. Safe to use in interrupt handlers.
 
 ---
 

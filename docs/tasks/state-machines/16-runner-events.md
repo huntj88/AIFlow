@@ -14,12 +14,71 @@ Integrate Effect `PubSub` into the `StateMachineRunner` for publishing `MachineE
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and affect this task's implementation.
+> These details emerged from Tasks 01–09 and affect this task's implementation.
 
 - **`MachineEvent` uses `type` as discriminant** (NOT `_tag`). Example: `{ type: 'state_changed', instanceId: '...', data: { ... } }`. The `type` field is a string union; `_tag` is used only for errors.
 - **`MachineResult` uses `status` as discriminant**: `{ status: 'completed', output, instanceId }`.
 - **Effect Service pattern**: Use `Context.GenericTag<PubSub.PubSub<MachineEvent>>('MachineEventPubSub')` for the PubSub tag.
 - **`PubSub`** is available from `effect` directly: `import { PubSub } from 'effect';`.
+
+### Runner does NOT currently depend on PubSub (Task 09)
+
+`StateMachineRunnerLive` currently depends on: `MachineStore`, `ActionRegistry`, `ArtifactStoreFactory`, `MiddlewareExecutor`. **PubSub must be added as a new dependency** in the Layer:
+
+```typescript
+const pubsub = yield * MachineEventPubSub;
+```
+
+### StateLogger is a per-state factory function, not a Service (Task 06)
+
+`createStateLoggerFactory()` is a plain function — NOT an Effect Service with Tag/Layer. It creates a mutable collector that the runner reads after each action via `loggerFactory.getEntries()`.
+
+**Impact on `log_entry` events:** Log entries are collected **after** the action completes (not during). The runner calls `loggerFactory.getEntries()` to get all entries from the action, then publishes them. For truly real-time log streaming, one option is to wrap the `StateLogger` returned by the factory to also publish events immediately:
+
+```typescript
+// In the runner, wrap the logger to intercept calls:
+const rawLogger = loggerFactory.create(instanceId, currentState);
+const logger: StateLogger = {
+  debug: (msg, data?) =>
+    rawLogger
+      .debug(msg, data)
+      .pipe(Effect.tap(() => pubsub.publish({ type: 'log_entry', instanceId, data: lastEntry }))),
+  // ... same for info, warn, error
+};
+```
+
+Or publish all collected entries in batch after the action, before `transition_recorded`.
+
+### ArtifactStore is returned synchronously from factory (Task 08)
+
+`ArtifactStoreFactory.makeScoped()` returns `ArtifactStore` (not an Effect). To intercept artifact writes for `artifact_created` events, wrap the store:
+
+```typescript
+const rawArtifacts = artifactFactory.makeScoped(instanceId, currentState, parentId);
+const artifacts: ArtifactStore = {
+  ...rawArtifacts,
+  write: (name, content, meta?) =>
+    rawArtifacts
+      .write(name, content, meta)
+      .pipe(
+        Effect.tap((record) =>
+          pubsub.publish({ type: 'artifact_created', instanceId, data: record }),
+        ),
+      ),
+};
+```
+
+### Event publishing insertion points in the runner loop (Task 09)
+
+The current loop has clear insertion points for events:
+
+| After this line in the runner                                       | Event to publish            |
+| ------------------------------------------------------------------- | --------------------------- |
+| After Checkpoint 3 (`store.updateInstance` with new `currentState`) | `state_changed`             |
+| After recording `transitionRecord` in history                       | `transition_recorded`       |
+| After `loggerFactory.getEntries()` collection                       | `log_entry` (one per entry) |
+| After terminal state resolution (Checkpoint 4)                      | `machine_completed`         |
+| After artifact write (wrapped store)                                | `artifact_created`          |
 
 ---
 

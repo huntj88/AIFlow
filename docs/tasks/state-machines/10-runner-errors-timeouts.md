@@ -14,11 +14,44 @@ Extend the `StateMachineRunner` with robust error handling, per-state action tim
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and affect this task's implementation.
+> These details emerged from Tasks 01–09 and affect this task's implementation.
 
 - **Error constructors** use the `mk` prefix: `mkActionError({ actionId, stateName, cause })`, `mkDefinitionError({ message, details })`, `mkValidationError({ message, path })` — imported from `'../machines/types.js'`.
 - **Ajv CJS interop** for input validation against `inputSchema`: Use the same pattern from `DefinitionValidator.ts` — `import AjvModule from 'ajv'` with runtime `.default` normalization. Or share the ajv instance from the validator module.
 - **`MachineStore.updateInstance`** signature: `updateInstance(id, patch: Partial<Omit<MachineInstance, 'id' | 'createdAt'>>)` — the store auto-refreshes `updatedAt`.
+
+### Critical: Runner action-error behaviour (Task 09)
+
+**The current `run()` Effect FAILS when an action errors** — it does NOT return a `MachineResult` with `status: 'error'`. The flow is:
+
+1. Action fails → `catchAll` fires → middleware `onError` runs → error transition recorded → instance persisted with `status: 'error'` (Checkpoint 4)
+2. Then the handler calls `Effect.fail(machineError)` — so the entire `run()` Effect fails.
+
+**This must be changed in this task.** After persisting the error state, `run()` should **return** `{ status: 'error', error: errorMessage, instanceId }` instead of failing. This is critical because:
+
+- Task 11: Parent must receive child `MachineResult.error` (not catch a failed Effect)
+- Task 14: Fiber completion vs failure semantics differ
+- Task 20: API needs to handle the run result uniformly
+
+The fix: replace the `return yield* Effect.fail(machineError)` at the end of the `catchAll` handler with `return { status: 'error', error: errorMessage, instanceId }` and break out of the loop.
+
+### Input validation is already implemented (Task 09)
+
+Step 6 ("Input validation on start") is already done in the runner. The runner validates `input` against `definition.inputSchema` using ajv **before** creating the instance. If validation fails, `mkValidationError` is returned — the instance is never created. **Skip re-implementing this; focus on timeout and depth additions.**
+
+### `MiddlewareExecutor.runOnError()` never fails
+
+The `runOnError` method returns `Effect.Effect<void>` (no error channel). Individual onError hook errors are logged and swallowed. The runner can call it without error handling.
+
+### Existing error handling in the runner
+
+The runner already handles:
+
+- Action failure → error terminal + middleware onError + persist
+- Illegal transition → `DefinitionError` with from→to details
+- Missing actionId → `DefinitionError`
+
+This task adds: per-state timeout, machine-level timeout, and depth limits on top of the existing error paths.
 
 ---
 

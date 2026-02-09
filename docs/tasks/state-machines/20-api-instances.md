@@ -14,7 +14,7 @@ Implement the REST API routes for machine instance lifecycle: starting, listing,
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–05 and affect this task’s implementation.
+> These details emerged from Tasks 01–09 and affect this task's implementation.
 
 ### Schema decoding
 
@@ -53,6 +53,38 @@ yield * runner.run(definition, input);
 ### Instance filter query params
 
 For `GET /api/machines/instances`, use `decodeInstanceFilter` from `schemas.ts` or parse query params manually. The `InstanceFilterSchema` validates `status`, `definitionId`, `parentInstanceId`, `limit`, `offset`.
+
+### Critical: `run()` is a blocking Effect — must fork as fiber (Task 09)
+
+The current `runner.run()` returns `Effect.Effect<MachineResult, MachineError>` and runs the entire state loop synchronously within the Effect. **The API route must fork it as a background fiber** so the HTTP response returns immediately:
+
+```typescript
+// DON'T block the request:
+// const result = yield* runner.run(definition, input);
+
+// DO fork as a background fiber:
+yield * Effect.fork(runner.run(definition, input));
+// Return 201 immediately with the instance ID
+```
+
+After Task 14 (cancellation), the runner will internally manage fiber tracking. But the API layer still needs to fork the execution to avoid blocking the HTTP response.
+
+### `run()` failure mode — depends on Task 10
+
+After Task 10, `run()` should return `MachineResult.error` for action errors (not fail the Effect). However, `ValidationError` (bad input schema) and `NotFoundError` (missing action) will still fail the Effect. The forked fiber should handle these gracefully — persist error status on the instance if the Effect fails for non-action reasons.
+
+### Artifact download requires `ArtifactStoreFactory` (Task 08)
+
+`ArtifactStoreFactory` is an Effect Service. To download an artifact, the route needs to create a scoped store from the factory:
+
+```typescript
+const factory = yield * ArtifactStoreFactory;
+const instance = yield * store.getInstance(id);
+const artifactStore = factory.makeScoped(id, '', instance.parentInstanceId);
+const content = yield * artifactStore.read(name);
+```
+
+Note: `makeScoped` takes `stateName` as the second argument, but for reading it doesn't matter — the directory is resolved by `instanceId` and `parentInstanceId` only. Pass empty string for read-only access.
 
 ---
 
