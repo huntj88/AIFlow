@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 
 import { ActionRegistryLive } from '@/machines/ActionRegistry.js';
 import { FsArtifactStoreLive } from '@/machines/artifacts/FsArtifactStore.js';
+import { MachineEventPubSubLive } from '@/machines/EventPubSub.js';
 import { ExecutionSemaphoreLive } from '@/machines/ExecutionSemaphore.js';
 import { makeMiddlewareExecutorLayer } from '@/machines/middleware/MiddlewareExecutor.js';
 import { StateMachineRunnerLive } from '@/machines/StateMachineRunner.js';
@@ -30,14 +31,22 @@ const StoreLive = InMemoryMachineStoreLive;
 const RegistryLive = ActionRegistryLive;
 const MiddlewareLive = makeMiddlewareExecutorLayer([]);
 const SemaphoreLive = ExecutionSemaphoreLive;
+const PubSubLive = MachineEventPubSubLive;
 
 // ArtifactStoreFactory depends on MachineStore
 const ArtifactLive = FsArtifactStoreLive.pipe(Layer.provide(StoreLive));
 
-// Runner depends on all five services
+// Runner depends on all six services
 const RunnerLive = StateMachineRunnerLive.pipe(
   Layer.provide(
-    Layer.mergeAll(StoreLive, RegistryLive, ArtifactLive, MiddlewareLive, SemaphoreLive),
+    Layer.mergeAll(
+      StoreLive,
+      RegistryLive,
+      ArtifactLive,
+      MiddlewareLive,
+      SemaphoreLive,
+      PubSubLive,
+    ),
   ),
 );
 
@@ -48,6 +57,7 @@ export const MachineLive = Layer.mergeAll(
   ArtifactLive,
   RunnerLive,
   SemaphoreLive,
+  PubSubLive,
 );
 
 // ── HTTP server ─────────────────────────────────────────────────────────────

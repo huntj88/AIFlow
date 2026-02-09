@@ -12,6 +12,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import { ActionRegistryLive } from '@/machines/ActionRegistry.js';
 import { FsArtifactStoreLive } from '@/machines/artifacts/FsArtifactStore.js';
+import { MachineEventPubSubLive } from '@/machines/EventPubSub.js';
 import { ExecutionSemaphoreLive } from '@/machines/ExecutionSemaphore.js';
 import { makeMiddlewareExecutorLayer } from '@/machines/middleware/MiddlewareExecutor.js';
 import { StateMachineRunnerLive } from '@/machines/StateMachineRunner.js';
@@ -27,14 +28,29 @@ const StoreLive = InMemoryMachineStoreLive;
 const RegistryLive = ActionRegistryLive;
 const MiddlewareLive = makeMiddlewareExecutorLayer([]);
 const SemaphoreLive = ExecutionSemaphoreLive;
+const PubSubLive = MachineEventPubSubLive;
 const ArtifactLive = FsArtifactStoreLive.pipe(Layer.provide(StoreLive));
 const RunnerLive = StateMachineRunnerLive.pipe(
   Layer.provide(
-    Layer.mergeAll(StoreLive, RegistryLive, ArtifactLive, MiddlewareLive, SemaphoreLive),
+    Layer.mergeAll(
+      StoreLive,
+      RegistryLive,
+      ArtifactLive,
+      MiddlewareLive,
+      SemaphoreLive,
+      PubSubLive,
+    ),
   ),
 );
 
-const TestLayer = Layer.mergeAll(StoreLive, RegistryLive, ArtifactLive, RunnerLive, SemaphoreLive);
+const TestLayer = Layer.mergeAll(
+  StoreLive,
+  RegistryLive,
+  ArtifactLive,
+  RunnerLive,
+  SemaphoreLive,
+  PubSubLive,
+);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Handler

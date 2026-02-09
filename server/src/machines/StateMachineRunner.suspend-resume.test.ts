@@ -21,6 +21,7 @@ import { Duration, Effect, Fiber, Layer } from 'effect';
 import { describe, expect, it } from 'vitest';
 
 import { InMemoryActionRegistryLive, ActionRegistry } from './ActionRegistry.js';
+import { MachineEventPubSubLive } from './EventPubSub.js';
 import { ExecutionSemaphoreLive } from './ExecutionSemaphore.js';
 import { FsArtifactStoreLive } from './artifacts/FsArtifactStore.js';
 import { makeMiddlewareExecutorLayer } from './middleware/MiddlewareExecutor.js';
@@ -50,6 +51,7 @@ const makeTestLayer = () =>
     Layer.provide(FsArtifactStoreLive.pipe(Layer.provide(InMemoryMachineStoreLive))),
     Layer.provide(NoMiddleware),
     Layer.provide(ExecutionSemaphoreLive),
+    Layer.provide(MachineEventPubSubLive),
     // Merge MachineStore + ActionRegistry so they are accessible in tests
     Layer.provideMerge(InMemoryMachineStoreLive),
     Layer.provideMerge(InMemoryActionRegistryLive),

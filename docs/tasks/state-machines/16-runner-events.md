@@ -264,11 +264,11 @@ const subscription = yield * PubSub.subscribe(machineEventPubSub);
 
 ## Validation Checklist
 
-- [ ] `server/src/machines/EventPubSub.ts` creates PubSub Layer
-- [ ] Runner publishes all 10 event types at correct points
-- [ ] Event ordering is correct (state_changed before transition_recorded)
-- [ ] Log entries published before transition_recorded
-- [ ] Artifact writes trigger `artifact_created` events
-- [ ] PubSub is a runner dependency (injected via Layer)
-- [ ] Subscription API works for consumers
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
+- [x] `server/src/machines/EventPubSub.ts` creates PubSub Layer
+- [x] Runner publishes all 10 event types at correct points
+- [x] Event ordering is correct (state_changed before transition_recorded)
+- [x] Log entries published before transition_recorded
+- [x] Artifact writes trigger `artifact_created` events
+- [x] PubSub is a runner dependency (injected via Layer)
+- [x] Subscription API works for consumers
+- [x] `pnpm --filter @aiflow/server run build` succeeds

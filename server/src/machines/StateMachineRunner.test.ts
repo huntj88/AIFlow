@@ -24,6 +24,7 @@ import { Duration, Effect, Layer } from 'effect';
 import { describe, expect, it } from 'vitest';
 
 import { ActionRegistry, InMemoryActionRegistryLive } from './ActionRegistry.js';
+import { MachineEventPubSubLive } from './EventPubSub.js';
 import { ExecutionSemaphore, ExecutionSemaphoreLive } from './ExecutionSemaphore.js';
 import { FsArtifactStoreLive } from './artifacts/FsArtifactStore.js';
 import { ValidationMiddleware } from './middleware/ValidationMiddleware.js';
@@ -56,6 +57,7 @@ const makeTestLayer = (middleware: readonly TransitionMiddleware[] = []) =>
     Layer.provide(FsArtifactStoreLive.pipe(Layer.provide(InMemoryMachineStoreLive))),
     Layer.provide(middleware.length > 0 ? makeMiddlewareExecutorLayer(middleware) : NoMiddleware),
     Layer.provide(ExecutionSemaphoreLive),
+    Layer.provide(MachineEventPubSubLive),
     Layer.provideMerge(InMemoryMachineStoreLive),
     Layer.provideMerge(InMemoryActionRegistryLive),
   );
@@ -1842,6 +1844,7 @@ describe('StateMachineRunner — Concurrency & Semaphore (§10)', () => {
       Layer.provide(FsArtifactStoreLive.pipe(Layer.provide(InMemoryMachineStoreLive))),
       Layer.provide(NoMiddleware),
       Layer.provide(TwoPermitSemaphore),
+      Layer.provide(MachineEventPubSubLive),
       Layer.provideMerge(InMemoryMachineStoreLive),
       Layer.provideMerge(InMemoryActionRegistryLive),
     );
@@ -1886,6 +1889,7 @@ describe('StateMachineRunner — Concurrency & Semaphore (§10)', () => {
       Layer.provide(FsArtifactStoreLive.pipe(Layer.provide(InMemoryMachineStoreLive))),
       Layer.provide(NoMiddleware),
       Layer.provide(TwoPermitSemaphore),
+      Layer.provide(MachineEventPubSubLive),
       Layer.provideMerge(InMemoryMachineStoreLive),
       Layer.provideMerge(InMemoryActionRegistryLive),
     );

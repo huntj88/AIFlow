@@ -26,17 +26,19 @@
  * interrupted action and continuing the state loop. Startup recovery
  * auto-resumes top-level suspended instances when `AUTO_RESUME_ON_STARTUP=true`.
  *
- * PubSub events are added in subsequent tasks.
+ * PubSub events are published at each significant point during execution
+ * (Task 16) via an Effect PubSub<MachineEvent>.
  *
  * @module
  */
 
 import AjvModule from 'ajv';
-import { Cause, Context, Duration, Effect, Either, Exit, Fiber, Layer } from 'effect';
+import { Cause, Context, Duration, Effect, Either, Exit, Fiber, Layer, PubSub } from 'effect';
 import { JSONPath } from 'jsonpath-plus';
 
 import { ActionRegistry } from './ActionRegistry.js';
 import { validateDefinition } from './DefinitionValidator.js';
+import { MachineEventPubSub } from './EventPubSub.js';
 import { ExecutionSemaphore } from './ExecutionSemaphore.js';
 import { createStateLoggerFactory } from './StateLogger.js';
 import { ArtifactStoreFactory } from './artifacts/ArtifactStoreFactory.js';
@@ -45,10 +47,12 @@ import { MachineStore } from './store/MachineStore.js';
 import type {
   ActionContext,
   ActionError,
+  ArtifactStore,
   ChildSpawnDefinition,
   DefinitionError,
   LogEntry,
   MachineError,
+  MachineEvent,
   MachineInstance,
   MachineResult,
   NotFoundError,
@@ -192,6 +196,11 @@ export const StateMachineRunnerLive = Layer.effect(
     const artifactFactory = yield* ArtifactStoreFactory;
     const middlewareExec = yield* MiddlewareExecutor;
     const semaphore = yield* ExecutionSemaphore;
+    const pubsub = yield* MachineEventPubSub;
+
+    /** Publish a machine event (fire-and-forget — never fails the caller). */
+    const publishEvent = (event: MachineEvent) =>
+      PubSub.publish(pubsub, event).pipe(Effect.catchAll(() => Effect.void));
 
     /**
      * In-memory fiber tracking for running instances.
@@ -250,6 +259,13 @@ export const StateMachineRunnerLive = Layer.effect(
             error: errorMessage,
             instanceId: ls.instanceId,
           };
+
+          // Publish machine_completed event with error status
+          yield* publishEvent({
+            type: 'machine_completed',
+            instanceId: ls.instanceId,
+            data: ls.errorResult,
+          });
         });
 
     // ──────────────────────────────────────────────────────────────────
@@ -353,11 +369,26 @@ export const StateMachineRunnerLive = Layer.effect(
         // b. Create scoped StateLogger and ArtifactStore
         const loggerFactory = createStateLoggerFactory();
         const logger = loggerFactory.create(ls.instanceId, ls.currentState);
-        const artifacts = artifactFactory.makeScoped(
+        const rawArtifacts = artifactFactory.makeScoped(
           ls.instanceId,
           ls.currentState,
           ls.parentInstanceId,
         );
+
+        // Wrap artifact store to publish artifact_created events on write
+        const artifacts: ArtifactStore = {
+          ...rawArtifacts,
+          write: (name, content, meta?) =>
+            rawArtifacts.write(name, content, meta).pipe(
+              Effect.tap((record) =>
+                publishEvent({
+                  type: 'artifact_created',
+                  instanceId: ls.instanceId,
+                  data: record,
+                }),
+              ),
+            ),
+        };
 
         // c. Build ActionContext
         const actionCtx: ActionContext = {
@@ -490,6 +521,34 @@ export const StateMachineRunnerLive = Layer.effect(
           history: ls.history,
           logs: ls.allLogs,
           updatedAt: new Date().toISOString(),
+        });
+
+        // Publish state_changed event
+        yield* publishEvent({
+          type: 'state_changed',
+          instanceId: ls.instanceId,
+          data: {
+            previousState: ls.currentState,
+            currentState: nextState,
+            stateData: nextStateData,
+            timestamp: new Date().toISOString(),
+          },
+        });
+
+        // Publish log_entry events (before transition_recorded)
+        for (const entry of logEntries) {
+          yield* publishEvent({
+            type: 'log_entry',
+            instanceId: ls.instanceId,
+            data: entry,
+          });
+        }
+
+        // Publish transition_recorded event
+        yield* publishEvent({
+          type: 'transition_recorded',
+          instanceId: ls.instanceId,
+          data: transitionRecord,
         });
 
         ls.currentState = nextState;
@@ -682,6 +741,17 @@ export const StateMachineRunnerLive = Layer.effect(
             // Phase 2: Spawn child machine (NO permit — release-before-wait)
             const childStartTime = Date.now();
             const childRunDepth = resumeContext ? 1 : (opts?.depth ?? 0) + 1;
+
+            // Publish child_spawned event
+            yield* publishEvent({
+              type: 'child_spawned',
+              instanceId: ls.instanceId,
+              data: {
+                childInstanceId: 'pending', // instanceId assigned inside run()
+                childDefinitionId: childSpawnInfo.childDefId,
+              },
+            });
+
             const childResult: MachineResult = yield* runner.run(
               childSpawnInfo.childDefinition,
               childSpawnInfo.childInput,
@@ -691,6 +761,16 @@ export const StateMachineRunnerLive = Layer.effect(
                 depth: childRunDepth,
               },
             );
+
+            // Publish child_completed event
+            yield* publishEvent({
+              type: 'child_completed',
+              instanceId: ls.instanceId,
+              data: {
+                childInstanceId: childResult.instanceId,
+                result: childResult,
+              },
+            });
 
             // Phase 3: Post-child action execution (WITH permit)
             yield* semaphore.withPermits(1)(
@@ -857,6 +937,34 @@ export const StateMachineRunnerLive = Layer.effect(
                     history: ls.history,
                     logs: ls.allLogs,
                     updatedAt: new Date().toISOString(),
+                  });
+
+                  // Publish state_changed event
+                  yield* publishEvent({
+                    type: 'state_changed',
+                    instanceId: ls.instanceId,
+                    data: {
+                      previousState: ls.currentState,
+                      currentState: nextState,
+                      stateData: nextStateData,
+                      timestamp: new Date().toISOString(),
+                    },
+                  });
+
+                  // Publish log_entry events (before transition_recorded)
+                  for (const entry of logEntries) {
+                    yield* publishEvent({
+                      type: 'log_entry',
+                      instanceId: ls.instanceId,
+                      data: entry,
+                    });
+                  }
+
+                  // Publish transition_recorded event
+                  yield* publishEvent({
+                    type: 'transition_recorded',
+                    instanceId: ls.instanceId,
+                    data: transitionRecord,
                   });
 
                   ls.currentState = nextState;
@@ -1094,6 +1202,20 @@ export const StateMachineRunnerLive = Layer.effect(
               // (already handled in the loop above via the firstError check)
             }
 
+            // Publish children_spawned event
+            yield* publishEvent({
+              type: 'children_spawned',
+              instanceId: ls.instanceId,
+              data: { childInstanceIds },
+            });
+
+            // Publish children_completed event
+            yield* publishEvent({
+              type: 'children_completed',
+              instanceId: ls.instanceId,
+              data: { results: childResults },
+            });
+
             // Phase 3: Post-children action execution (WITH permit)
             yield* semaphore.withPermits(1)(
               Effect.gen(function* () {
@@ -1187,6 +1309,34 @@ export const StateMachineRunnerLive = Layer.effect(
                   updatedAt: new Date().toISOString(),
                 });
 
+                // Publish state_changed event
+                yield* publishEvent({
+                  type: 'state_changed',
+                  instanceId: ls.instanceId,
+                  data: {
+                    previousState: ls.currentState,
+                    currentState: nextState,
+                    stateData: nextStateData,
+                    timestamp: new Date().toISOString(),
+                  },
+                });
+
+                // Publish log_entry events (before transition_recorded)
+                for (const entry of parallelLogEntries) {
+                  yield* publishEvent({
+                    type: 'log_entry',
+                    instanceId: ls.instanceId,
+                    data: entry,
+                  });
+                }
+
+                // Publish transition_recorded event
+                yield* publishEvent({
+                  type: 'transition_recorded',
+                  instanceId: ls.instanceId,
+                  data: parallelTransitionRecord,
+                });
+
                 ls.currentState = nextState;
                 ls.stateData = nextStateData;
               }),
@@ -1272,6 +1422,34 @@ export const StateMachineRunnerLive = Layer.effect(
                   history: ls.history,
                   logs: ls.allLogs,
                   updatedAt: new Date().toISOString(),
+                });
+
+                // Publish state_changed event
+                yield* publishEvent({
+                  type: 'state_changed',
+                  instanceId: ls.instanceId,
+                  data: {
+                    previousState: ls.currentState,
+                    currentState: nextState,
+                    stateData: nextStateData,
+                    timestamp: new Date().toISOString(),
+                  },
+                });
+
+                // Publish log_entry events (before transition_recorded)
+                for (const entry of logEntries) {
+                  yield* publishEvent({
+                    type: 'log_entry',
+                    instanceId: ls.instanceId,
+                    data: entry,
+                  });
+                }
+
+                // Publish transition_recorded event
+                yield* publishEvent({
+                  type: 'transition_recorded',
+                  instanceId: ls.instanceId,
+                  data: transitionRecord,
                 });
 
                 // Advance loop variables
@@ -1361,6 +1539,13 @@ export const StateMachineRunnerLive = Layer.effect(
             instanceId: ls.instanceId,
           };
         }
+
+        // Publish machine_completed event for all terminal states
+        yield* publishEvent({
+          type: 'machine_completed',
+          instanceId: ls.instanceId,
+          data: result,
+        });
 
         return result;
       });
@@ -1759,6 +1944,17 @@ export const StateMachineRunnerLive = Layer.effect(
           yield* store.updateInstance(instanceId, {
             status: 'running',
             updatedAt: new Date().toISOString(),
+          });
+
+          // Publish machine_resumed event
+          yield* publishEvent({
+            type: 'machine_resumed',
+            instanceId,
+            data: {
+              previousState: instance.currentState,
+              resumedState: instance.currentState,
+              timestamp: new Date().toISOString(),
+            },
           });
 
           // 6. Build LoopState from persisted instance
