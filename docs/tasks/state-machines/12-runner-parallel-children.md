@@ -127,12 +127,12 @@ The parent's `TransitionRecord` for the `parallel_children` state includes:
 
 ## Validation Checklist
 
-- [ ] `parallel_children` spawns all children concurrently
-- [ ] `all_or_interrupt` mode interrupts siblings on first failure
-- [ ] `all_settled` mode waits for all children regardless of failures
-- [ ] `ParallelChildrenResult` has correct `results` and `childInstanceIds` keying
-- [ ] Each child receives its own input from its `inputMapping`
-- [ ] Parent's `actionId` executes after all children complete
-- [ ] Interrupted children have `status: 'cancelled'`
-- [ ] `TransitionRecord` includes `childInstanceIds`
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
+- [x] `parallel_children` spawns all children concurrently
+- [x] `all_or_interrupt` mode interrupts siblings on first failure
+- [x] `all_settled` mode waits for all children regardless of failures
+- [x] `ParallelChildrenResult` has correct `results` and `childInstanceIds` keying
+- [x] Each child receives its own input from its `inputMapping`
+- [x] Parent's `actionId` executes after all children complete
+- [x] Interrupted children have `status: 'cancelled'`
+- [x] `TransitionRecord` includes `childInstanceIds`
+- [x] `pnpm --filter @aiflow/server run build` succeeds

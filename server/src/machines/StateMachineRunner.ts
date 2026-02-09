@@ -1,10 +1,11 @@
 /**
- * StateMachineRunner — Core linear execution loop (Task 09)
+ * StateMachineRunner — Core execution loop (Tasks 09–12)
  *
  * Implements the core `StateMachineRunner` Effect Service — the main execution
- * engine for state machines. This task covers the **linear execution path** only:
- * `action` type states running in sequence. Child machine spawning, cancellation,
- * suspension/resume, and PubSub are added in subsequent tasks.
+ * engine for state machines. Covers linear execution (action states), single
+ * child machine spawning (child_machine), and parallel children
+ * (parallel_children with all_or_interrupt and all_settled modes).
+ * Cancellation, suspension/resume, and PubSub are added in subsequent tasks.
  *
  * The runner implements the state loop, middleware integration, transition
  * validation, persistence checkpoints, and `MachineResult` resolution.
@@ -13,7 +14,7 @@
  */
 
 import AjvModule from 'ajv';
-import { Context, Duration, Effect, Layer } from 'effect';
+import { Context, Duration, Effect, Either, Exit, Fiber, Layer } from 'effect';
 import { JSONPath } from 'jsonpath-plus';
 
 import { ActionRegistry } from './ActionRegistry.js';
@@ -25,10 +26,12 @@ import { MachineStore } from './store/MachineStore.js';
 import type {
   ActionContext,
   ActionError,
+  ChildSpawnDefinition,
   MachineError,
   MachineInstance,
   MachineResult,
   NotFoundError,
+  ParallelChildrenResult,
   StateMachineDefinition,
   TransitionRecord,
   TransitionResult,
@@ -551,12 +554,314 @@ export const StateMachineRunnerLive = Layer.effect(
                 currentState = nextState;
                 stateData = nextStateData;
               } else if (stateDef.type === 'parallel_children') {
-                // ── PARALLEL CHILDREN (Task 12 — placeholder) ──
-                return yield* Effect.fail(
-                  mkDefinitionError({
-                    message: `State "${currentState}" has type "parallel_children" which is not yet implemented`,
-                  }),
+                // ── PARALLEL CHILDREN (Task 12) ──
+
+                // i. Validate children[] exists and is non-empty
+                const children: ChildSpawnDefinition[] = stateDef.children ?? [];
+                if (children.length === 0) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `State "${currentState}" of type "parallel_children" has no children`,
+                    }),
+                  );
+                }
+
+                // ii. Validate actionId exists
+                const actionId = stateDef.actionId;
+                if (!actionId) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `State "${currentState}" of type "parallel_children" has no actionId`,
+                    }),
+                  );
+                }
+
+                // iii. Evaluate each child's inputMapping and load definitions
+                const childSpecs: {
+                  key: string;
+                  definition: StateMachineDefinition;
+                  input: unknown;
+                }[] = [];
+
+                for (const child of children) {
+                  // Load child definition
+                  const childDef = yield* store.getDefinition(child.machineDefId).pipe(
+                    Effect.catchTag('NotFoundError', (err: NotFoundError) =>
+                      Effect.fail(
+                        mkNotFoundError({
+                          entityType: err.entityType,
+                          id: err.id,
+                        }),
+                      ),
+                    ),
+                  );
+
+                  // Evaluate inputMapping via JSONPath
+                  let childInput: unknown;
+                  try {
+                    const jsonPathResult: unknown[] = JSONPath({
+                      path: child.inputMapping,
+                      json: {
+                        stateData,
+                        machineInput: input,
+                        stateName: currentState,
+                      },
+                    });
+
+                    if (!Array.isArray(jsonPathResult) || jsonPathResult.length === 0) {
+                      return yield* Effect.fail(
+                        mkActionError({
+                          actionId: 'parallel_children',
+                          stateName: currentState,
+                          cause: `inputMapping "${child.inputMapping}" for child "${child.key}" returned no results`,
+                        }),
+                      );
+                    }
+
+                    childInput = jsonPathResult.length === 1 ? jsonPathResult[0] : jsonPathResult;
+                  } catch (jsonPathError) {
+                    return yield* Effect.fail(
+                      mkActionError({
+                        actionId: 'parallel_children',
+                        stateName: currentState,
+                        cause:
+                          jsonPathError instanceof Error
+                            ? `Invalid inputMapping for child "${child.key}": ${jsonPathError.message}`
+                            : `Invalid inputMapping for child "${child.key}": ${String(jsonPathError)}`,
+                      }),
+                    );
+                  }
+
+                  childSpecs.push({
+                    key: child.key,
+                    definition: childDef,
+                    input: childInput,
+                  });
+                }
+
+                // iv. Set parent status to 'waiting_for_child'
+                yield* store.updateInstance(instanceId, {
+                  status: 'waiting_for_child',
+                  updatedAt: new Date().toISOString(),
+                });
+
+                // v. Spawn children based on parallelMode
+                const parallelStartTime = Date.now();
+                const parallelMode = stateDef.parallelMode ?? 'all_or_interrupt';
+
+                const childResults: Record<string, MachineResult> = {};
+                const childInstanceIds: Record<string, string> = {};
+
+                if (parallelMode === 'all_settled') {
+                  // ── all_settled: run all children, collect all results ──
+                  const outcomes = yield* Effect.forEach(
+                    childSpecs,
+                    (spec) =>
+                      runner
+                        .run(spec.definition, spec.input, {
+                          parentInstanceId: instanceId,
+                          parentStateName: currentState,
+                          depth: (opts?.depth ?? 0) + 1,
+                        })
+                        .pipe(Effect.either),
+                    { concurrency: 'unbounded' },
+                  );
+
+                  for (let i = 0; i < childSpecs.length; i++) {
+                    const spec = childSpecs[i];
+                    const outcome = outcomes[i];
+
+                    if (Either.isRight(outcome)) {
+                      const result = outcome.right;
+                      childResults[spec.key] = result;
+                      childInstanceIds[spec.key] = result.instanceId;
+                    } else {
+                      // Child failed with a MachineError (validation/store error)
+                      // Create an error MachineResult for this child
+                      const machineError = outcome.left;
+                      const errorMessage =
+                        'message' in machineError
+                          ? (machineError as { message: string }).message
+                          : 'cause' in machineError
+                            ? String((machineError as { cause: unknown }).cause)
+                            : `Child "${spec.key}" failed`;
+                      childResults[spec.key] = {
+                        status: 'error',
+                        error: errorMessage,
+                        instanceId: 'unknown',
+                      };
+                      childInstanceIds[spec.key] = 'unknown';
+                    }
+                  }
+                } else {
+                  // ── all_or_interrupt (default): first failure interrupts siblings ──
+                  // Spawn each child as a fiber
+                  const fibers: {
+                    key: string;
+                    fiber: Fiber.RuntimeFiber<MachineResult, MachineError>;
+                  }[] = [];
+
+                  for (const spec of childSpecs) {
+                    const fiber = yield* Effect.fork(
+                      runner.run(spec.definition, spec.input, {
+                        parentInstanceId: instanceId,
+                        parentStateName: currentState,
+                        depth: (opts?.depth ?? 0) + 1,
+                      }),
+                    );
+                    fibers.push({ key: spec.key, fiber: fiber });
+                  }
+
+                  // Wait for all fibers, interrupting on first failure
+                  let firstError: MachineError | null = null;
+                  const completedKeys = new Set<string>();
+
+                  // Join each fiber; if one fails, interrupt the rest
+                  for (const { key, fiber } of fibers) {
+                    if (firstError) {
+                      // A previous child failed — interrupt remaining fibers
+                      yield* Fiber.interrupt(fiber);
+                      childResults[key] = {
+                        status: 'cancelled',
+                        instanceId: 'interrupted',
+                      };
+                      childInstanceIds[key] = 'interrupted';
+                      continue;
+                    }
+
+                    const exit = yield* Fiber.await(fiber);
+
+                    if (Exit.isSuccess(exit)) {
+                      const result = exit.value;
+                      childResults[key] = result;
+                      childInstanceIds[key] = result.instanceId;
+                      completedKeys.add(key);
+
+                      // Check if the child itself errored (returned error MachineResult)
+                      if (result.status === 'error') {
+                        firstError = mkActionError({
+                          actionId: 'parallel_children',
+                          stateName: currentState,
+                          cause: `Child "${key}" errored: ${result.error}`,
+                        });
+                      }
+                    } else {
+                      // Child Effect failed (validation/store error)
+                      const cause = Exit.causeOption(exit);
+                      const errorMessage =
+                        cause._tag === 'Some' ? String(cause.value) : `Child "${key}" failed`;
+
+                      childResults[key] = {
+                        status: 'error',
+                        error: errorMessage,
+                        instanceId: 'unknown',
+                      };
+                      childInstanceIds[key] = 'unknown';
+
+                      firstError = mkActionError({
+                        actionId: 'parallel_children',
+                        stateName: currentState,
+                        cause: `Child "${key}" failed: ${errorMessage}`,
+                      });
+                    }
+                  }
+
+                  // If there was an error and remaining fibers, interrupt them
+                  // (already handled in the loop above via the firstError check)
+                }
+
+                // vi. Build ParallelChildrenResult
+                const parallelResult: ParallelChildrenResult = {
+                  results: childResults,
+                  childInstanceIds,
+                };
+
+                // vii. Update parent: set childInstanceIds and restore status
+                yield* store.updateInstance(instanceId, {
+                  status: 'running',
+                  childInstanceIds,
+                  updatedAt: new Date().toISOString(),
+                });
+
+                // viii. Set stateData to the parallel result for the parent action
+                stateData = parallelResult;
+
+                // ix. Rebuild ActionContext with updated stateData
+                const parallelActionCtx: ActionContext = {
+                  ...actionCtx,
+                  stateData,
+                };
+
+                const { transitionResult, durationMs } = yield* executeAction(
+                  actionId,
+                  parallelActionCtx,
+                  stateDef,
+                  { ...middlewareCtx, stateData },
+                  loggerFactory,
                 );
+
+                // If an error occurred during action execution, break out
+                if (errorResult) return;
+
+                // x. Validate nextState is a legal transition
+                if (
+                  !isLegalTransition(
+                    currentState,
+                    transitionResult.nextState,
+                    definition.transitions,
+                  )
+                ) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
+                      details: [
+                        `Action "${actionId}" returned nextState "${transitionResult.nextState}" which is not in the definition's transitions`,
+                      ],
+                    }),
+                  );
+                }
+
+                // xi. Run middleware afterTransition
+                yield* middlewareExec.runAfter({
+                  ...middlewareCtx,
+                  stateData,
+                  result: transitionResult,
+                });
+
+                // xii. Record TransitionRecord with parallel children info
+                const totalParallelDurationMs = Date.now() - parallelStartTime;
+                const parallelTransitionRecord: TransitionRecord = {
+                  id: crypto.randomUUID(),
+                  fromState: currentState,
+                  toState: transitionResult.nextState,
+                  data: transitionResult.data,
+                  timestamp: new Date().toISOString(),
+                  durationMs: totalParallelDurationMs > 0 ? totalParallelDurationMs : durationMs,
+                  actionId,
+                  childInstanceIds,
+                };
+
+                history = [...history, parallelTransitionRecord];
+
+                // xiii. Collect log entries
+                const parallelLogEntries = [...loggerFactory.getEntries()];
+                allLogs = [...allLogs, ...parallelLogEntries];
+
+                // xiv. Checkpoint: Persist and advance state
+                const nextState = transitionResult.nextState;
+                const nextStateData = transitionResult.data ?? stateData;
+
+                yield* store.updateInstance(instanceId, {
+                  currentState: nextState,
+                  stateData: nextStateData,
+                  childInstanceIds: undefined,
+                  history,
+                  logs: allLogs,
+                  updatedAt: new Date().toISOString(),
+                });
+
+                currentState = nextState;
+                stateData = nextStateData;
               } else {
                 // ── ACTION EXECUTION (existing logic) ──
 

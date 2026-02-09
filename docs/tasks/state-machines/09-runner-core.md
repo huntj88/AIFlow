@@ -241,13 +241,13 @@ Each action receives:
 
 ## Validation Checklist
 
-- [ ] `server/src/machines/StateMachineRunner.ts` exists and compiles
-- [ ] `run()` method creates instance, validates definition and input, executes state loop
-- [ ] State loop follows the spec: middleware → action → validate transition → record → checkpoint
-- [ ] Terminal state resolution produces correct `MachineResult`
-- [ ] Transition validation rejects illegal `nextState` values
-- [ ] Action failures transition to error terminal state
-- [ ] All 4 persistence checkpoints are implemented
-- [ ] `ActionContext` is wired with all required fields
-- [ ] Runner is an Effect Service with Layer dependencies
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
+- [x] `server/src/machines/StateMachineRunner.ts` exists and compiles
+- [x] `run()` method creates instance, validates definition and input, executes state loop
+- [x] State loop follows the spec: middleware → action → validate transition → record → checkpoint
+- [x] Terminal state resolution produces correct `MachineResult`
+- [x] Transition validation rejects illegal `nextState` values
+- [x] Action failures transition to error terminal state
+- [x] All 4 persistence checkpoints are implemented
+- [x] `ActionContext` is wired with all required fields
+- [x] Runner is an Effect Service with Layer dependencies
+- [x] `pnpm --filter @aiflow/server run build` succeeds
