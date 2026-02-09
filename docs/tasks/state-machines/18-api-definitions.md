@@ -191,12 +191,12 @@ When validation fails (Rule violations), return:
 
 ## Validation Checklist
 
-- [ ] `server/src/routes/machines/definitions.ts` exists with all 5 routes
-- [ ] POST returns 201 with auto-generated `id`
-- [ ] POST/PUT run definition validation in `'save'` mode
-- [ ] GET returns 404 for non-existent IDs
-- [ ] PUT increments `version` and refreshes `updatedAt`
-- [ ] DELETE returns 204 on success, 404 for non-existent
-- [ ] Validation errors return 400 with `message` and `details[]`
-- [ ] Error mapping uses `Effect.catchTag` for each error type
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
+- [x] `server/src/routes/machines/definitions.ts` exists with all 5 routes
+- [x] POST returns 201 with auto-generated `id`
+- [x] POST/PUT run definition validation in `'save'` mode
+- [x] GET returns 404 for non-existent IDs
+- [x] PUT increments `version` and refreshes `updatedAt`
+- [x] DELETE returns 204 on success, 404 for non-existent
+- [x] Validation errors return 400 with `message` and `details[]`
+- [x] Error mapping uses `Effect.catchTag` for each error type
+- [x] `pnpm --filter @aiflow/server run build` succeeds
