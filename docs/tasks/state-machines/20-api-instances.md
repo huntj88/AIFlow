@@ -260,14 +260,14 @@ Special cases:
 
 ## Validation Checklist
 
-- [ ] `server/src/routes/machines/instances.ts` exists with all routes
-- [ ] POST `/instances` validates request, forks execution, returns 201
-- [ ] GET `/instances` supports all filter query params
-- [ ] GET `/instances/:id` returns full instance or 404
-- [ ] GET history and logs work with correct filtering
-- [ ] POST cancel: success for running; 409 for terminal
-- [ ] POST resume: success for suspended; 409 for others; 404 for deleted def
-- [ ] GET artifacts: flat list and `?tree=true` recursive tree
-- [ ] GET artifacts/:name: downloads file content or 404
-- [ ] All error mappings correct
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
+- [x] `server/src/routes/machines/instances.ts` exists with all routes
+- [x] POST `/instances` validates request, forks execution, returns 201
+- [x] GET `/instances` supports all filter query params
+- [x] GET `/instances/:id` returns full instance or 404
+- [x] GET history and logs work with correct filtering
+- [x] POST cancel: success for running; 409 for terminal
+- [x] POST resume: success for suspended; 409 for others; 404 for deleted def
+- [x] GET artifacts: flat list and `?tree=true` recursive tree
+- [x] GET artifacts/:name: downloads file content or 404
+- [x] All error mappings correct
+- [x] `pnpm --filter @aiflow/server run build` succeeds

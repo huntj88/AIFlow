@@ -7,21 +7,22 @@ flow for plan reviewer to make sure it fits in the context of the rest of the ap
 
 separate flow to mark checklist items.
 
-- "Mark the completed items in the task checklist. Review each to make sure it can be marked as complete first. Commit the changes and handle any precommit hooks" or maybe review after impl agent commits?
+- "Mark the completed items in the task checklist. Review each to make sure it can be marked as complete first. Commit the changes and handle any precommit hooks"
 
 flow after planning to create questions to ask user for further plan refinement
 
-"Create a list of _behaviors_ to e2e later. Put in a markdown document <feature.behaviors>.md. put in feature-specs folder"
+"Create a list of _behaviors_ for <feature> to e2e later. Put in a markdown document <feature.behaviors>.md. put in feature-specs folder"
 
-"Create an implementation plan for state machine feature. This is a complex feature so break down the plan into many tasks under the state-machines task folder. Ensure task don't have circular dependencies. Ensure every aspect of the feature spec and behavior spec is taken into account. ultrathink."
+"Create an implementation plan for <feature>. This is a complex feature so break down the plan into many tasks under the <feature> task folder. Ensure task don't have circular dependencies. Ensure every aspect of the feature spec and behavior spec is taken into account. ultrathink."
 
-"validate was fully implemented and check off validation items"
+---
 
-"Review the <feature> tasks that have been done starting from task <number>. Were there any decisions or implementation details that would affect later tasks? Update later tasks with relevant details that emerged from tasks done so far. Think really hard on this."
+"Review the <feature> tasks that have been done starting from task <number>. Were there any decisions or implementation details that would affect unfinished tasks? Update unfinished tasks with relevant details that emerged from tasks done so far. Think really hard on this."
+
+## "create schedule to run <codeReview prompt> and <decisions/implementationDetails prompt> after a dependency group is done"
 
 ---
 
 "review the code for <feature spec>"
 
-"Create a plan at task x.1 to fix the issues, but make sure they are consistent with future task requirments"
-"
+## "Create a plan at task x.1 to fix the issues, but make sure they are consistent with future task requirments"
