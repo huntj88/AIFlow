@@ -170,10 +170,10 @@ The stores enable all client-side behaviors in §17 and §18. Specific behaviors
 
 ## Validation Checklist
 
-- [ ] `useMachineDefinitions` store with full CRUD operations
-- [ ] `useMachineInstances` store with start, cancel, resume, and WebSocket integration
-- [ ] `useMachineLogs` store with filtering and live updates
-- [ ] `useMachineArtifacts` store with tree and download support
-- [ ] All stores handle loading/error states
-- [ ] WebSocket events correctly update store state
-- [ ] `pnpm --filter @aiflow/client run build` succeeds
+- [x] `useMachineDefinitions` store with full CRUD operations
+- [x] `useMachineInstances` store with start, cancel, resume, and WebSocket integration
+- [x] `useMachineLogs` store with filtering and live updates
+- [x] `useMachineArtifacts` store with tree and download support
+- [x] All stores handle loading/error states
+- [x] WebSocket events correctly update store state
+- [x] `pnpm --filter @aiflow/client run build` succeeds
