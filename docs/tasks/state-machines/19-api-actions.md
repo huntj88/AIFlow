@@ -122,8 +122,8 @@ const id = params.id;
 
 ## Validation Checklist
 
-- [ ] `server/src/routes/machines/actions.ts` exists with both routes
-- [ ] GET list returns all 5 built-in actions
-- [ ] GET by ID returns correct metadata
-- [ ] Non-existent action → 404
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
+- [x] `server/src/routes/machines/actions.ts` exists with both routes
+- [x] GET list returns all 5 built-in actions
+- [x] GET by ID returns correct metadata
+- [x] Non-existent action → 404
+- [x] `pnpm --filter @aiflow/server run build` succeeds
