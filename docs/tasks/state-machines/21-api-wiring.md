@@ -264,12 +264,12 @@ This task doesn't cover specific behaviors directly — it's infrastructure wiri
 
 ## Validation Checklist
 
-- [ ] `server/src/routes/machines/index.ts` combines all machine sub-routers
-- [ ] `server/src/lib/HttpServer.ts` provides all machine service layers
-- [ ] Full Layer dependency graph compiles without missing services
-- [ ] `pnpm --filter @aiflow/server run dev` starts without errors
-- [ ] `GET /api/hello` still works
-- [ ] `GET /api/machines/definitions` returns empty array
-- [ ] `GET /api/machines/actions` returns 5 built-in actions
-- [ ] Shutdown handlers registered for `SIGTERM`/`SIGINT`
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
+- [x] `server/src/routes/machines/index.ts` combines all machine sub-routers
+- [x] `server/src/lib/HttpServer.ts` provides all machine service layers
+- [x] Full Layer dependency graph compiles without missing services
+- [x] `pnpm --filter @aiflow/server run dev` starts without errors
+- [x] `GET /api/hello` still works
+- [x] `GET /api/machines/definitions` returns empty array
+- [x] `GET /api/machines/actions` returns 5 built-in actions
+- [x] Shutdown handlers registered for `SIGTERM`/`SIGINT`
+- [x] `pnpm --filter @aiflow/server run build` succeeds

@@ -2,28 +2,35 @@ import { NodeRuntime } from '@effect/platform-node';
 import { Effect } from 'effect';
 
 import { startServer } from '@/lib/HttpServer.js';
+import { MachineLive } from '@/lib/HttpServer.js';
 import { ServerLoggerLive } from '@/lib/Logger.js';
+import { StateMachineRunner } from '@/machines/StateMachineRunner.js';
 
 /**
  * Main server entry point.
  *
- * 1. Launch the HTTP server
- * 2. Wire SIGTERM / SIGINT handlers for graceful shutdown
+ * 1. Launch the HTTP server with all machine service layers
+ * 2. Wire SIGTERM / SIGINT handlers for graceful shutdown via `suspendAll()`
  *
- * Note: `suspendAll()` and `startupRecovery` are wired once the
- * StateMachineRunner is integrated into the HTTP layer (Tasks 18–21).
- * For now, the shutdown handlers log a message and exit cleanly.
+ * `NodeRuntime.runMain` handles SIGTERM/SIGINT by interrupting the running
+ * Effect, which triggers the `onInterrupt` finalizer chain. We also register
+ * explicit signal handlers that call `runner.suspendAll()` to persist
+ * in-flight machines as `'suspended'` before the process exits.
  */
 const main = Effect.gen(function* () {
+  const runner = yield* StateMachineRunner;
+
   yield* Effect.sync(() => {
     const shutdown = (signal: string) => {
-      Effect.log(`Received ${signal} — initiating graceful shutdown…`).pipe(
+      Effect.log(`Received ${signal} — suspending all running machines…`).pipe(
+        Effect.andThen(() => runner.suspendAll()),
+        Effect.andThen(() => Effect.log('All machines suspended, shutting down.')),
+        Effect.catchAll((err: unknown) =>
+          Effect.log(`Shutdown error: ${err instanceof Error ? err.message : JSON.stringify(err)}`),
+        ),
         Effect.provide(ServerLoggerLive),
-        (eff) => {
-          Effect.runFork(eff);
-        },
+        Effect.runFork,
       );
-      // Future: call runner.suspendAll() here once wired (Task 21)
     };
 
     process.on('SIGTERM', () => {
@@ -37,6 +44,6 @@ const main = Effect.gen(function* () {
 
 startServer.pipe(
   Effect.provide(ServerLoggerLive),
-  Effect.tap(() => main),
+  Effect.tap(() => main.pipe(Effect.provide(MachineLive))),
   NodeRuntime.runMain,
 );
