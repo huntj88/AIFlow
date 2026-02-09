@@ -47,6 +47,7 @@ import type {
   ActionError,
   ChildSpawnDefinition,
   DefinitionError,
+  LogEntry,
   MachineError,
   MachineInstance,
   MachineResult,
@@ -160,6 +161,29 @@ const isLegalTransition = (
 // Layer (Live implementation)
 // ────────────────────────────────────────────────────────────────────────────
 
+// ────────────────────────────────────────────────────────────────────────────
+// Shared mutable context for the state loop (Task 17.1 refactor)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Mutable context threaded through the shared state loop. */
+interface LoopState {
+  readonly instanceId: string;
+  readonly definition: StateMachineDefinition;
+  readonly machineInput: unknown;
+  readonly parentContext?: { parentInstanceId: string; parentStateName: string };
+  readonly parentInstanceId?: string;
+  readonly depth: number;
+  currentState: string;
+  stateData: unknown;
+  history: TransitionRecord[];
+  allLogs: LogEntry[];
+  errorResult: MachineResult | null;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Layer (Live implementation)
+// ────────────────────────────────────────────────────────────────────────────
+
 export const StateMachineRunnerLive = Layer.effect(
   StateMachineRunner,
   Effect.gen(function* () {
@@ -192,7 +216,1248 @@ export const StateMachineRunnerLive = Layer.effect(
     const SHUTDOWN_TIMEOUT_MS = parseInt(process.env['SHUTDOWN_TIMEOUT_MS'] ?? '10000', 10);
     /* eslint-enable @typescript-eslint/dot-notation */
 
+    // ──────────────────────────────────────────────────────────────────
+    // Shared helper: persistError (Task 17.1 — step 1)
+    // ──────────────────────────────────────────────────────────────────
+
+    /** Build a `persistError` closure bound to the loop's mutable state. */
+    const makePersistError =
+      (ls: LoopState) => (errorMessage: string, actionId: string | undefined, durationMs: number) =>
+        Effect.gen(function* () {
+          const errorTransitionRecord: TransitionRecord = {
+            id: crypto.randomUUID(),
+            fromState: ls.currentState,
+            toState: 'error',
+            timestamp: new Date().toISOString(),
+            durationMs,
+            actionId,
+          };
+
+          ls.history = [...ls.history, errorTransitionRecord];
+
+          yield* store.updateInstance(ls.instanceId, {
+            status: 'error',
+            currentState: 'error',
+            stateData: ls.stateData,
+            error: errorMessage,
+            history: ls.history,
+            logs: ls.allLogs,
+            updatedAt: new Date().toISOString(),
+          });
+
+          ls.errorResult = {
+            status: 'error',
+            error: errorMessage,
+            instanceId: ls.instanceId,
+          };
+        });
+
+    // ──────────────────────────────────────────────────────────────────
+    // Shared helper: executeAction (Task 17.1 — step 2)
+    // ──────────────────────────────────────────────────────────────────
+
+    const makeExecuteAction =
+      (ls: LoopState, persistError: ReturnType<typeof makePersistError>) =>
+      (
+        actionId: string,
+        actionCtx: ActionContext,
+        stateDef: { readonly timeoutMs?: number },
+        middlewareCtx: {
+          instance: MachineInstance;
+          stateName: string;
+          stateData: unknown;
+          definition: StateMachineDefinition;
+        },
+        loggerFactory: ReturnType<typeof createStateLoggerFactory>,
+      ) =>
+        Effect.gen(function* () {
+          const { fn: actionFn } = yield* registry.get(actionId);
+
+          const startTime = Date.now();
+
+          // Apply per-state timeout if configured
+          const rawAction = actionFn(actionCtx);
+          const timedAction = stateDef.timeoutMs
+            ? rawAction.pipe(
+                Effect.timeoutFail({
+                  duration: Duration.millis(stateDef.timeoutMs),
+                  onTimeout: () =>
+                    mkActionError({
+                      actionId,
+                      stateName: ls.currentState,
+                      cause: 'timeout',
+                    }),
+                }),
+              )
+            : rawAction;
+
+          const transitionResult = yield* timedAction.pipe(
+            Effect.catchAll((actionError: ActionError) =>
+              Effect.gen(function* () {
+                // Build the MachineError
+                const machineError: MachineError = mkActionError({
+                  actionId,
+                  stateName: ls.currentState,
+                  cause: actionError.cause ?? actionError,
+                });
+
+                // Run middleware onError (never fails)
+                yield* middlewareExec.runOnError({
+                  ...middlewareCtx,
+                  error: machineError,
+                });
+
+                // Collect logs from the failed action
+                const errorLogs = [...loggerFactory.getEntries()];
+                ls.allLogs = [...ls.allLogs, ...errorLogs];
+
+                // Build descriptive error message
+                const isTimeout = actionError.cause === 'timeout';
+                const errorMessage = isTimeout
+                  ? `Action '${actionId}' in state '${ls.currentState}' timed out after ${String(stateDef.timeoutMs ?? 0)}ms`
+                  : actionError.cause instanceof Error
+                    ? actionError.cause.message
+                    : typeof actionError.cause === 'string'
+                      ? actionError.cause
+                      : `Action "${actionId}" failed in state "${ls.currentState}"`;
+
+                const durationMs = Date.now() - startTime;
+
+                // Persist error terminal state + set errorResult
+                yield* persistError(errorMessage, actionId, durationMs);
+
+                // Return a dummy TransitionResult (not used — errorResult is checked)
+                return { nextState: 'error' } as TransitionResult;
+              }),
+            ),
+          );
+
+          const durationMs = Date.now() - startTime;
+          return { transitionResult, durationMs };
+        });
+
+    // ──────────────────────────────────────────────────────────────────
+    // Shared helper: runPreamble (Task 17.1 — step 3)
+    // ──────────────────────────────────────────────────────────────────
+
+    const makeRunPreamble = (ls: LoopState) => () =>
+      Effect.gen(function* () {
+        // a. Checkpoint 2: Persist BEFORE action runs
+        yield* store.updateInstance(ls.instanceId, {
+          currentState: ls.currentState,
+          stateData: ls.stateData,
+          history: ls.history,
+          updatedAt: new Date().toISOString(),
+        });
+
+        // b. Create scoped StateLogger and ArtifactStore
+        const loggerFactory = createStateLoggerFactory();
+        const logger = loggerFactory.create(ls.instanceId, ls.currentState);
+        const artifacts = artifactFactory.makeScoped(
+          ls.instanceId,
+          ls.currentState,
+          ls.parentInstanceId,
+        );
+
+        // c. Build ActionContext
+        const actionCtx: ActionContext = {
+          machineInstanceId: ls.instanceId,
+          machineDefId: ls.definition.id,
+          stateName: ls.currentState,
+          stateData: ls.stateData,
+          machineInput: ls.machineInput,
+          parentContext: ls.parentContext,
+          logger,
+          artifacts,
+        };
+
+        // d. Run middleware beforeTransition
+        const latestInstance = yield* store.getInstance(ls.instanceId);
+        const middlewareCtx = {
+          instance: latestInstance,
+          stateName: ls.currentState,
+          stateData: ls.stateData,
+          definition: ls.definition,
+        };
+
+        yield* middlewareExec.runBefore(middlewareCtx);
+
+        return { loggerFactory, actionCtx, middlewareCtx };
+      });
+
+    // ──────────────────────────────────────────────────────────────────
+    // Shared helper: post-child action (shared by child_machine branches)
+    // ──────────────────────────────────────────────────────────────────
+
+    const executePostChildAction = (
+      ls: LoopState,
+      executeAction: ReturnType<typeof makeExecuteAction>,
+      preamble: {
+        loggerFactory: ReturnType<typeof createStateLoggerFactory>;
+        actionCtx: ActionContext;
+        middlewareCtx: {
+          instance: MachineInstance;
+          stateName: string;
+          stateData: unknown;
+          definition: StateMachineDefinition;
+        };
+      },
+      childResult: MachineResult,
+      stateDef: {
+        readonly actionId?: string;
+        readonly childMachineDefId?: string;
+        readonly timeoutMs?: number;
+      },
+      startTime: number | null,
+    ) =>
+      Effect.gen(function* () {
+        yield* store.updateInstance(ls.instanceId, {
+          status: 'running',
+          childInstanceId: childResult.instanceId,
+          updatedAt: new Date().toISOString(),
+        });
+
+        ls.stateData = childResult;
+
+        const actionId = stateDef.actionId;
+        if (!actionId) {
+          return yield* Effect.fail(
+            mkDefinitionError({
+              message: `State "${ls.currentState}" of type "child_machine" has no actionId`,
+            }),
+          );
+        }
+
+        const childActionCtx: ActionContext = {
+          ...preamble.actionCtx,
+          stateData: ls.stateData,
+        };
+
+        const { transitionResult, durationMs } = yield* executeAction(
+          actionId,
+          childActionCtx,
+          stateDef,
+          { ...preamble.middlewareCtx, stateData: ls.stateData },
+          preamble.loggerFactory,
+        );
+
+        if (ls.errorResult) return;
+
+        if (
+          !isLegalTransition(ls.currentState, transitionResult.nextState, ls.definition.transitions)
+        ) {
+          return yield* Effect.fail(
+            mkDefinitionError({
+              message: `Illegal transition from "${ls.currentState}" to "${transitionResult.nextState}"`,
+              details: [
+                `Action "${actionId}" returned nextState "${transitionResult.nextState}" which is not in the definition's transitions`,
+              ],
+            }),
+          );
+        }
+
+        yield* middlewareExec.runAfter({
+          ...preamble.middlewareCtx,
+          stateData: ls.stateData,
+          result: transitionResult,
+        });
+
+        const totalDurationMs = startTime !== null ? Date.now() - startTime : 0;
+        const transitionRecord: TransitionRecord = {
+          id: crypto.randomUUID(),
+          fromState: ls.currentState,
+          toState: transitionResult.nextState,
+          data: transitionResult.data,
+          timestamp: new Date().toISOString(),
+          durationMs: startTime !== null && totalDurationMs > 0 ? totalDurationMs : durationMs,
+          actionId,
+          childInstanceId: childResult.instanceId,
+          childDefinitionId: stateDef.childMachineDefId,
+        };
+
+        ls.history = [...ls.history, transitionRecord];
+
+        const logEntries = [...preamble.loggerFactory.getEntries()];
+        ls.allLogs = [...ls.allLogs, ...logEntries];
+
+        const nextState = transitionResult.nextState;
+        const nextStateData = transitionResult.data ?? ls.stateData;
+
+        yield* store.updateInstance(ls.instanceId, {
+          currentState: nextState,
+          stateData: nextStateData,
+          childInstanceId: undefined,
+          history: ls.history,
+          logs: ls.allLogs,
+          updatedAt: new Date().toISOString(),
+        });
+
+        ls.currentState = nextState;
+        ls.stateData = nextStateData;
+      });
+
+    // ──────────────────────────────────────────────────────────────────
+    // Shared helper: executeStateLoop (Task 17.1 — step 4)
+    // ──────────────────────────────────────────────────────────────────
+
+    /**
+     * The shared state loop used by both `run()` and `resume()`.
+     *
+     * For resume, `resumeContext` provides already-completed child info
+     * so the loop can skip re-spawning children that finished before suspension.
+     */
+    const executeStateLoop = (
+      ls: LoopState,
+      executeAction: ReturnType<typeof makeExecuteAction>,
+      runPreamble: ReturnType<typeof makeRunPreamble>,
+      opts?: { timeoutMs?: number; depth?: number },
+      resumeContext?: {
+        instance: MachineInstance;
+      },
+    ) =>
+      Effect.gen(function* () {
+        while (ls.definition.states[ls.currentState].type !== 'terminal') {
+          const stateDef = ls.definition.states[ls.currentState];
+
+          // ────────────────────────────────────────────────────────
+          // Type-based branching (semaphore: permit per active step)
+          // ────────────────────────────────────────────────────────
+
+          if (stateDef.type === 'child_machine') {
+            // ── CHILD MACHINE SPAWNING ──
+
+            // On resume: check if child already completed
+            if (resumeContext) {
+              const existingChildId = resumeContext.instance.childInstanceId;
+              let childResult: MachineResult | null = null;
+
+              if (existingChildId) {
+                const childInstance = yield* store
+                  .getInstance(existingChildId)
+                  .pipe(
+                    Effect.catchTag('NotFoundError', () =>
+                      Effect.succeed(null as MachineInstance | null),
+                    ),
+                  );
+
+                if (
+                  childInstance &&
+                  (childInstance.status === 'completed' ||
+                    childInstance.status === 'error' ||
+                    childInstance.status === 'cancelled')
+                ) {
+                  childResult =
+                    childInstance.status === 'completed'
+                      ? {
+                          status: 'completed',
+                          output: childInstance.output,
+                          instanceId: childInstance.id,
+                        }
+                      : childInstance.status === 'error'
+                        ? {
+                            status: 'error',
+                            error: childInstance.error ?? 'Child errored',
+                            instanceId: childInstance.id,
+                          }
+                        : {
+                            status: 'cancelled',
+                            instanceId: childInstance.id,
+                          };
+                }
+              }
+
+              if (childResult) {
+                // Child already done — proceed to post-child action
+                const resolvedChild = childResult;
+                yield* semaphore.withPermits(1)(
+                  Effect.gen(function* () {
+                    const preamble = yield* runPreamble();
+                    yield* executePostChildAction(
+                      ls,
+                      executeAction,
+                      preamble,
+                      resolvedChild,
+                      stateDef,
+                      null,
+                    );
+                  }),
+                );
+
+                if (ls.errorResult) return;
+                // After processing the resumed child, clear resumeContext
+                // so subsequent iterations use the fresh-run path
+                resumeContext = undefined;
+                continue;
+              }
+            }
+
+            // Phase 1: Preamble + pre-spawn validation (WITH permit)
+            const childSpawnInfo = yield* semaphore.withPermits(1)(
+              Effect.gen(function* () {
+                const preamble = yield* runPreamble();
+
+                // i. Validate childMachineDefId exists
+                const childDefId = stateDef.childMachineDefId;
+                if (!childDefId) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `State "${ls.currentState}" of type "child_machine" has no childMachineDefId`,
+                    }),
+                  );
+                }
+
+                // ii. Load child definition from store
+                const childDefinition = yield* store.getDefinition(childDefId).pipe(
+                  Effect.catchTag('NotFoundError', (err: NotFoundError) =>
+                    Effect.fail(
+                      mkNotFoundError({
+                        entityType: err.entityType,
+                        id: err.id,
+                      }),
+                    ),
+                  ),
+                );
+
+                // iii. Evaluate childInputMapping via JSONPath
+                const mappingExpr = stateDef.childInputMapping;
+                if (!mappingExpr) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `State "${ls.currentState}" of type "child_machine" has no childInputMapping`,
+                    }),
+                  );
+                }
+
+                let childInput: unknown;
+                try {
+                  const jsonPathResult: unknown[] = JSONPath({
+                    path: mappingExpr,
+                    json: {
+                      stateData: ls.stateData,
+                      machineInput: ls.machineInput,
+                      stateName: ls.currentState,
+                    },
+                  });
+
+                  if (!Array.isArray(jsonPathResult) || jsonPathResult.length === 0) {
+                    return yield* Effect.fail(
+                      mkActionError({
+                        actionId: 'child_machine',
+                        stateName: ls.currentState,
+                        cause: `childInputMapping "${mappingExpr}" returned no results`,
+                      }),
+                    );
+                  }
+
+                  // JSONPath always returns an array; unwrap single result
+                  childInput = jsonPathResult.length === 1 ? jsonPathResult[0] : jsonPathResult;
+                } catch (jsonPathError) {
+                  return yield* Effect.fail(
+                    mkActionError({
+                      actionId: 'child_machine',
+                      stateName: ls.currentState,
+                      cause:
+                        jsonPathError instanceof Error
+                          ? `Invalid childInputMapping: ${jsonPathError.message}`
+                          : `Invalid childInputMapping: ${String(jsonPathError)}`,
+                    }),
+                  );
+                }
+
+                // iv. Set parent status to 'waiting_for_child'
+                yield* store.updateInstance(ls.instanceId, {
+                  status: 'waiting_for_child',
+                  updatedAt: new Date().toISOString(),
+                });
+
+                return {
+                  childDefId,
+                  childDefinition,
+                  childInput,
+                  ...preamble,
+                };
+              }),
+            );
+
+            // Phase 2: Spawn child machine (NO permit — release-before-wait)
+            const childStartTime = Date.now();
+            const childRunDepth = resumeContext ? 1 : (opts?.depth ?? 0) + 1;
+            const childResult: MachineResult = yield* runner.run(
+              childSpawnInfo.childDefinition,
+              childSpawnInfo.childInput,
+              {
+                parentInstanceId: ls.instanceId,
+                parentStateName: ls.currentState,
+                depth: childRunDepth,
+              },
+            );
+
+            // Phase 3: Post-child action execution (WITH permit)
+            yield* semaphore.withPermits(1)(
+              Effect.gen(function* () {
+                yield* executePostChildAction(
+                  ls,
+                  executeAction,
+                  childSpawnInfo,
+                  childResult,
+                  stateDef,
+                  childStartTime,
+                );
+              }),
+            );
+
+            if (ls.errorResult) return;
+            // After first iteration on resume, clear resumeContext
+            if (resumeContext) resumeContext = undefined;
+          } else if (stateDef.type === 'parallel_children') {
+            // ── PARALLEL CHILDREN ──
+
+            // On resume: check if all children have already reached terminal state
+            if (resumeContext) {
+              const existingChildIds = resumeContext.instance.childInstanceIds;
+              const rChildResults: Record<string, MachineResult> = {};
+              const rChildInstanceIds: Record<string, string> = {};
+              let allChildrenDone = true;
+
+              if (existingChildIds) {
+                for (const [key, childId] of Object.entries(existingChildIds)) {
+                  const childInstance = yield* store
+                    .getInstance(childId)
+                    .pipe(
+                      Effect.catchTag('NotFoundError', () =>
+                        Effect.succeed(null as MachineInstance | null),
+                      ),
+                    );
+
+                  if (
+                    childInstance &&
+                    (childInstance.status === 'completed' ||
+                      childInstance.status === 'error' ||
+                      childInstance.status === 'cancelled')
+                  ) {
+                    rChildResults[key] =
+                      childInstance.status === 'completed'
+                        ? {
+                            status: 'completed',
+                            output: childInstance.output,
+                            instanceId: childInstance.id,
+                          }
+                        : childInstance.status === 'error'
+                          ? {
+                              status: 'error',
+                              error: childInstance.error ?? 'Child errored',
+                              instanceId: childInstance.id,
+                            }
+                          : {
+                              status: 'cancelled',
+                              instanceId: childInstance.id,
+                            };
+                    rChildInstanceIds[key] = childInstance.id;
+                  } else {
+                    allChildrenDone = false;
+                  }
+                }
+              } else {
+                allChildrenDone = false;
+              }
+
+              if (!allChildrenDone) {
+                return yield* Effect.fail(
+                  mkDefinitionError({
+                    message: `Cannot resume parallel_children state "${ls.currentState}" — not all children have reached terminal state`,
+                  }),
+                );
+              }
+
+              // All children done — proceed to post-children action
+              yield* semaphore.withPermits(1)(
+                Effect.gen(function* () {
+                  const preamble = yield* runPreamble();
+
+                  const parallelResult: ParallelChildrenResult = {
+                    results: rChildResults,
+                    childInstanceIds: rChildInstanceIds,
+                  };
+
+                  yield* store.updateInstance(ls.instanceId, {
+                    status: 'running',
+                    childInstanceIds: rChildInstanceIds,
+                    updatedAt: new Date().toISOString(),
+                  });
+
+                  ls.stateData = parallelResult;
+
+                  const actionId = stateDef.actionId;
+                  if (!actionId) {
+                    return yield* Effect.fail(
+                      mkDefinitionError({
+                        message: `State "${ls.currentState}" of type "parallel_children" has no actionId`,
+                      }),
+                    );
+                  }
+
+                  const parallelActionCtx: ActionContext = {
+                    ...preamble.actionCtx,
+                    stateData: ls.stateData,
+                  };
+
+                  const { transitionResult, durationMs } = yield* executeAction(
+                    actionId,
+                    parallelActionCtx,
+                    stateDef,
+                    { ...preamble.middlewareCtx, stateData: ls.stateData },
+                    preamble.loggerFactory,
+                  );
+
+                  if (ls.errorResult) return;
+
+                  if (
+                    !isLegalTransition(
+                      ls.currentState,
+                      transitionResult.nextState,
+                      ls.definition.transitions,
+                    )
+                  ) {
+                    return yield* Effect.fail(
+                      mkDefinitionError({
+                        message: `Illegal transition from "${ls.currentState}" to "${transitionResult.nextState}"`,
+                      }),
+                    );
+                  }
+
+                  yield* middlewareExec.runAfter({
+                    ...preamble.middlewareCtx,
+                    stateData: ls.stateData,
+                    result: transitionResult,
+                  });
+
+                  const transitionRecord: TransitionRecord = {
+                    id: crypto.randomUUID(),
+                    fromState: ls.currentState,
+                    toState: transitionResult.nextState,
+                    data: transitionResult.data,
+                    timestamp: new Date().toISOString(),
+                    durationMs,
+                    actionId,
+                    childInstanceIds: rChildInstanceIds,
+                  };
+
+                  ls.history = [...ls.history, transitionRecord];
+
+                  const logEntries = [...preamble.loggerFactory.getEntries()];
+                  ls.allLogs = [...ls.allLogs, ...logEntries];
+
+                  const nextState = transitionResult.nextState;
+                  const nextStateData = transitionResult.data ?? ls.stateData;
+
+                  yield* store.updateInstance(ls.instanceId, {
+                    currentState: nextState,
+                    stateData: nextStateData,
+                    childInstanceIds: undefined,
+                    history: ls.history,
+                    logs: ls.allLogs,
+                    updatedAt: new Date().toISOString(),
+                  });
+
+                  ls.currentState = nextState;
+                  ls.stateData = nextStateData;
+                }),
+              );
+
+              if (ls.errorResult) return;
+              resumeContext = undefined;
+              continue;
+            }
+
+            // Fresh-run parallel children path
+
+            // Phase 1: Preamble + pre-spawn validation (WITH permit)
+            const parallelSpawnInfo = yield* semaphore.withPermits(1)(
+              Effect.gen(function* () {
+                const preamble = yield* runPreamble();
+
+                // i. Validate children[] exists and is non-empty
+                const children: ChildSpawnDefinition[] = stateDef.children ?? [];
+                if (children.length === 0) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `State "${ls.currentState}" of type "parallel_children" has no children`,
+                    }),
+                  );
+                }
+
+                // ii. Validate actionId exists
+                const actionId = stateDef.actionId;
+                if (!actionId) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `State "${ls.currentState}" of type "parallel_children" has no actionId`,
+                    }),
+                  );
+                }
+
+                // iii. Evaluate each child's inputMapping and load definitions
+                const childSpecs: {
+                  key: string;
+                  definition: StateMachineDefinition;
+                  input: unknown;
+                }[] = [];
+
+                for (const child of children) {
+                  // Load child definition
+                  const childDef = yield* store.getDefinition(child.machineDefId).pipe(
+                    Effect.catchTag('NotFoundError', (err: NotFoundError) =>
+                      Effect.fail(
+                        mkNotFoundError({
+                          entityType: err.entityType,
+                          id: err.id,
+                        }),
+                      ),
+                    ),
+                  );
+
+                  // Evaluate inputMapping via JSONPath
+                  let childInput: unknown;
+                  try {
+                    const jsonPathResult: unknown[] = JSONPath({
+                      path: child.inputMapping,
+                      json: {
+                        stateData: ls.stateData,
+                        machineInput: ls.machineInput,
+                        stateName: ls.currentState,
+                      },
+                    });
+
+                    if (!Array.isArray(jsonPathResult) || jsonPathResult.length === 0) {
+                      return yield* Effect.fail(
+                        mkActionError({
+                          actionId: 'parallel_children',
+                          stateName: ls.currentState,
+                          cause: `inputMapping "${child.inputMapping}" for child "${child.key}" returned no results`,
+                        }),
+                      );
+                    }
+
+                    childInput = jsonPathResult.length === 1 ? jsonPathResult[0] : jsonPathResult;
+                  } catch (jsonPathError) {
+                    return yield* Effect.fail(
+                      mkActionError({
+                        actionId: 'parallel_children',
+                        stateName: ls.currentState,
+                        cause:
+                          jsonPathError instanceof Error
+                            ? `Invalid inputMapping for child "${child.key}": ${jsonPathError.message}`
+                            : `Invalid inputMapping for child "${child.key}": ${String(jsonPathError)}`,
+                      }),
+                    );
+                  }
+
+                  childSpecs.push({
+                    key: child.key,
+                    definition: childDef,
+                    input: childInput,
+                  });
+                }
+
+                // iv. Set parent status to 'waiting_for_child'
+                yield* store.updateInstance(ls.instanceId, {
+                  status: 'waiting_for_child',
+                  updatedAt: new Date().toISOString(),
+                });
+
+                return { childSpecs, actionId, ...preamble };
+              }),
+            );
+
+            // Phase 2: Spawn parallel children (NO permit — release-before-wait)
+            const parallelStartTime = Date.now();
+            const parallelMode = stateDef.parallelMode ?? 'all_or_interrupt';
+
+            const childResults: Record<string, MachineResult> = {};
+            const childInstanceIds: Record<string, string> = {};
+
+            if (parallelMode === 'all_settled') {
+              // ── all_settled: run all children, collect all results ──
+              const outcomes = yield* Effect.forEach(
+                parallelSpawnInfo.childSpecs,
+                (spec) =>
+                  runner
+                    .run(spec.definition, spec.input, {
+                      parentInstanceId: ls.instanceId,
+                      parentStateName: ls.currentState,
+                      depth: (opts?.depth ?? 0) + 1,
+                    })
+                    .pipe(Effect.either),
+                { concurrency: 'unbounded' },
+              );
+
+              for (let i = 0; i < parallelSpawnInfo.childSpecs.length; i++) {
+                const spec = parallelSpawnInfo.childSpecs[i];
+                const outcome = outcomes[i];
+
+                if (Either.isRight(outcome)) {
+                  const result = outcome.right;
+                  childResults[spec.key] = result;
+                  childInstanceIds[spec.key] = result.instanceId;
+                } else {
+                  // Child failed with a MachineError (validation/store error)
+                  // Create an error MachineResult for this child
+                  const machineError = outcome.left;
+                  const errorMessage =
+                    'message' in machineError
+                      ? (machineError as { message: string }).message
+                      : 'cause' in machineError
+                        ? String((machineError as { cause: unknown }).cause)
+                        : `Child "${spec.key}" failed`;
+                  childResults[spec.key] = {
+                    status: 'error',
+                    error: errorMessage,
+                    instanceId: 'unknown',
+                  };
+                  childInstanceIds[spec.key] = 'unknown';
+                }
+              }
+            } else {
+              // ── all_or_interrupt (default): first failure interrupts siblings ──
+              // Spawn each child as a fiber
+              const fibers: {
+                key: string;
+                fiber: Fiber.RuntimeFiber<MachineResult, MachineError>;
+              }[] = [];
+
+              for (const spec of parallelSpawnInfo.childSpecs) {
+                const fiber = yield* Effect.fork(
+                  runner.run(spec.definition, spec.input, {
+                    parentInstanceId: ls.instanceId,
+                    parentStateName: ls.currentState,
+                    depth: (opts?.depth ?? 0) + 1,
+                  }),
+                );
+                fibers.push({ key: spec.key, fiber: fiber });
+              }
+
+              // Wait for all fibers, interrupting on first failure
+              let firstError: MachineError | null = null;
+              const completedKeys = new Set<string>();
+
+              // Join each fiber; if one fails, interrupt the rest
+              for (const { key, fiber } of fibers) {
+                if (firstError) {
+                  // A previous child failed — interrupt remaining fibers
+                  yield* Fiber.interrupt(fiber);
+                  childResults[key] = {
+                    status: 'cancelled',
+                    instanceId: 'interrupted',
+                  };
+                  childInstanceIds[key] = 'interrupted';
+                  continue;
+                }
+
+                const exit = yield* Fiber.await(fiber);
+
+                if (Exit.isSuccess(exit)) {
+                  const result = exit.value;
+                  childResults[key] = result;
+                  childInstanceIds[key] = result.instanceId;
+                  completedKeys.add(key);
+
+                  // Check if the child itself errored (returned error MachineResult)
+                  if (result.status === 'error') {
+                    firstError = mkActionError({
+                      actionId: 'parallel_children',
+                      stateName: ls.currentState,
+                      cause: `Child "${key}" errored: ${result.error}`,
+                    });
+                  }
+                } else {
+                  // Child Effect failed (validation/store error)
+                  const cause = Exit.causeOption(exit);
+                  const errorMessage =
+                    cause._tag === 'Some' ? String(cause.value) : `Child "${key}" failed`;
+
+                  childResults[key] = {
+                    status: 'error',
+                    error: errorMessage,
+                    instanceId: 'unknown',
+                  };
+                  childInstanceIds[key] = 'unknown';
+
+                  firstError = mkActionError({
+                    actionId: 'parallel_children',
+                    stateName: ls.currentState,
+                    cause: `Child "${key}" failed: ${errorMessage}`,
+                  });
+                }
+              }
+
+              // If there was an error and remaining fibers, interrupt them
+              // (already handled in the loop above via the firstError check)
+            }
+
+            // Phase 3: Post-children action execution (WITH permit)
+            yield* semaphore.withPermits(1)(
+              Effect.gen(function* () {
+                // vi. Build ParallelChildrenResult
+                const parallelResult: ParallelChildrenResult = {
+                  results: childResults,
+                  childInstanceIds,
+                };
+
+                // vii. Update parent: set childInstanceIds and restore status
+                yield* store.updateInstance(ls.instanceId, {
+                  status: 'running',
+                  childInstanceIds,
+                  updatedAt: new Date().toISOString(),
+                });
+
+                // viii. Set stateData to the parallel result for the parent action
+                ls.stateData = parallelResult;
+
+                // ix. Rebuild ActionContext with updated stateData
+                const parallelActionCtx: ActionContext = {
+                  ...parallelSpawnInfo.actionCtx,
+                  stateData: ls.stateData,
+                };
+
+                const { transitionResult, durationMs } = yield* executeAction(
+                  parallelSpawnInfo.actionId,
+                  parallelActionCtx,
+                  stateDef,
+                  { ...parallelSpawnInfo.middlewareCtx, stateData: ls.stateData },
+                  parallelSpawnInfo.loggerFactory,
+                );
+
+                // If an error occurred during action execution, break out
+                if (ls.errorResult) return;
+
+                // x. Validate nextState is a legal transition
+                if (
+                  !isLegalTransition(
+                    ls.currentState,
+                    transitionResult.nextState,
+                    ls.definition.transitions,
+                  )
+                ) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `Illegal transition from "${ls.currentState}" to "${transitionResult.nextState}"`,
+                      details: [
+                        `Action "${parallelSpawnInfo.actionId}" returned nextState "${transitionResult.nextState}" which is not in the definition's transitions`,
+                      ],
+                    }),
+                  );
+                }
+
+                // xi. Run middleware afterTransition
+                yield* middlewareExec.runAfter({
+                  ...parallelSpawnInfo.middlewareCtx,
+                  stateData: ls.stateData,
+                  result: transitionResult,
+                });
+
+                // xii. Record TransitionRecord with parallel children info
+                const totalParallelDurationMs = Date.now() - parallelStartTime;
+                const parallelTransitionRecord: TransitionRecord = {
+                  id: crypto.randomUUID(),
+                  fromState: ls.currentState,
+                  toState: transitionResult.nextState,
+                  data: transitionResult.data,
+                  timestamp: new Date().toISOString(),
+                  durationMs: totalParallelDurationMs > 0 ? totalParallelDurationMs : durationMs,
+                  actionId: parallelSpawnInfo.actionId,
+                  childInstanceIds,
+                };
+
+                ls.history = [...ls.history, parallelTransitionRecord];
+
+                // xiii. Collect log entries
+                const parallelLogEntries = [...parallelSpawnInfo.loggerFactory.getEntries()];
+                ls.allLogs = [...ls.allLogs, ...parallelLogEntries];
+
+                // xiv. Checkpoint: Persist and advance state
+                const nextState = transitionResult.nextState;
+                const nextStateData = transitionResult.data ?? ls.stateData;
+
+                yield* store.updateInstance(ls.instanceId, {
+                  currentState: nextState,
+                  stateData: nextStateData,
+                  childInstanceIds: undefined,
+                  history: ls.history,
+                  logs: ls.allLogs,
+                  updatedAt: new Date().toISOString(),
+                });
+
+                ls.currentState = nextState;
+                ls.stateData = nextStateData;
+              }),
+            );
+
+            if (ls.errorResult) return;
+          } else {
+            // ── ACTION EXECUTION (WITH permit for entire step) ──
+
+            yield* semaphore.withPermits(1)(
+              Effect.gen(function* () {
+                const { loggerFactory, actionCtx, middlewareCtx } = yield* runPreamble();
+
+                // Look up actionId in ActionRegistry
+                const actionId = stateDef.actionId;
+                if (!actionId) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `State "${ls.currentState}" of type "action" has no actionId`,
+                    }),
+                  );
+                }
+
+                const { transitionResult, durationMs } = yield* executeAction(
+                  actionId,
+                  actionCtx,
+                  stateDef,
+                  middlewareCtx,
+                  loggerFactory,
+                );
+
+                // If an error occurred, break out of the loop
+                if (ls.errorResult) return;
+
+                // Validate nextState is a legal transition
+                if (
+                  !isLegalTransition(
+                    ls.currentState,
+                    transitionResult.nextState,
+                    ls.definition.transitions,
+                  )
+                ) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `Illegal transition from "${ls.currentState}" to "${transitionResult.nextState}"`,
+                      details: [
+                        `Action "${actionId}" returned nextState "${transitionResult.nextState}" which is not in the definition's transitions`,
+                      ],
+                    }),
+                  );
+                }
+
+                // Run middleware afterTransition
+                yield* middlewareExec.runAfter({
+                  ...middlewareCtx,
+                  result: transitionResult,
+                });
+
+                // Record TransitionRecord in history
+                const transitionRecord: TransitionRecord = {
+                  id: crypto.randomUUID(),
+                  fromState: ls.currentState,
+                  toState: transitionResult.nextState,
+                  data: transitionResult.data,
+                  timestamp: new Date().toISOString(),
+                  durationMs,
+                  actionId,
+                };
+
+                ls.history = [...ls.history, transitionRecord];
+
+                // Collect log entries from StateLogger
+                const logEntries = [...loggerFactory.getEntries()];
+                ls.allLogs = [...ls.allLogs, ...logEntries];
+
+                // Checkpoint 3: Persist history + logs + advance state
+                const nextState = transitionResult.nextState;
+                const nextStateData = transitionResult.data ?? ls.stateData;
+
+                yield* store.updateInstance(ls.instanceId, {
+                  currentState: nextState,
+                  stateData: nextStateData,
+                  history: ls.history,
+                  logs: ls.allLogs,
+                  updatedAt: new Date().toISOString(),
+                });
+
+                // Advance loop variables
+                ls.currentState = nextState;
+                ls.stateData = nextStateData;
+              }),
+            );
+
+            if (ls.errorResult) return;
+          }
+        }
+      });
+
+    // ──────────────────────────────────────────────────────────────────
+    // Shared helper: resolveTerminalState (Task 17.1 — step 5)
+    // ──────────────────────────────────────────────────────────────────
+
+    const resolveTerminalState = (ls: LoopState) =>
+      Effect.gen(function* () {
+        let result: MachineResult;
+
+        if (ls.currentState === 'completed') {
+          const output =
+            ls.history.length > 0 ? ls.history[ls.history.length - 1].data : ls.stateData;
+
+          yield* store.updateInstance(ls.instanceId, {
+            status: 'completed',
+            currentState: ls.currentState,
+            output,
+            history: ls.history,
+            logs: ls.allLogs,
+            updatedAt: new Date().toISOString(),
+          });
+
+          result = {
+            status: 'completed',
+            output,
+            instanceId: ls.instanceId,
+          };
+        } else if (ls.currentState === 'error') {
+          const errorMsg =
+            ls.history.length > 0
+              ? `Machine reached error state`
+              : 'Machine entered error terminal state';
+
+          yield* store.updateInstance(ls.instanceId, {
+            status: 'error',
+            currentState: ls.currentState,
+            error: errorMsg,
+            history: ls.history,
+            logs: ls.allLogs,
+            updatedAt: new Date().toISOString(),
+          });
+
+          result = {
+            status: 'error',
+            error: errorMsg,
+            instanceId: ls.instanceId,
+          };
+        } else if (ls.currentState === 'cancelled') {
+          yield* store.updateInstance(ls.instanceId, {
+            status: 'cancelled',
+            currentState: ls.currentState,
+            history: ls.history,
+            logs: ls.allLogs,
+            updatedAt: new Date().toISOString(),
+          });
+
+          result = {
+            status: 'cancelled',
+            instanceId: ls.instanceId,
+          };
+        } else {
+          // Unexpected terminal state
+          yield* store.updateInstance(ls.instanceId, {
+            status: 'error',
+            currentState: ls.currentState,
+            error: `Unexpected terminal state "${ls.currentState}"`,
+            history: ls.history,
+            logs: ls.allLogs,
+            updatedAt: new Date().toISOString(),
+          });
+
+          result = {
+            status: 'error',
+            error: `Unexpected terminal state "${ls.currentState}"`,
+            instanceId: ls.instanceId,
+          };
+        }
+
+        return result;
+      });
+
+    // ──────────────────────────────────────────────────────────────────
+    // Shared helper: onInterrupt finalizer (Task 17.1 — step 6)
+    // ──────────────────────────────────────────────────────────────────
+
+    const makeOnInterruptFinalizer = (instanceId: string) =>
+      Effect.gen(function* () {
+        // Read the latest persisted state (may have been checkpointed)
+        const latestInstance = yield* store
+          .getInstance(instanceId)
+          .pipe(Effect.catchAll(() => Effect.succeed(null as MachineInstance | null)));
+        if (!latestInstance) return;
+
+        // Skip if already in a terminal state (another code path handled it)
+        if (
+          latestInstance.status === 'cancelled' ||
+          latestInstance.status === 'completed' ||
+          latestInstance.status === 'error' ||
+          latestInstance.status === 'suspended'
+        ) {
+          return;
+        }
+
+        // Distinguish suspension from cancellation
+        const reason: 'suspended' | 'cancelled' = isShuttingDown ? 'suspended' : 'cancelled';
+
+        if (reason === 'suspended') {
+          // Checkpoint 5: Preserve currentState for resume —
+          // do NOT add a transition record (the action was interrupted,
+          // not completed). Keep currentState pointing at the
+          // interrupted state so resume can re-enter it.
+          yield* store
+            .updateInstance(instanceId, {
+              status: 'suspended',
+              updatedAt: new Date().toISOString(),
+            })
+            .pipe(Effect.catchAll(() => Effect.void));
+        } else {
+          const cancellationRecord: TransitionRecord = {
+            id: crypto.randomUUID(),
+            fromState: latestInstance.currentState,
+            toState: 'cancelled',
+            timestamp: new Date().toISOString(),
+            durationMs: 0,
+          };
+
+          yield* store
+            .updateInstance(instanceId, {
+              status: 'cancelled',
+              currentState: 'cancelled',
+              history: [...latestInstance.history, cancellationRecord],
+              updatedAt: new Date().toISOString(),
+            })
+            .pipe(Effect.catchAll(() => Effect.void));
+        }
+      }).pipe(Effect.catchAll(() => Effect.void));
+
+    // ──────────────────────────────────────────────────────────────────
+    // Shared helper: fork, track, await, cleanup (Task 17.1 — step 7)
+    // ──────────────────────────────────────────────────────────────────
+
+    const forkTrackAwait = (instanceId: string, exec: Effect.Effect<MachineResult, MachineError>) =>
+      Effect.gen(function* () {
+        const fiber = yield* Effect.fork(exec);
+        fiberMap.set(instanceId, fiber);
+
+        const exit = yield* Fiber.await(fiber);
+        fiberMap.delete(instanceId);
+
+        if (Exit.isSuccess(exit)) {
+          return exit.value;
+        }
+
+        // Fiber was interrupted — onInterrupt finalizer already persisted state.
+        if (Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause)) {
+          if (isShuttingDown) {
+            return { status: 'cancelled' as const, instanceId } as MachineResult;
+          }
+          return { status: 'cancelled' as const, instanceId } as MachineResult;
+        }
+
+        // Re-raise non-interruption failures
+        return yield* Effect.failCause(exit.cause);
+      });
+
+    // ──────────────────────────────────────────────────────────────────
+    // Runner implementation
+    // ──────────────────────────────────────────────────────────────────
+
     const runner: StateMachineRunner = {
+      // ────────────────────────────────────────────────────────────────
+      // run() — Setup + shared loop (Task 17.1 — step 7)
+      // ────────────────────────────────────────────────────────────────
+
       run(definition, input, opts) {
         return Effect.gen(function* () {
           // ── Reject if shutting down ──
@@ -203,21 +1468,14 @@ export const StateMachineRunnerLive = Layer.effect(
               }),
             );
           }
-          // ──────────────────────────────────────────────────────────────
-          // 1. Validate definition at runtime
-          // ──────────────────────────────────────────────────────────────
 
-          // Build synchronous adapter for the validator's ActionRegistry
+          // ── 1. Validate definition at runtime ──
           const registryEntries = yield* registry.list();
           const registryIds = new Set(registryEntries.map((m) => m.id));
           const syncRegistry = { has: (id: string) => registryIds.has(id) };
-
           yield* validateDefinition(definition, 'runtime', syncRegistry);
 
-          // ──────────────────────────────────────────────────────────────
-          // 1b. Enforce max depth (MAX_MACHINE_DEPTH)
-          // ──────────────────────────────────────────────────────────────
-
+          // ── 1b. Enforce max depth (MAX_MACHINE_DEPTH) ──
           /* eslint-disable @typescript-eslint/dot-notation */
           const MAX_MACHINE_DEPTH = parseInt(process.env['MAX_MACHINE_DEPTH'] ?? '10', 10);
           /* eslint-enable @typescript-eslint/dot-notation */
@@ -235,10 +1493,7 @@ export const StateMachineRunnerLive = Layer.effect(
             );
           }
 
-          // ──────────────────────────────────────────────────────────────
-          // 2. Validate input against definition.inputSchema
-          // ──────────────────────────────────────────────────────────────
-
+          // ── 2. Validate input against definition.inputSchema ──
           if (Object.keys(definition.inputSchema).length > 0) {
             const validate = ajv.compile(definition.inputSchema);
             const valid = validate(input);
@@ -254,10 +1509,7 @@ export const StateMachineRunnerLive = Layer.effect(
             }
           }
 
-          // ──────────────────────────────────────────────────────────────
-          // 3. Create MachineInstance — Checkpoint 1
-          // ──────────────────────────────────────────────────────────────
-
+          // ── 3. Create MachineInstance — Checkpoint 1 ──
           const savedInstance = yield* store.saveInstance({
             definitionId: definition.id,
             definitionVersion: definition.version,
@@ -273,7 +1525,6 @@ export const StateMachineRunnerLive = Layer.effect(
 
           const instanceId = savedInstance.id;
 
-          // Build parent context for ActionContext (if child machine)
           const parentContext =
             opts?.parentInstanceId && opts.parentStateName
               ? {
@@ -282,814 +1533,31 @@ export const StateMachineRunnerLive = Layer.effect(
                 }
               : undefined;
 
-          // ──────────────────────────────────────────────────────────────
-          // 4. Machine execution (forked as fiber for cancellation — Task 14)
-          // ──────────────────────────────────────────────────────────────
+          // ── 4. Build LoopState ──
+          const ls: LoopState = {
+            instanceId,
+            definition,
+            machineInput: input,
+            parentContext,
+            parentInstanceId: opts?.parentInstanceId,
+            depth,
+            currentState: definition.initialState,
+            stateData: input,
+            history: [],
+            allLogs: savedInstance.logs,
+            errorResult: null,
+          };
 
+          const persistError = makePersistError(ls);
+          const executeAction = makeExecuteAction(ls, persistError);
+          const runPreamble = makeRunPreamble(ls);
+
+          // ── 5. Machine execution (forked as fiber for cancellation) ──
           const machineExec = Effect.gen(function* () {
-            let currentState = definition.initialState;
-            let stateData: unknown = input;
-            let history: TransitionRecord[] = [];
-            let allLogs = savedInstance.logs;
-            let errorResult: MachineResult | null = null;
+            // The core state loop
+            const stateLoop = executeStateLoop(ls, executeAction, runPreamble, opts);
 
-            // ── Helper: persist error terminal state and build MachineResult ──
-            const persistError = (
-              errorMessage: string,
-              actionId: string | undefined,
-              durationMs: number,
-            ) =>
-              Effect.gen(function* () {
-                const errorTransitionRecord: TransitionRecord = {
-                  id: crypto.randomUUID(),
-                  fromState: currentState,
-                  toState: 'error',
-                  timestamp: new Date().toISOString(),
-                  durationMs,
-                  actionId,
-                };
-
-                history = [...history, errorTransitionRecord];
-
-                yield* store.updateInstance(instanceId, {
-                  status: 'error',
-                  currentState: 'error',
-                  stateData,
-                  error: errorMessage,
-                  history,
-                  logs: allLogs,
-                  updatedAt: new Date().toISOString(),
-                });
-
-                errorResult = {
-                  status: 'error',
-                  error: errorMessage,
-                  instanceId,
-                };
-              });
-
-            // ── Helper: execute an action with timeout, error handling, and middleware ──
-            const executeAction = (
-              actionId: string,
-              actionCtx: ActionContext,
-              stateDef: { readonly timeoutMs?: number },
-              middlewareCtx: {
-                instance: MachineInstance;
-                stateName: string;
-                stateData: unknown;
-                definition: StateMachineDefinition;
-              },
-              loggerFactory: ReturnType<typeof createStateLoggerFactory>,
-            ) =>
-              Effect.gen(function* () {
-                const { fn: actionFn } = yield* registry.get(actionId);
-
-                const startTime = Date.now();
-
-                // Apply per-state timeout if configured
-                const rawAction = actionFn(actionCtx);
-                const timedAction = stateDef.timeoutMs
-                  ? rawAction.pipe(
-                      Effect.timeoutFail({
-                        duration: Duration.millis(stateDef.timeoutMs),
-                        onTimeout: () =>
-                          mkActionError({
-                            actionId,
-                            stateName: currentState,
-                            cause: 'timeout',
-                          }),
-                      }),
-                    )
-                  : rawAction;
-
-                const transitionResult = yield* timedAction.pipe(
-                  Effect.catchAll((actionError: ActionError) =>
-                    Effect.gen(function* () {
-                      // Build the MachineError
-                      const machineError: MachineError = mkActionError({
-                        actionId,
-                        stateName: currentState,
-                        cause: actionError.cause ?? actionError,
-                      });
-
-                      // Run middleware onError (never fails)
-                      yield* middlewareExec.runOnError({
-                        ...middlewareCtx,
-                        error: machineError,
-                      });
-
-                      // Collect logs from the failed action
-                      const errorLogs = [...loggerFactory.getEntries()];
-                      allLogs = [...allLogs, ...errorLogs];
-
-                      // Build descriptive error message
-                      const isTimeout = actionError.cause === 'timeout';
-                      const errorMessage = isTimeout
-                        ? `Action '${actionId}' in state '${currentState}' timed out after ${String(stateDef.timeoutMs ?? 0)}ms`
-                        : actionError.cause instanceof Error
-                          ? actionError.cause.message
-                          : typeof actionError.cause === 'string'
-                            ? actionError.cause
-                            : `Action "${actionId}" failed in state "${currentState}"`;
-
-                      const durationMs = Date.now() - startTime;
-
-                      // Persist error terminal state + set errorResult
-                      yield* persistError(errorMessage, actionId, durationMs);
-
-                      // Return a dummy TransitionResult (not used — errorResult is checked)
-                      return { nextState: 'error' } as TransitionResult;
-                    }),
-                  ),
-                );
-
-                const durationMs = Date.now() - startTime;
-                return { transitionResult, durationMs };
-              });
-
-            // ── The core state loop as a separate Effect (for machine-level timeout) ──
-            const stateLoop = Effect.gen(function* () {
-              // ── Helper: common preamble (checkpoint, logger, ActionContext, middleware) ──
-              const runPreamble = () =>
-                Effect.gen(function* () {
-                  // a. Checkpoint 2: Persist BEFORE action runs
-                  yield* store.updateInstance(instanceId, {
-                    currentState,
-                    stateData,
-                    history,
-                    updatedAt: new Date().toISOString(),
-                  });
-
-                  // b. Create scoped StateLogger and ArtifactStore
-                  const loggerFactory = createStateLoggerFactory();
-                  const logger = loggerFactory.create(instanceId, currentState);
-                  const artifacts = artifactFactory.makeScoped(
-                    instanceId,
-                    currentState,
-                    opts?.parentInstanceId,
-                  );
-
-                  // c. Build ActionContext
-                  const actionCtx: ActionContext = {
-                    machineInstanceId: instanceId,
-                    machineDefId: definition.id,
-                    stateName: currentState,
-                    stateData,
-                    machineInput: input,
-                    parentContext,
-                    logger,
-                    artifacts,
-                  };
-
-                  // d. Run middleware beforeTransition
-                  const latestInstance = yield* store.getInstance(instanceId);
-                  const middlewareCtx = {
-                    instance: latestInstance,
-                    stateName: currentState,
-                    stateData,
-                    definition,
-                  };
-
-                  yield* middlewareExec.runBefore(middlewareCtx);
-
-                  return { loggerFactory, actionCtx, middlewareCtx };
-                });
-
-              while (definition.states[currentState].type !== 'terminal') {
-                const stateDef = definition.states[currentState];
-
-                // ────────────────────────────────────────────────────────
-                // Type-based branching (semaphore: permit per active step)
-                // ────────────────────────────────────────────────────────
-
-                if (stateDef.type === 'child_machine') {
-                  // ── CHILD MACHINE SPAWNING (Task 11 + Task 13 semaphore) ──
-
-                  // Phase 1: Preamble + pre-spawn validation (WITH permit)
-                  const childSpawnInfo = yield* semaphore.withPermits(1)(
-                    Effect.gen(function* () {
-                      const preamble = yield* runPreamble();
-
-                      // i. Validate childMachineDefId exists
-                      const childDefId = stateDef.childMachineDefId;
-                      if (!childDefId) {
-                        return yield* Effect.fail(
-                          mkDefinitionError({
-                            message: `State "${currentState}" of type "child_machine" has no childMachineDefId`,
-                          }),
-                        );
-                      }
-
-                      // ii. Load child definition from store
-                      const childDefinition = yield* store.getDefinition(childDefId).pipe(
-                        Effect.catchTag('NotFoundError', (err: NotFoundError) =>
-                          Effect.fail(
-                            mkNotFoundError({
-                              entityType: err.entityType,
-                              id: err.id,
-                            }),
-                          ),
-                        ),
-                      );
-
-                      // iii. Evaluate childInputMapping via JSONPath
-                      const mappingExpr = stateDef.childInputMapping;
-                      if (!mappingExpr) {
-                        return yield* Effect.fail(
-                          mkDefinitionError({
-                            message: `State "${currentState}" of type "child_machine" has no childInputMapping`,
-                          }),
-                        );
-                      }
-
-                      let childInput: unknown;
-                      try {
-                        const jsonPathResult: unknown[] = JSONPath({
-                          path: mappingExpr,
-                          json: {
-                            stateData,
-                            machineInput: input,
-                            stateName: currentState,
-                          },
-                        });
-
-                        if (!Array.isArray(jsonPathResult) || jsonPathResult.length === 0) {
-                          return yield* Effect.fail(
-                            mkActionError({
-                              actionId: 'child_machine',
-                              stateName: currentState,
-                              cause: `childInputMapping "${mappingExpr}" returned no results`,
-                            }),
-                          );
-                        }
-
-                        // JSONPath always returns an array; unwrap single result
-                        childInput =
-                          jsonPathResult.length === 1 ? jsonPathResult[0] : jsonPathResult;
-                      } catch (jsonPathError) {
-                        return yield* Effect.fail(
-                          mkActionError({
-                            actionId: 'child_machine',
-                            stateName: currentState,
-                            cause:
-                              jsonPathError instanceof Error
-                                ? `Invalid childInputMapping: ${jsonPathError.message}`
-                                : `Invalid childInputMapping: ${String(jsonPathError)}`,
-                          }),
-                        );
-                      }
-
-                      // iv. Set parent status to 'waiting_for_child'
-                      yield* store.updateInstance(instanceId, {
-                        status: 'waiting_for_child',
-                        updatedAt: new Date().toISOString(),
-                      });
-
-                      return {
-                        childDefId,
-                        childDefinition,
-                        childInput,
-                        ...preamble,
-                      };
-                    }),
-                  );
-
-                  // Phase 2: Spawn child machine (NO permit — release-before-wait)
-                  const childStartTime = Date.now();
-                  const childResult: MachineResult = yield* runner.run(
-                    childSpawnInfo.childDefinition,
-                    childSpawnInfo.childInput,
-                    {
-                      parentInstanceId: instanceId,
-                      parentStateName: currentState,
-                      depth: (opts?.depth ?? 0) + 1,
-                    },
-                  );
-
-                  // Phase 3: Post-child action execution (WITH permit)
-                  yield* semaphore.withPermits(1)(
-                    Effect.gen(function* () {
-                      // vi. Update parent: set childInstanceId and restore status
-                      yield* store.updateInstance(instanceId, {
-                        status: 'running',
-                        childInstanceId: childResult.instanceId,
-                        updatedAt: new Date().toISOString(),
-                      });
-
-                      // vii. Set stateData to child's MachineResult for the parent action
-                      stateData = childResult;
-
-                      // viii. Execute the parent state's actionId with child result
-                      const actionId = stateDef.actionId;
-                      if (!actionId) {
-                        return yield* Effect.fail(
-                          mkDefinitionError({
-                            message: `State "${currentState}" of type "child_machine" has no actionId`,
-                          }),
-                        );
-                      }
-
-                      // Rebuild ActionContext with updated stateData (child result)
-                      const childActionCtx: ActionContext = {
-                        ...childSpawnInfo.actionCtx,
-                        stateData,
-                      };
-
-                      const { transitionResult, durationMs } = yield* executeAction(
-                        actionId,
-                        childActionCtx,
-                        stateDef,
-                        { ...childSpawnInfo.middlewareCtx, stateData },
-                        childSpawnInfo.loggerFactory,
-                      );
-
-                      // If an error occurred during action execution, break out
-                      if (errorResult) return;
-
-                      // ix. Validate nextState is a legal transition
-                      if (
-                        !isLegalTransition(
-                          currentState,
-                          transitionResult.nextState,
-                          definition.transitions,
-                        )
-                      ) {
-                        return yield* Effect.fail(
-                          mkDefinitionError({
-                            message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
-                            details: [
-                              `Action "${actionId}" returned nextState "${transitionResult.nextState}" which is not in the definition's transitions`,
-                            ],
-                          }),
-                        );
-                      }
-
-                      // x. Run middleware afterTransition
-                      yield* middlewareExec.runAfter({
-                        ...childSpawnInfo.middlewareCtx,
-                        stateData,
-                        result: transitionResult,
-                      });
-
-                      // xi. Record TransitionRecord with child info
-                      const totalDurationMs = Date.now() - childStartTime;
-                      const transitionRecord: TransitionRecord = {
-                        id: crypto.randomUUID(),
-                        fromState: currentState,
-                        toState: transitionResult.nextState,
-                        data: transitionResult.data,
-                        timestamp: new Date().toISOString(),
-                        durationMs: totalDurationMs > 0 ? totalDurationMs : durationMs,
-                        actionId,
-                        childInstanceId: childResult.instanceId,
-                        childDefinitionId: childSpawnInfo.childDefId,
-                      };
-
-                      history = [...history, transitionRecord];
-
-                      // xii. Collect log entries
-                      const logEntries = [...childSpawnInfo.loggerFactory.getEntries()];
-                      allLogs = [...allLogs, ...logEntries];
-
-                      // xiii. Checkpoint 3: Persist and advance state
-                      const nextState = transitionResult.nextState;
-                      const nextStateData = transitionResult.data ?? stateData;
-
-                      yield* store.updateInstance(instanceId, {
-                        currentState: nextState,
-                        stateData: nextStateData,
-                        childInstanceId: undefined,
-                        history,
-                        logs: allLogs,
-                        updatedAt: new Date().toISOString(),
-                      });
-
-                      currentState = nextState;
-                      stateData = nextStateData;
-                    }),
-                  );
-
-                  if (errorResult) return;
-                } else if (stateDef.type === 'parallel_children') {
-                  // ── PARALLEL CHILDREN (Task 12 + Task 13 semaphore) ──
-
-                  // Phase 1: Preamble + pre-spawn validation (WITH permit)
-                  const parallelSpawnInfo = yield* semaphore.withPermits(1)(
-                    Effect.gen(function* () {
-                      const preamble = yield* runPreamble();
-
-                      // i. Validate children[] exists and is non-empty
-                      const children: ChildSpawnDefinition[] = stateDef.children ?? [];
-                      if (children.length === 0) {
-                        return yield* Effect.fail(
-                          mkDefinitionError({
-                            message: `State "${currentState}" of type "parallel_children" has no children`,
-                          }),
-                        );
-                      }
-
-                      // ii. Validate actionId exists
-                      const actionId = stateDef.actionId;
-                      if (!actionId) {
-                        return yield* Effect.fail(
-                          mkDefinitionError({
-                            message: `State "${currentState}" of type "parallel_children" has no actionId`,
-                          }),
-                        );
-                      }
-
-                      // iii. Evaluate each child's inputMapping and load definitions
-                      const childSpecs: {
-                        key: string;
-                        definition: StateMachineDefinition;
-                        input: unknown;
-                      }[] = [];
-
-                      for (const child of children) {
-                        // Load child definition
-                        const childDef = yield* store.getDefinition(child.machineDefId).pipe(
-                          Effect.catchTag('NotFoundError', (err: NotFoundError) =>
-                            Effect.fail(
-                              mkNotFoundError({
-                                entityType: err.entityType,
-                                id: err.id,
-                              }),
-                            ),
-                          ),
-                        );
-
-                        // Evaluate inputMapping via JSONPath
-                        let childInput: unknown;
-                        try {
-                          const jsonPathResult: unknown[] = JSONPath({
-                            path: child.inputMapping,
-                            json: {
-                              stateData,
-                              machineInput: input,
-                              stateName: currentState,
-                            },
-                          });
-
-                          if (!Array.isArray(jsonPathResult) || jsonPathResult.length === 0) {
-                            return yield* Effect.fail(
-                              mkActionError({
-                                actionId: 'parallel_children',
-                                stateName: currentState,
-                                cause: `inputMapping "${child.inputMapping}" for child "${child.key}" returned no results`,
-                              }),
-                            );
-                          }
-
-                          childInput =
-                            jsonPathResult.length === 1 ? jsonPathResult[0] : jsonPathResult;
-                        } catch (jsonPathError) {
-                          return yield* Effect.fail(
-                            mkActionError({
-                              actionId: 'parallel_children',
-                              stateName: currentState,
-                              cause:
-                                jsonPathError instanceof Error
-                                  ? `Invalid inputMapping for child "${child.key}": ${jsonPathError.message}`
-                                  : `Invalid inputMapping for child "${child.key}": ${String(jsonPathError)}`,
-                            }),
-                          );
-                        }
-
-                        childSpecs.push({
-                          key: child.key,
-                          definition: childDef,
-                          input: childInput,
-                        });
-                      }
-
-                      // iv. Set parent status to 'waiting_for_child'
-                      yield* store.updateInstance(instanceId, {
-                        status: 'waiting_for_child',
-                        updatedAt: new Date().toISOString(),
-                      });
-
-                      return { childSpecs, actionId, ...preamble };
-                    }),
-                  );
-
-                  // Phase 2: Spawn parallel children (NO permit — release-before-wait)
-                  const parallelStartTime = Date.now();
-                  const parallelMode = stateDef.parallelMode ?? 'all_or_interrupt';
-
-                  const childResults: Record<string, MachineResult> = {};
-                  const childInstanceIds: Record<string, string> = {};
-
-                  if (parallelMode === 'all_settled') {
-                    // ── all_settled: run all children, collect all results ──
-                    const outcomes = yield* Effect.forEach(
-                      parallelSpawnInfo.childSpecs,
-                      (spec) =>
-                        runner
-                          .run(spec.definition, spec.input, {
-                            parentInstanceId: instanceId,
-                            parentStateName: currentState,
-                            depth: (opts?.depth ?? 0) + 1,
-                          })
-                          .pipe(Effect.either),
-                      { concurrency: 'unbounded' },
-                    );
-
-                    for (let i = 0; i < parallelSpawnInfo.childSpecs.length; i++) {
-                      const spec = parallelSpawnInfo.childSpecs[i];
-                      const outcome = outcomes[i];
-
-                      if (Either.isRight(outcome)) {
-                        const result = outcome.right;
-                        childResults[spec.key] = result;
-                        childInstanceIds[spec.key] = result.instanceId;
-                      } else {
-                        // Child failed with a MachineError (validation/store error)
-                        // Create an error MachineResult for this child
-                        const machineError = outcome.left;
-                        const errorMessage =
-                          'message' in machineError
-                            ? (machineError as { message: string }).message
-                            : 'cause' in machineError
-                              ? String((machineError as { cause: unknown }).cause)
-                              : `Child "${spec.key}" failed`;
-                        childResults[spec.key] = {
-                          status: 'error',
-                          error: errorMessage,
-                          instanceId: 'unknown',
-                        };
-                        childInstanceIds[spec.key] = 'unknown';
-                      }
-                    }
-                  } else {
-                    // ── all_or_interrupt (default): first failure interrupts siblings ──
-                    // Spawn each child as a fiber
-                    const fibers: {
-                      key: string;
-                      fiber: Fiber.RuntimeFiber<MachineResult, MachineError>;
-                    }[] = [];
-
-                    for (const spec of parallelSpawnInfo.childSpecs) {
-                      const fiber = yield* Effect.fork(
-                        runner.run(spec.definition, spec.input, {
-                          parentInstanceId: instanceId,
-                          parentStateName: currentState,
-                          depth: (opts?.depth ?? 0) + 1,
-                        }),
-                      );
-                      fibers.push({ key: spec.key, fiber: fiber });
-                    }
-
-                    // Wait for all fibers, interrupting on first failure
-                    let firstError: MachineError | null = null;
-                    const completedKeys = new Set<string>();
-
-                    // Join each fiber; if one fails, interrupt the rest
-                    for (const { key, fiber } of fibers) {
-                      if (firstError) {
-                        // A previous child failed — interrupt remaining fibers
-                        yield* Fiber.interrupt(fiber);
-                        childResults[key] = {
-                          status: 'cancelled',
-                          instanceId: 'interrupted',
-                        };
-                        childInstanceIds[key] = 'interrupted';
-                        continue;
-                      }
-
-                      const exit = yield* Fiber.await(fiber);
-
-                      if (Exit.isSuccess(exit)) {
-                        const result = exit.value;
-                        childResults[key] = result;
-                        childInstanceIds[key] = result.instanceId;
-                        completedKeys.add(key);
-
-                        // Check if the child itself errored (returned error MachineResult)
-                        if (result.status === 'error') {
-                          firstError = mkActionError({
-                            actionId: 'parallel_children',
-                            stateName: currentState,
-                            cause: `Child "${key}" errored: ${result.error}`,
-                          });
-                        }
-                      } else {
-                        // Child Effect failed (validation/store error)
-                        const cause = Exit.causeOption(exit);
-                        const errorMessage =
-                          cause._tag === 'Some' ? String(cause.value) : `Child "${key}" failed`;
-
-                        childResults[key] = {
-                          status: 'error',
-                          error: errorMessage,
-                          instanceId: 'unknown',
-                        };
-                        childInstanceIds[key] = 'unknown';
-
-                        firstError = mkActionError({
-                          actionId: 'parallel_children',
-                          stateName: currentState,
-                          cause: `Child "${key}" failed: ${errorMessage}`,
-                        });
-                      }
-                    }
-
-                    // If there was an error and remaining fibers, interrupt them
-                    // (already handled in the loop above via the firstError check)
-                  }
-
-                  // Phase 3: Post-children action execution (WITH permit)
-                  yield* semaphore.withPermits(1)(
-                    Effect.gen(function* () {
-                      // vi. Build ParallelChildrenResult
-                      const parallelResult: ParallelChildrenResult = {
-                        results: childResults,
-                        childInstanceIds,
-                      };
-
-                      // vii. Update parent: set childInstanceIds and restore status
-                      yield* store.updateInstance(instanceId, {
-                        status: 'running',
-                        childInstanceIds,
-                        updatedAt: new Date().toISOString(),
-                      });
-
-                      // viii. Set stateData to the parallel result for the parent action
-                      stateData = parallelResult;
-
-                      // ix. Rebuild ActionContext with updated stateData
-                      const parallelActionCtx: ActionContext = {
-                        ...parallelSpawnInfo.actionCtx,
-                        stateData,
-                      };
-
-                      const { transitionResult, durationMs } = yield* executeAction(
-                        parallelSpawnInfo.actionId,
-                        parallelActionCtx,
-                        stateDef,
-                        { ...parallelSpawnInfo.middlewareCtx, stateData },
-                        parallelSpawnInfo.loggerFactory,
-                      );
-
-                      // If an error occurred during action execution, break out
-                      if (errorResult) return;
-
-                      // x. Validate nextState is a legal transition
-                      if (
-                        !isLegalTransition(
-                          currentState,
-                          transitionResult.nextState,
-                          definition.transitions,
-                        )
-                      ) {
-                        return yield* Effect.fail(
-                          mkDefinitionError({
-                            message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
-                            details: [
-                              `Action "${parallelSpawnInfo.actionId}" returned nextState "${transitionResult.nextState}" which is not in the definition's transitions`,
-                            ],
-                          }),
-                        );
-                      }
-
-                      // xi. Run middleware afterTransition
-                      yield* middlewareExec.runAfter({
-                        ...parallelSpawnInfo.middlewareCtx,
-                        stateData,
-                        result: transitionResult,
-                      });
-
-                      // xii. Record TransitionRecord with parallel children info
-                      const totalParallelDurationMs = Date.now() - parallelStartTime;
-                      const parallelTransitionRecord: TransitionRecord = {
-                        id: crypto.randomUUID(),
-                        fromState: currentState,
-                        toState: transitionResult.nextState,
-                        data: transitionResult.data,
-                        timestamp: new Date().toISOString(),
-                        durationMs:
-                          totalParallelDurationMs > 0 ? totalParallelDurationMs : durationMs,
-                        actionId: parallelSpawnInfo.actionId,
-                        childInstanceIds,
-                      };
-
-                      history = [...history, parallelTransitionRecord];
-
-                      // xiii. Collect log entries
-                      const parallelLogEntries = [...parallelSpawnInfo.loggerFactory.getEntries()];
-                      allLogs = [...allLogs, ...parallelLogEntries];
-
-                      // xiv. Checkpoint: Persist and advance state
-                      const nextState = transitionResult.nextState;
-                      const nextStateData = transitionResult.data ?? stateData;
-
-                      yield* store.updateInstance(instanceId, {
-                        currentState: nextState,
-                        stateData: nextStateData,
-                        childInstanceIds: undefined,
-                        history,
-                        logs: allLogs,
-                        updatedAt: new Date().toISOString(),
-                      });
-
-                      currentState = nextState;
-                      stateData = nextStateData;
-                    }),
-                  );
-
-                  if (errorResult) return;
-                } else {
-                  // ── ACTION EXECUTION (WITH permit for entire step) ──
-
-                  yield* semaphore.withPermits(1)(
-                    Effect.gen(function* () {
-                      const { loggerFactory, actionCtx, middlewareCtx } = yield* runPreamble();
-
-                      // e. Look up actionId in ActionRegistry
-                      const actionId = stateDef.actionId;
-                      if (!actionId) {
-                        return yield* Effect.fail(
-                          mkDefinitionError({
-                            message: `State "${currentState}" of type "action" has no actionId`,
-                          }),
-                        );
-                      }
-
-                      const { transitionResult, durationMs } = yield* executeAction(
-                        actionId,
-                        actionCtx,
-                        stateDef,
-                        middlewareCtx,
-                        loggerFactory,
-                      );
-
-                      // If an error occurred, break out of the loop
-                      if (errorResult) return;
-
-                      // g. Validate nextState is a legal transition
-                      if (
-                        !isLegalTransition(
-                          currentState,
-                          transitionResult.nextState,
-                          definition.transitions,
-                        )
-                      ) {
-                        return yield* Effect.fail(
-                          mkDefinitionError({
-                            message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
-                            details: [
-                              `Action "${actionId}" returned nextState "${transitionResult.nextState}" which is not in the definition's transitions`,
-                            ],
-                          }),
-                        );
-                      }
-
-                      // h. Run middleware afterTransition
-                      yield* middlewareExec.runAfter({
-                        ...middlewareCtx,
-                        result: transitionResult,
-                      });
-
-                      // i. Record TransitionRecord in history
-                      const transitionRecord: TransitionRecord = {
-                        id: crypto.randomUUID(),
-                        fromState: currentState,
-                        toState: transitionResult.nextState,
-                        data: transitionResult.data,
-                        timestamp: new Date().toISOString(),
-                        durationMs,
-                        actionId,
-                      };
-
-                      history = [...history, transitionRecord];
-
-                      // j. Collect log entries from StateLogger
-                      const logEntries = [...loggerFactory.getEntries()];
-                      allLogs = [...allLogs, ...logEntries];
-
-                      // k. Checkpoint 3: Persist history + logs + advance state
-                      const nextState = transitionResult.nextState;
-                      const nextStateData = transitionResult.data ?? stateData;
-
-                      yield* store.updateInstance(instanceId, {
-                        currentState: nextState,
-                        stateData: nextStateData,
-                        history,
-                        logs: allLogs,
-                        updatedAt: new Date().toISOString(),
-                      });
-
-                      // Advance loop variables
-                      currentState = nextState;
-                      stateData = nextStateData;
-                    }),
-                  );
-
-                  if (errorResult) return;
-                }
-              }
-            });
-
-            // ── Apply machine-level timeout if configured ──
+            // Apply machine-level timeout if configured
             const timedStateLoop = opts?.timeoutMs
               ? stateLoop.pipe(
                   Effect.timeoutFail({
@@ -1097,7 +1565,7 @@ export const StateMachineRunnerLive = Layer.effect(
                     onTimeout: () =>
                       mkActionError({
                         actionId: 'machine',
-                        stateName: currentState,
+                        stateName: ls.currentState,
                         cause: 'machine_timeout',
                       }),
                   }),
@@ -1112,11 +1580,10 @@ export const StateMachineRunnerLive = Layer.effect(
                     const timeoutVal = opts?.timeoutMs ?? 0;
                     const errorMessage = `Machine execution timed out after ${String(timeoutVal)}ms`;
 
-                    // Run middleware onError (never fails)
                     yield* middlewareExec.runOnError({
                       instance: yield* store.getInstance(instanceId),
-                      stateName: currentState,
-                      stateData,
+                      stateName: ls.currentState,
+                      stateData: ls.stateData,
                       definition,
                       error: err,
                     });
@@ -1124,176 +1591,21 @@ export const StateMachineRunnerLive = Layer.effect(
                     yield* persistError(errorMessage, undefined, timeoutVal);
                     return;
                   }
-                  // Re-throw non-timeout errors
                   return yield* Effect.fail(err);
                 }),
               ),
             );
 
-            // If any error occurred during the loop, return the error result
-            // (errorResult is mutated inside Effect closures — TS can't track it)
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-            if (errorResult) {
-              return errorResult;
+            if (ls.errorResult) {
+              return ls.errorResult;
             }
 
-            // ──────────────────────────────────────────────────────────────
-            // 5. Terminal state resolution — Checkpoint 4
-            // ──────────────────────────────────────────────────────────────
+            // ── Terminal state resolution — Checkpoint 4 ──
+            return yield* resolveTerminalState(ls);
+          }).pipe(Effect.onInterrupt(() => makeOnInterruptFinalizer(instanceId)));
 
-            let result: MachineResult;
-
-            if (currentState === 'completed') {
-              const output = history.length > 0 ? history[history.length - 1].data : stateData;
-
-              yield* store.updateInstance(instanceId, {
-                status: 'completed',
-                currentState,
-                output,
-                history,
-                logs: allLogs,
-                updatedAt: new Date().toISOString(),
-              });
-
-              result = {
-                status: 'completed',
-                output,
-                instanceId,
-              };
-            } else if (currentState === 'error') {
-              const errorMsg =
-                history.length > 0
-                  ? `Machine reached error state`
-                  : 'Machine entered error terminal state';
-
-              yield* store.updateInstance(instanceId, {
-                status: 'error',
-                currentState,
-                error: errorMsg,
-                history,
-                logs: allLogs,
-                updatedAt: new Date().toISOString(),
-              });
-
-              result = {
-                status: 'error',
-                error: errorMsg,
-                instanceId,
-              };
-            } else if (currentState === 'cancelled') {
-              yield* store.updateInstance(instanceId, {
-                status: 'cancelled',
-                currentState,
-                history,
-                logs: allLogs,
-                updatedAt: new Date().toISOString(),
-              });
-
-              result = {
-                status: 'cancelled',
-                instanceId,
-              };
-            } else {
-              // Unexpected terminal state
-              yield* store.updateInstance(instanceId, {
-                status: 'error',
-                currentState,
-                error: `Unexpected terminal state "${currentState}"`,
-                history,
-                logs: allLogs,
-                updatedAt: new Date().toISOString(),
-              });
-
-              result = {
-                status: 'error',
-                error: `Unexpected terminal state "${currentState}"`,
-                instanceId,
-              };
-            }
-
-            return result;
-          }).pipe(
-            Effect.onInterrupt(() =>
-              Effect.gen(function* () {
-                // Read the latest persisted state (may have been checkpointed)
-                const latestInstance = yield* store
-                  .getInstance(instanceId)
-                  .pipe(Effect.catchAll(() => Effect.succeed(null as MachineInstance | null)));
-                if (!latestInstance) return;
-
-                // Skip if already in a terminal state (another code path handled it)
-                if (
-                  latestInstance.status === 'cancelled' ||
-                  latestInstance.status === 'completed' ||
-                  latestInstance.status === 'error' ||
-                  latestInstance.status === 'suspended'
-                ) {
-                  return;
-                }
-
-                // Distinguish suspension from cancellation
-                const reason: 'suspended' | 'cancelled' = isShuttingDown
-                  ? 'suspended'
-                  : 'cancelled';
-
-                if (reason === 'suspended') {
-                  // Checkpoint 5: Preserve currentState for resume —
-                  // do NOT add a transition record (the action was interrupted,
-                  // not completed). Keep currentState pointing at the
-                  // interrupted state so resume can re-enter it.
-                  yield* store
-                    .updateInstance(instanceId, {
-                      status: 'suspended',
-                      updatedAt: new Date().toISOString(),
-                    })
-                    .pipe(Effect.catchAll(() => Effect.void));
-                } else {
-                  const cancellationRecord: TransitionRecord = {
-                    id: crypto.randomUUID(),
-                    fromState: latestInstance.currentState,
-                    toState: 'cancelled',
-                    timestamp: new Date().toISOString(),
-                    durationMs: 0,
-                  };
-
-                  yield* store
-                    .updateInstance(instanceId, {
-                      status: 'cancelled',
-                      currentState: 'cancelled',
-                      history: [...latestInstance.history, cancellationRecord],
-                      updatedAt: new Date().toISOString(),
-                    })
-                    .pipe(Effect.catchAll(() => Effect.void));
-                }
-              }).pipe(Effect.catchAll(() => Effect.void)),
-            ),
-          );
-
-          // ──────────────────────────────────────────────────────────────
-          // 5. Fork as fiber, track, await, cleanup
-          // ──────────────────────────────────────────────────────────────
-
-          const fiber = yield* Effect.fork(machineExec);
-          fiberMap.set(instanceId, fiber);
-
-          const exit = yield* Fiber.await(fiber);
-          fiberMap.delete(instanceId);
-
-          if (Exit.isSuccess(exit)) {
-            return exit.value;
-          }
-
-          // Fiber was interrupted — onInterrupt finalizer already persisted state.
-          // Distinguish suspended (shutdown) from cancelled (explicit cancel).
-          if (Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause)) {
-            if (isShuttingDown) {
-              return { status: 'cancelled' as const, instanceId } as MachineResult;
-            }
-            return { status: 'cancelled' as const, instanceId } as MachineResult;
-          }
-
-          // Re-raise non-interruption failures
-          return yield* Effect.failCause(exit.cause);
+          // ── 6. Fork, track, await, cleanup ──
+          return yield* forkTrackAwait(instanceId, machineExec);
         });
       },
 
@@ -1356,7 +1668,7 @@ export const StateMachineRunnerLive = Layer.effect(
       },
 
       // ────────────────────────────────────────────────────────────────
-      // resume() — Task 15: Resume a suspended machine instance
+      // resume() — Setup + shared loop (Task 17.1 — step 8)
       // ────────────────────────────────────────────────────────────────
 
       resume(instanceId) {
@@ -1414,7 +1726,6 @@ export const StateMachineRunnerLive = Layer.effect(
 
           // 4. Handle child resumption first
           if (instance.childInstanceId) {
-            // Single child — resume if suspended, skip if already completed
             const childInstance = yield* store
               .getInstance(instance.childInstanceId)
               .pipe(
@@ -1429,7 +1740,6 @@ export const StateMachineRunnerLive = Layer.effect(
           }
 
           if (instance.childInstanceIds) {
-            // Parallel children — resume each suspended child
             for (const childId of Object.values(instance.childInstanceIds)) {
               const childInstance = yield* store
                 .getInstance(childId)
@@ -1451,880 +1761,52 @@ export const StateMachineRunnerLive = Layer.effect(
             updatedAt: new Date().toISOString(),
           });
 
-          // 6. Re-run the machine from the persisted currentState.
-          //    We call runner.run() with the original definition + input,
-          //    but we need to fast-forward past already-completed transitions.
-          //    Instead, we build a "trimmed" run that enters the state loop
-          //    at instance.currentState with instance.stateData.
-          const resumeExec = Effect.gen(function* () {
-            let currentState = instance.currentState;
-            let stateData: unknown = instance.stateData;
-            let history: TransitionRecord[] = [...instance.history];
-            let allLogs = [...instance.logs];
-            let errorResult: MachineResult | null = null;
-
-            // Build parent context (if child machine)
-            const parentContext = instance.parentInstanceId
-              ? {
-                  parentInstanceId: instance.parentInstanceId,
-                  parentStateName:
-                    instance.history.length > 0
-                      ? instance.history[instance.history.length - 1].fromState
-                      : instance.currentState,
-                }
-              : undefined;
-
-            const persistError = (
-              errorMessage: string,
-              actionId: string | undefined,
-              durationMs: number,
-            ) =>
-              Effect.gen(function* () {
-                const errorTransitionRecord: TransitionRecord = {
-                  id: crypto.randomUUID(),
-                  fromState: currentState,
-                  toState: 'error',
-                  timestamp: new Date().toISOString(),
-                  durationMs,
-                  actionId,
-                };
-
-                history = [...history, errorTransitionRecord];
-
-                yield* store.updateInstance(instanceId, {
-                  status: 'error',
-                  currentState: 'error',
-                  stateData,
-                  error: errorMessage,
-                  history,
-                  logs: allLogs,
-                  updatedAt: new Date().toISOString(),
-                });
-
-                errorResult = {
-                  status: 'error',
-                  error: errorMessage,
-                  instanceId,
-                };
-              });
-
-            const executeAction = (
-              actionId: string,
-              actionCtx: ActionContext,
-              stateDef: { readonly timeoutMs?: number },
-              middlewareCtx: {
-                instance: MachineInstance;
-                stateName: string;
-                stateData: unknown;
-                definition: StateMachineDefinition;
-              },
-              loggerFactory: ReturnType<typeof createStateLoggerFactory>,
-            ) =>
-              Effect.gen(function* () {
-                const { fn: actionFn } = yield* registry.get(actionId);
-
-                const startTime = Date.now();
-
-                const rawAction = actionFn(actionCtx);
-                const timedAction = stateDef.timeoutMs
-                  ? rawAction.pipe(
-                      Effect.timeoutFail({
-                        duration: Duration.millis(stateDef.timeoutMs),
-                        onTimeout: () =>
-                          mkActionError({
-                            actionId,
-                            stateName: currentState,
-                            cause: 'timeout',
-                          }),
-                      }),
-                    )
-                  : rawAction;
-
-                const transitionResult = yield* timedAction.pipe(
-                  Effect.catchAll((actionError: ActionError) =>
-                    Effect.gen(function* () {
-                      const machineError: MachineError = mkActionError({
-                        actionId,
-                        stateName: currentState,
-                        cause: actionError.cause ?? actionError,
-                      });
-
-                      yield* middlewareExec.runOnError({
-                        ...middlewareCtx,
-                        error: machineError,
-                      });
-
-                      const errorLogs = [...loggerFactory.getEntries()];
-                      allLogs = [...allLogs, ...errorLogs];
-
-                      const isTimeout = actionError.cause === 'timeout';
-                      const errorMessage = isTimeout
-                        ? `Action '${actionId}' in state '${currentState}' timed out after ${String(stateDef.timeoutMs ?? 0)}ms`
-                        : actionError.cause instanceof Error
-                          ? actionError.cause.message
-                          : typeof actionError.cause === 'string'
-                            ? actionError.cause
-                            : `Action "${actionId}" failed in state "${currentState}"`;
-
-                      const durationMs = Date.now() - startTime;
-                      yield* persistError(errorMessage, actionId, durationMs);
-
-                      return { nextState: 'error' } as TransitionResult;
-                    }),
-                  ),
-                );
-
-                const durationMs = Date.now() - startTime;
-                return { transitionResult, durationMs };
-              });
-
-            // ── Resume state loop ──
-            const stateLoop = Effect.gen(function* () {
-              const runPreamble = () =>
-                Effect.gen(function* () {
-                  yield* store.updateInstance(instanceId, {
-                    currentState,
-                    stateData,
-                    history,
-                    updatedAt: new Date().toISOString(),
-                  });
-
-                  const loggerFactory = createStateLoggerFactory();
-                  const logger = loggerFactory.create(instanceId, currentState);
-                  const artifacts = artifactFactory.makeScoped(
-                    instanceId,
-                    currentState,
-                    instance.parentInstanceId,
-                  );
-
-                  const actionCtx: ActionContext = {
-                    machineInstanceId: instanceId,
-                    machineDefId: definition.id,
-                    stateName: currentState,
-                    stateData,
-                    machineInput: instance.input,
-                    parentContext,
-                    logger,
-                    artifacts,
-                  };
-
-                  const latestInstance = yield* store.getInstance(instanceId);
-                  const middlewareCtx = {
-                    instance: latestInstance,
-                    stateName: currentState,
-                    stateData,
-                    definition,
-                  };
-
-                  yield* middlewareExec.runBefore(middlewareCtx);
-
-                  return { loggerFactory, actionCtx, middlewareCtx };
-                });
-
-              // The state loop — identical to the run() loop but starting
-              // from the resumed currentState.
-              while (definition.states[currentState].type !== 'terminal') {
-                const stateDef = definition.states[currentState];
-
-                if (stateDef.type === 'child_machine') {
-                  // For child_machine states on resume:
-                  // Check if the child has already completed. If so, use
-                  // its result directly. Otherwise, re-spawn.
-                  const existingChildId = instance.childInstanceId;
-                  let childResult: MachineResult | null = null;
-
-                  if (existingChildId) {
-                    const childInstance = yield* store
-                      .getInstance(existingChildId)
-                      .pipe(
-                        Effect.catchTag('NotFoundError', () =>
-                          Effect.succeed(null as MachineInstance | null),
-                        ),
-                      );
-
-                    if (
-                      childInstance &&
-                      (childInstance.status === 'completed' ||
-                        childInstance.status === 'error' ||
-                        childInstance.status === 'cancelled')
-                    ) {
-                      // Child already reached terminal — use its stored result
-                      childResult =
-                        childInstance.status === 'completed'
-                          ? {
-                              status: 'completed',
-                              output: childInstance.output,
-                              instanceId: childInstance.id,
-                            }
-                          : childInstance.status === 'error'
-                            ? {
-                                status: 'error',
-                                error: childInstance.error ?? 'Child errored',
-                                instanceId: childInstance.id,
-                              }
-                            : {
-                                status: 'cancelled',
-                                instanceId: childInstance.id,
-                              };
-                    }
-                  }
-
-                  if (childResult) {
-                    // Child already done — proceed to post-child action
-                    const resolvedChild = childResult;
-                    yield* semaphore.withPermits(1)(
-                      Effect.gen(function* () {
-                        const preamble = yield* runPreamble();
-
-                        yield* store.updateInstance(instanceId, {
-                          status: 'running',
-                          childInstanceId: resolvedChild.instanceId,
-                          updatedAt: new Date().toISOString(),
-                        });
-
-                        stateData = resolvedChild;
-
-                        const actionId = stateDef.actionId;
-                        if (!actionId) {
-                          return yield* Effect.fail(
-                            mkDefinitionError({
-                              message: `State "${currentState}" of type "child_machine" has no actionId`,
-                            }),
-                          );
-                        }
-
-                        const childActionCtx: ActionContext = {
-                          ...preamble.actionCtx,
-                          stateData,
-                        };
-
-                        const { transitionResult, durationMs } = yield* executeAction(
-                          actionId,
-                          childActionCtx,
-                          stateDef,
-                          { ...preamble.middlewareCtx, stateData },
-                          preamble.loggerFactory,
-                        );
-
-                        if (errorResult) return;
-
-                        if (
-                          !isLegalTransition(
-                            currentState,
-                            transitionResult.nextState,
-                            definition.transitions,
-                          )
-                        ) {
-                          return yield* Effect.fail(
-                            mkDefinitionError({
-                              message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
-                            }),
-                          );
-                        }
-
-                        yield* middlewareExec.runAfter({
-                          ...preamble.middlewareCtx,
-                          stateData,
-                          result: transitionResult,
-                        });
-
-                        const transitionRecord: TransitionRecord = {
-                          id: crypto.randomUUID(),
-                          fromState: currentState,
-                          toState: transitionResult.nextState,
-                          data: transitionResult.data,
-                          timestamp: new Date().toISOString(),
-                          durationMs,
-                          actionId,
-                          childInstanceId: resolvedChild.instanceId,
-                          childDefinitionId: stateDef.childMachineDefId,
-                        };
-
-                        history = [...history, transitionRecord];
-
-                        const logEntries = [...preamble.loggerFactory.getEntries()];
-                        allLogs = [...allLogs, ...logEntries];
-
-                        const nextState = transitionResult.nextState;
-                        const nextStateData = transitionResult.data ?? stateData;
-
-                        yield* store.updateInstance(instanceId, {
-                          currentState: nextState,
-                          stateData: nextStateData,
-                          childInstanceId: undefined,
-                          history,
-                          logs: allLogs,
-                          updatedAt: new Date().toISOString(),
-                        });
-
-                        currentState = nextState;
-                        stateData = nextStateData;
-                      }),
-                    );
-
-                    if (errorResult) return;
-                  } else {
-                    // Child needs to be (re-)spawned — delegate to normal run path
-                    // by re-using the same child_machine logic from run()
-                    const childSpawnInfo = yield* semaphore.withPermits(1)(
-                      Effect.gen(function* () {
-                        const preamble = yield* runPreamble();
-
-                        const childDefId = stateDef.childMachineDefId;
-                        if (!childDefId) {
-                          return yield* Effect.fail(
-                            mkDefinitionError({
-                              message: `State "${currentState}" of type "child_machine" has no childMachineDefId`,
-                            }),
-                          );
-                        }
-
-                        const childDefinition = yield* store
-                          .getDefinition(childDefId)
-                          .pipe(
-                            Effect.catchTag('NotFoundError', (err: NotFoundError) =>
-                              Effect.fail(
-                                mkNotFoundError({ entityType: err.entityType, id: err.id }),
-                              ),
-                            ),
-                          );
-
-                        const mappingExpr = stateDef.childInputMapping;
-                        if (!mappingExpr) {
-                          return yield* Effect.fail(
-                            mkDefinitionError({
-                              message: `State "${currentState}" of type "child_machine" has no childInputMapping`,
-                            }),
-                          );
-                        }
-
-                        let childInput: unknown;
-                        try {
-                          const jsonPathResult: unknown[] = JSONPath({
-                            path: mappingExpr,
-                            json: {
-                              stateData,
-                              machineInput: instance.input,
-                              stateName: currentState,
-                            },
-                          });
-
-                          if (!Array.isArray(jsonPathResult) || jsonPathResult.length === 0) {
-                            return yield* Effect.fail(
-                              mkActionError({
-                                actionId: 'child_machine',
-                                stateName: currentState,
-                                cause: `childInputMapping "${mappingExpr}" returned no results`,
-                              }),
-                            );
-                          }
-
-                          childInput =
-                            jsonPathResult.length === 1 ? jsonPathResult[0] : jsonPathResult;
-                        } catch (jsonPathError) {
-                          return yield* Effect.fail(
-                            mkActionError({
-                              actionId: 'child_machine',
-                              stateName: currentState,
-                              cause:
-                                jsonPathError instanceof Error
-                                  ? `Invalid childInputMapping: ${jsonPathError.message}`
-                                  : `Invalid childInputMapping: ${String(jsonPathError)}`,
-                            }),
-                          );
-                        }
-
-                        yield* store.updateInstance(instanceId, {
-                          status: 'waiting_for_child',
-                          updatedAt: new Date().toISOString(),
-                        });
-
-                        return {
-                          childDefId,
-                          childDefinition,
-                          childInput,
-                          ...preamble,
-                        };
-                      }),
-                    );
-
-                    const childStartTime = Date.now();
-                    const freshChildResult: MachineResult = yield* runner.run(
-                      childSpawnInfo.childDefinition,
-                      childSpawnInfo.childInput,
-                      {
-                        parentInstanceId: instanceId,
-                        parentStateName: currentState,
-                        depth: 1, // resumed children start at depth 1
-                      },
-                    );
-
-                    yield* semaphore.withPermits(1)(
-                      Effect.gen(function* () {
-                        yield* store.updateInstance(instanceId, {
-                          status: 'running',
-                          childInstanceId: freshChildResult.instanceId,
-                          updatedAt: new Date().toISOString(),
-                        });
-
-                        stateData = freshChildResult;
-
-                        const actionId = stateDef.actionId;
-                        if (!actionId) {
-                          return yield* Effect.fail(
-                            mkDefinitionError({
-                              message: `State "${currentState}" of type "child_machine" has no actionId`,
-                            }),
-                          );
-                        }
-
-                        const childActionCtx: ActionContext = {
-                          ...childSpawnInfo.actionCtx,
-                          stateData,
-                        };
-
-                        const { transitionResult, durationMs } = yield* executeAction(
-                          actionId,
-                          childActionCtx,
-                          stateDef,
-                          { ...childSpawnInfo.middlewareCtx, stateData },
-                          childSpawnInfo.loggerFactory,
-                        );
-
-                        if (errorResult) return;
-
-                        if (
-                          !isLegalTransition(
-                            currentState,
-                            transitionResult.nextState,
-                            definition.transitions,
-                          )
-                        ) {
-                          return yield* Effect.fail(
-                            mkDefinitionError({
-                              message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
-                            }),
-                          );
-                        }
-
-                        yield* middlewareExec.runAfter({
-                          ...childSpawnInfo.middlewareCtx,
-                          stateData,
-                          result: transitionResult,
-                        });
-
-                        const totalDurationMs = Date.now() - childStartTime;
-                        const transitionRecord: TransitionRecord = {
-                          id: crypto.randomUUID(),
-                          fromState: currentState,
-                          toState: transitionResult.nextState,
-                          data: transitionResult.data,
-                          timestamp: new Date().toISOString(),
-                          durationMs: totalDurationMs > 0 ? totalDurationMs : durationMs,
-                          actionId,
-                          childInstanceId: freshChildResult.instanceId,
-                          childDefinitionId: childSpawnInfo.childDefId,
-                        };
-
-                        history = [...history, transitionRecord];
-
-                        const logEntries = [...childSpawnInfo.loggerFactory.getEntries()];
-                        allLogs = [...allLogs, ...logEntries];
-
-                        const nextState = transitionResult.nextState;
-                        const nextStateData = transitionResult.data ?? stateData;
-
-                        yield* store.updateInstance(instanceId, {
-                          currentState: nextState,
-                          stateData: nextStateData,
-                          childInstanceId: undefined,
-                          history,
-                          logs: allLogs,
-                          updatedAt: new Date().toISOString(),
-                        });
-
-                        currentState = nextState;
-                        stateData = nextStateData;
-                      }),
-                    );
-
-                    if (errorResult) return;
-                  }
-                } else if (stateDef.type === 'parallel_children') {
-                  // For parallel_children on resume: check if all children
-                  // have reached terminal state. If so, collect results.
-                  // Otherwise re-spawn the incomplete ones.
-                  const existingChildIds = instance.childInstanceIds;
-                  const childResults: Record<string, MachineResult> = {};
-                  const childInstanceIds: Record<string, string> = {};
-                  let allChildrenDone = true;
-
-                  if (existingChildIds) {
-                    for (const [key, childId] of Object.entries(existingChildIds)) {
-                      const childInstance = yield* store
-                        .getInstance(childId)
-                        .pipe(
-                          Effect.catchTag('NotFoundError', () =>
-                            Effect.succeed(null as MachineInstance | null),
-                          ),
-                        );
-
-                      if (
-                        childInstance &&
-                        (childInstance.status === 'completed' ||
-                          childInstance.status === 'error' ||
-                          childInstance.status === 'cancelled')
-                      ) {
-                        childResults[key] =
-                          childInstance.status === 'completed'
-                            ? {
-                                status: 'completed',
-                                output: childInstance.output,
-                                instanceId: childInstance.id,
-                              }
-                            : childInstance.status === 'error'
-                              ? {
-                                  status: 'error',
-                                  error: childInstance.error ?? 'Child errored',
-                                  instanceId: childInstance.id,
-                                }
-                              : {
-                                  status: 'cancelled',
-                                  instanceId: childInstance.id,
-                                };
-                        childInstanceIds[key] = childInstance.id;
-                      } else {
-                        allChildrenDone = false;
-                      }
-                    }
-                  } else {
-                    allChildrenDone = false;
-                  }
-
-                  if (!allChildrenDone) {
-                    // Not all children are done — this shouldn't normally happen
-                    // after recursive resume, but handle gracefully by re-running
-                    // the parallel_children state as if fresh.
-                    // For now, fail with a descriptive error.
-                    return yield* Effect.fail(
-                      mkDefinitionError({
-                        message: `Cannot resume parallel_children state "${currentState}" — not all children have reached terminal state`,
-                      }),
-                    );
-                  }
-
-                  // All children done — proceed to post-children action
-                  yield* semaphore.withPermits(1)(
-                    Effect.gen(function* () {
-                      const preamble = yield* runPreamble();
-
-                      const parallelResult: ParallelChildrenResult = {
-                        results: childResults,
-                        childInstanceIds,
-                      };
-
-                      yield* store.updateInstance(instanceId, {
-                        status: 'running',
-                        childInstanceIds,
-                        updatedAt: new Date().toISOString(),
-                      });
-
-                      stateData = parallelResult;
-
-                      const actionId = stateDef.actionId;
-                      if (!actionId) {
-                        return yield* Effect.fail(
-                          mkDefinitionError({
-                            message: `State "${currentState}" of type "parallel_children" has no actionId`,
-                          }),
-                        );
-                      }
-
-                      const parallelActionCtx: ActionContext = {
-                        ...preamble.actionCtx,
-                        stateData,
-                      };
-
-                      const { transitionResult, durationMs } = yield* executeAction(
-                        actionId,
-                        parallelActionCtx,
-                        stateDef,
-                        { ...preamble.middlewareCtx, stateData },
-                        preamble.loggerFactory,
-                      );
-
-                      if (errorResult) return;
-
-                      if (
-                        !isLegalTransition(
-                          currentState,
-                          transitionResult.nextState,
-                          definition.transitions,
-                        )
-                      ) {
-                        return yield* Effect.fail(
-                          mkDefinitionError({
-                            message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
-                          }),
-                        );
-                      }
-
-                      yield* middlewareExec.runAfter({
-                        ...preamble.middlewareCtx,
-                        stateData,
-                        result: transitionResult,
-                      });
-
-                      const transitionRecord: TransitionRecord = {
-                        id: crypto.randomUUID(),
-                        fromState: currentState,
-                        toState: transitionResult.nextState,
-                        data: transitionResult.data,
-                        timestamp: new Date().toISOString(),
-                        durationMs,
-                        actionId,
-                        childInstanceIds,
-                      };
-
-                      history = [...history, transitionRecord];
-
-                      const logEntries = [...preamble.loggerFactory.getEntries()];
-                      allLogs = [...allLogs, ...logEntries];
-
-                      const nextState = transitionResult.nextState;
-                      const nextStateData = transitionResult.data ?? stateData;
-
-                      yield* store.updateInstance(instanceId, {
-                        currentState: nextState,
-                        stateData: nextStateData,
-                        childInstanceIds: undefined,
-                        history,
-                        logs: allLogs,
-                        updatedAt: new Date().toISOString(),
-                      });
-
-                      currentState = nextState;
-                      stateData = nextStateData;
-                    }),
-                  );
-
-                  if (errorResult) return;
-                } else {
-                  // ── Normal action execution (same as run() loop) ──
-                  yield* semaphore.withPermits(1)(
-                    Effect.gen(function* () {
-                      const { loggerFactory, actionCtx, middlewareCtx } = yield* runPreamble();
-
-                      const actionId = stateDef.actionId;
-                      if (!actionId) {
-                        return yield* Effect.fail(
-                          mkDefinitionError({
-                            message: `State "${currentState}" of type "action" has no actionId`,
-                          }),
-                        );
-                      }
-
-                      const { transitionResult, durationMs } = yield* executeAction(
-                        actionId,
-                        actionCtx,
-                        stateDef,
-                        middlewareCtx,
-                        loggerFactory,
-                      );
-
-                      if (errorResult) return;
-
-                      if (
-                        !isLegalTransition(
-                          currentState,
-                          transitionResult.nextState,
-                          definition.transitions,
-                        )
-                      ) {
-                        return yield* Effect.fail(
-                          mkDefinitionError({
-                            message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
-                          }),
-                        );
-                      }
-
-                      yield* middlewareExec.runAfter({
-                        ...middlewareCtx,
-                        result: transitionResult,
-                      });
-
-                      const transitionRecord: TransitionRecord = {
-                        id: crypto.randomUUID(),
-                        fromState: currentState,
-                        toState: transitionResult.nextState,
-                        data: transitionResult.data,
-                        timestamp: new Date().toISOString(),
-                        durationMs,
-                        actionId,
-                      };
-
-                      history = [...history, transitionRecord];
-
-                      const logEntries = [...loggerFactory.getEntries()];
-                      allLogs = [...allLogs, ...logEntries];
-
-                      const nextState = transitionResult.nextState;
-                      const nextStateData = transitionResult.data ?? stateData;
-
-                      yield* store.updateInstance(instanceId, {
-                        currentState: nextState,
-                        stateData: nextStateData,
-                        history,
-                        logs: allLogs,
-                        updatedAt: new Date().toISOString(),
-                      });
-
-                      currentState = nextState;
-                      stateData = nextStateData;
-                    }),
-                  );
-
-                  if (errorResult) return;
-                }
+          // 6. Build LoopState from persisted instance
+          const parentContext = instance.parentInstanceId
+            ? {
+                parentInstanceId: instance.parentInstanceId,
+                parentStateName:
+                  instance.history.length > 0
+                    ? instance.history[instance.history.length - 1].fromState
+                    : instance.currentState,
               }
+            : undefined;
+
+          const ls: LoopState = {
+            instanceId,
+            definition,
+            machineInput: instance.input,
+            parentContext,
+            parentInstanceId: instance.parentInstanceId,
+            depth: 0,
+            currentState: instance.currentState,
+            stateData: instance.stateData,
+            history: [...instance.history],
+            allLogs: [...instance.logs],
+            errorResult: null,
+          };
+
+          const persistError = makePersistError(ls);
+          const executeAction = makeExecuteAction(ls, persistError);
+          const runPreamble = makeRunPreamble(ls);
+
+          // 7. Build resumeExec = executeStateLoop + resolveTerminalState
+          const resumeExec = Effect.gen(function* () {
+            const stateLoop = executeStateLoop(ls, executeAction, runPreamble, undefined, {
+              instance,
             });
 
             yield* stateLoop;
 
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-            if (errorResult) {
-              return errorResult;
+            if (ls.errorResult) {
+              return ls.errorResult;
             }
 
-            // ── Terminal state resolution ──
-            let result: MachineResult;
+            return yield* resolveTerminalState(ls);
+          }).pipe(Effect.onInterrupt(() => makeOnInterruptFinalizer(instanceId)));
 
-            if (currentState === 'completed') {
-              const output = history.length > 0 ? history[history.length - 1].data : stateData;
-
-              yield* store.updateInstance(instanceId, {
-                status: 'completed',
-                currentState,
-                output,
-                history,
-                logs: allLogs,
-                updatedAt: new Date().toISOString(),
-              });
-
-              result = { status: 'completed', output, instanceId };
-            } else if (currentState === 'error') {
-              const errorMsg =
-                history.length > 0
-                  ? 'Machine reached error state'
-                  : 'Machine entered error terminal state';
-
-              yield* store.updateInstance(instanceId, {
-                status: 'error',
-                currentState,
-                error: errorMsg,
-                history,
-                logs: allLogs,
-                updatedAt: new Date().toISOString(),
-              });
-
-              result = { status: 'error', error: errorMsg, instanceId };
-            } else if (currentState === 'cancelled') {
-              yield* store.updateInstance(instanceId, {
-                status: 'cancelled',
-                currentState,
-                history,
-                logs: allLogs,
-                updatedAt: new Date().toISOString(),
-              });
-
-              result = { status: 'cancelled', instanceId };
-            } else {
-              yield* store.updateInstance(instanceId, {
-                status: 'error',
-                currentState,
-                error: `Unexpected terminal state "${currentState}"`,
-                history,
-                logs: allLogs,
-                updatedAt: new Date().toISOString(),
-              });
-
-              result = {
-                status: 'error',
-                error: `Unexpected terminal state "${currentState}"`,
-                instanceId,
-              };
-            }
-
-            return result;
-          }).pipe(
-            Effect.onInterrupt(() =>
-              Effect.gen(function* () {
-                const latestInstance = yield* store
-                  .getInstance(instanceId)
-                  .pipe(Effect.catchAll(() => Effect.succeed(null as MachineInstance | null)));
-                if (!latestInstance) return;
-
-                if (
-                  latestInstance.status === 'cancelled' ||
-                  latestInstance.status === 'completed' ||
-                  latestInstance.status === 'error' ||
-                  latestInstance.status === 'suspended'
-                ) {
-                  return;
-                }
-
-                const reason: 'suspended' | 'cancelled' = isShuttingDown
-                  ? 'suspended'
-                  : 'cancelled';
-
-                if (reason === 'suspended') {
-                  yield* store
-                    .updateInstance(instanceId, {
-                      status: 'suspended',
-                      updatedAt: new Date().toISOString(),
-                    })
-                    .pipe(Effect.catchAll(() => Effect.void));
-                } else {
-                  const cancellationRecord: TransitionRecord = {
-                    id: crypto.randomUUID(),
-                    fromState: latestInstance.currentState,
-                    toState: 'cancelled',
-                    timestamp: new Date().toISOString(),
-                    durationMs: 0,
-                  };
-
-                  yield* store
-                    .updateInstance(instanceId, {
-                      status: 'cancelled',
-                      currentState: 'cancelled',
-                      history: [...latestInstance.history, cancellationRecord],
-                      updatedAt: new Date().toISOString(),
-                    })
-                    .pipe(Effect.catchAll(() => Effect.void));
-                }
-              }).pipe(Effect.catchAll(() => Effect.void)),
-            ),
-          );
-
-          // Fork as fiber, track, await, cleanup
-          const fiber = yield* Effect.fork(resumeExec);
-          fiberMap.set(instanceId, fiber);
-
-          const exit = yield* Fiber.await(fiber);
-          fiberMap.delete(instanceId);
-
-          if (Exit.isSuccess(exit)) {
-            return exit.value;
-          }
-
-          if (Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause)) {
-            if (isShuttingDown) {
-              return { status: 'cancelled' as const, instanceId } as MachineResult;
-            }
-            return { status: 'cancelled' as const, instanceId } as MachineResult;
-          }
-
-          return yield* Effect.failCause(exit.cause);
+          // 8. Fork, track, await, cleanup
+          return yield* forkTrackAwait(instanceId, resumeExec);
         });
       },
 
