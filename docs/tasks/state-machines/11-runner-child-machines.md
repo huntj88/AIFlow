@@ -160,14 +160,14 @@ If the child machine errors:
 
 ## Validation Checklist
 
-- [ ] ~~`jsonpath-plus` is added to server dependencies~~ (already present from Task 05)
-- [ ] `childInputMapping` JSONPath expression evaluates correctly
-- [ ] Invalid JSONPath expression → error (not null)
-- [ ] Parent status changes to `'waiting_for_child'` during child execution
-- [ ] Child instance has `parentInstanceId` set to parent's ID
-- [ ] Child result flows into parent's `stateData`
-- [ ] Parent's `actionId` executes after child completion
-- [ ] `ctx.parentContext` is populated in child actions
-- [ ] `TransitionRecord` captures child instance/definition IDs
-- [ ] Depth is incremented for child machine (`opts.depth + 1`)
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
+- [x] ~~`jsonpath-plus` is added to server dependencies~~ (already present from Task 05)
+- [x] `childInputMapping` JSONPath expression evaluates correctly
+- [x] Invalid JSONPath expression → error (not null)
+- [x] Parent status changes to `'waiting_for_child'` during child execution
+- [x] Child instance has `parentInstanceId` set to parent's ID
+- [x] Child result flows into parent's `stateData`
+- [x] Parent's `actionId` executes after child completion
+- [x] `ctx.parentContext` is populated in child actions
+- [x] `TransitionRecord` captures child instance/definition IDs
+- [x] Depth is incremented for child machine (`opts.depth + 1`)
+- [x] `pnpm --filter @aiflow/server run build` succeeds

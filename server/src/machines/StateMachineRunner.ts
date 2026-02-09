@@ -14,6 +14,7 @@
 
 import AjvModule from 'ajv';
 import { Context, Duration, Effect, Layer } from 'effect';
+import { JSONPath } from 'jsonpath-plus';
 
 import { ActionRegistry } from './ActionRegistry.js';
 import { validateDefinition } from './DefinitionValidator.js';
@@ -25,13 +26,15 @@ import type {
   ActionContext,
   ActionError,
   MachineError,
+  MachineInstance,
   MachineResult,
+  NotFoundError,
   StateMachineDefinition,
   TransitionRecord,
   TransitionResult,
   TransitionRule,
 } from './types.js';
-import { mkActionError, mkDefinitionError, mkValidationError } from './types.js';
+import { mkActionError, mkDefinitionError, mkNotFoundError, mkValidationError } from './types.js';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Ajv CJS interop
@@ -237,64 +240,22 @@ export const StateMachineRunnerLive = Layer.effect(
               };
             });
 
-          // ── The core state loop as a separate Effect (for machine-level timeout) ──
-          const stateLoop = Effect.gen(function* () {
-            while (definition.states[currentState].type !== 'terminal') {
-              const stateDef = definition.states[currentState];
-
-              // ── a. Checkpoint 2: Persist BEFORE action runs ──
-              yield* store.updateInstance(instanceId, {
-                currentState,
-                stateData,
-                history,
-                updatedAt: new Date().toISOString(),
-              });
-
-              // ── b. Create scoped StateLogger and ArtifactStore ──
-              const loggerFactory = createStateLoggerFactory();
-              const logger = loggerFactory.create(instanceId, currentState);
-              const artifacts = artifactFactory.makeScoped(
-                instanceId,
-                currentState,
-                opts?.parentInstanceId,
-              );
-
-              // ── c. Build ActionContext ──
-              const actionCtx: ActionContext = {
-                machineInstanceId: instanceId,
-                machineDefId: definition.id,
-                stateName: currentState,
-                stateData,
-                machineInput: input,
-                parentContext,
-                logger,
-                artifacts,
-              };
-
-              // ── d. Run middleware beforeTransition ──
-              const latestInstance = yield* store.getInstance(instanceId);
-              const middlewareCtx = {
-                instance: latestInstance,
-                stateName: currentState,
-                stateData,
-                definition,
-              };
-
-              yield* middlewareExec.runBefore(middlewareCtx);
-
-              // ── e. Look up actionId in ActionRegistry ──
-              const actionId = stateDef.actionId;
-              if (!actionId) {
-                return yield* Effect.fail(
-                  mkDefinitionError({
-                    message: `State "${currentState}" of type "action" has no actionId`,
-                  }),
-                );
-              }
-
+          // ── Helper: execute an action with timeout, error handling, and middleware ──
+          const executeAction = (
+            actionId: string,
+            actionCtx: ActionContext,
+            stateDef: { readonly timeoutMs?: number },
+            middlewareCtx: {
+              instance: MachineInstance;
+              stateName: string;
+              stateData: unknown;
+              definition: StateMachineDefinition;
+            },
+            loggerFactory: ReturnType<typeof createStateLoggerFactory>,
+          ) =>
+            Effect.gen(function* () {
               const { fn: actionFn } = yield* registry.get(actionId);
 
-              // ── f. Execute the action → get TransitionResult ──
               const startTime = Date.now();
 
               // Apply per-state timeout if configured
@@ -354,63 +315,329 @@ export const StateMachineRunnerLive = Layer.effect(
                 ),
               );
 
-              // If an error occurred, break out of the loop
-              if (errorResult) return;
-
               const durationMs = Date.now() - startTime;
+              return { transitionResult, durationMs };
+            });
 
-              // ── g. Validate nextState is a legal transition ──
-              if (
-                !isLegalTransition(currentState, transitionResult.nextState, definition.transitions)
-              ) {
-                return yield* Effect.fail(
-                  mkDefinitionError({
-                    message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
-                    details: [
-                      `Action "${actionId}" returned nextState "${transitionResult.nextState}" which is not in the definition's transitions`,
-                    ],
-                  }),
-                );
-              }
+          // ── The core state loop as a separate Effect (for machine-level timeout) ──
+          const stateLoop = Effect.gen(function* () {
+            while (definition.states[currentState].type !== 'terminal') {
+              const stateDef = definition.states[currentState];
 
-              // ── h. Run middleware afterTransition ──
-              yield* middlewareExec.runAfter({
-                ...middlewareCtx,
-                result: transitionResult,
-              });
-
-              // ── i. Record TransitionRecord in history ──
-              const transitionRecord: TransitionRecord = {
-                id: crypto.randomUUID(),
-                fromState: currentState,
-                toState: transitionResult.nextState,
-                data: transitionResult.data,
-                timestamp: new Date().toISOString(),
-                durationMs,
-                actionId,
-              };
-
-              history = [...history, transitionRecord];
-
-              // ── j. Collect log entries from StateLogger ──
-              const logEntries = [...loggerFactory.getEntries()];
-              allLogs = [...allLogs, ...logEntries];
-
-              // ── k. Checkpoint 3: Persist history + logs + advance state ──
-              const nextState = transitionResult.nextState;
-              const nextStateData = transitionResult.data ?? stateData;
-
+              // ── a. Checkpoint 2: Persist BEFORE action runs ──
               yield* store.updateInstance(instanceId, {
-                currentState: nextState,
-                stateData: nextStateData,
+                currentState,
+                stateData,
                 history,
-                logs: allLogs,
                 updatedAt: new Date().toISOString(),
               });
 
-              // Advance loop variables
-              currentState = nextState;
-              stateData = nextStateData;
+              // ── b. Create scoped StateLogger and ArtifactStore ──
+              const loggerFactory = createStateLoggerFactory();
+              const logger = loggerFactory.create(instanceId, currentState);
+              const artifacts = artifactFactory.makeScoped(
+                instanceId,
+                currentState,
+                opts?.parentInstanceId,
+              );
+
+              // ── c. Build ActionContext ──
+              const actionCtx: ActionContext = {
+                machineInstanceId: instanceId,
+                machineDefId: definition.id,
+                stateName: currentState,
+                stateData,
+                machineInput: input,
+                parentContext,
+                logger,
+                artifacts,
+              };
+
+              // ── d. Run middleware beforeTransition ──
+              const latestInstance = yield* store.getInstance(instanceId);
+              const middlewareCtx = {
+                instance: latestInstance,
+                stateName: currentState,
+                stateData,
+                definition,
+              };
+
+              yield* middlewareExec.runBefore(middlewareCtx);
+
+              // ────────────────────────────────────────────────────────
+              // Type-based branching
+              // ────────────────────────────────────────────────────────
+
+              if (stateDef.type === 'child_machine') {
+                // ── CHILD MACHINE SPAWNING (Task 11) ──
+
+                // i. Validate childMachineDefId exists
+                const childDefId = stateDef.childMachineDefId;
+                if (!childDefId) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `State "${currentState}" of type "child_machine" has no childMachineDefId`,
+                    }),
+                  );
+                }
+
+                // ii. Load child definition from store
+                const childDefinition = yield* store.getDefinition(childDefId).pipe(
+                  Effect.catchTag('NotFoundError', (err: NotFoundError) =>
+                    Effect.fail(
+                      mkNotFoundError({
+                        entityType: err.entityType,
+                        id: err.id,
+                      }),
+                    ),
+                  ),
+                );
+
+                // iii. Evaluate childInputMapping via JSONPath
+                const mappingExpr = stateDef.childInputMapping;
+                if (!mappingExpr) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `State "${currentState}" of type "child_machine" has no childInputMapping`,
+                    }),
+                  );
+                }
+
+                let childInput: unknown;
+                try {
+                  const jsonPathResult: unknown[] = JSONPath({
+                    path: mappingExpr,
+                    json: {
+                      stateData,
+                      machineInput: input,
+                      stateName: currentState,
+                    },
+                  });
+
+                  if (!Array.isArray(jsonPathResult) || jsonPathResult.length === 0) {
+                    return yield* Effect.fail(
+                      mkActionError({
+                        actionId: 'child_machine',
+                        stateName: currentState,
+                        cause: `childInputMapping "${mappingExpr}" returned no results`,
+                      }),
+                    );
+                  }
+
+                  // JSONPath always returns an array; unwrap single result
+                  childInput = jsonPathResult.length === 1 ? jsonPathResult[0] : jsonPathResult;
+                } catch (jsonPathError) {
+                  return yield* Effect.fail(
+                    mkActionError({
+                      actionId: 'child_machine',
+                      stateName: currentState,
+                      cause:
+                        jsonPathError instanceof Error
+                          ? `Invalid childInputMapping: ${jsonPathError.message}`
+                          : `Invalid childInputMapping: ${String(jsonPathError)}`,
+                    }),
+                  );
+                }
+
+                // iv. Set parent status to 'waiting_for_child'
+                yield* store.updateInstance(instanceId, {
+                  status: 'waiting_for_child',
+                  updatedAt: new Date().toISOString(),
+                });
+
+                // v. Spawn child machine (recursive call)
+                const childStartTime = Date.now();
+                const childResult: MachineResult = yield* runner.run(childDefinition, childInput, {
+                  parentInstanceId: instanceId,
+                  parentStateName: currentState,
+                  depth: (opts?.depth ?? 0) + 1,
+                });
+
+                // vi. Update parent: set childInstanceId and restore status
+                yield* store.updateInstance(instanceId, {
+                  status: 'running',
+                  childInstanceId: childResult.instanceId,
+                  updatedAt: new Date().toISOString(),
+                });
+
+                // vii. Set stateData to child's MachineResult for the parent action
+                stateData = childResult;
+
+                // viii. Execute the parent state's actionId with child result
+                const actionId = stateDef.actionId;
+                if (!actionId) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `State "${currentState}" of type "child_machine" has no actionId`,
+                    }),
+                  );
+                }
+
+                // Rebuild ActionContext with updated stateData (child result)
+                const childActionCtx: ActionContext = {
+                  ...actionCtx,
+                  stateData,
+                };
+
+                const { transitionResult, durationMs } = yield* executeAction(
+                  actionId,
+                  childActionCtx,
+                  stateDef,
+                  { ...middlewareCtx, stateData },
+                  loggerFactory,
+                );
+
+                // If an error occurred during action execution, break out
+                if (errorResult) return;
+
+                // ix. Validate nextState is a legal transition
+                if (
+                  !isLegalTransition(
+                    currentState,
+                    transitionResult.nextState,
+                    definition.transitions,
+                  )
+                ) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
+                      details: [
+                        `Action "${actionId}" returned nextState "${transitionResult.nextState}" which is not in the definition's transitions`,
+                      ],
+                    }),
+                  );
+                }
+
+                // x. Run middleware afterTransition
+                yield* middlewareExec.runAfter({
+                  ...middlewareCtx,
+                  stateData,
+                  result: transitionResult,
+                });
+
+                // xi. Record TransitionRecord with child info
+                const totalDurationMs = Date.now() - childStartTime;
+                const transitionRecord: TransitionRecord = {
+                  id: crypto.randomUUID(),
+                  fromState: currentState,
+                  toState: transitionResult.nextState,
+                  data: transitionResult.data,
+                  timestamp: new Date().toISOString(),
+                  durationMs: totalDurationMs > 0 ? totalDurationMs : durationMs,
+                  actionId,
+                  childInstanceId: childResult.instanceId,
+                  childDefinitionId: childDefId,
+                };
+
+                history = [...history, transitionRecord];
+
+                // xii. Collect log entries
+                const logEntries = [...loggerFactory.getEntries()];
+                allLogs = [...allLogs, ...logEntries];
+
+                // xiii. Checkpoint 3: Persist and advance state
+                const nextState = transitionResult.nextState;
+                const nextStateData = transitionResult.data ?? stateData;
+
+                yield* store.updateInstance(instanceId, {
+                  currentState: nextState,
+                  stateData: nextStateData,
+                  childInstanceId: undefined,
+                  history,
+                  logs: allLogs,
+                  updatedAt: new Date().toISOString(),
+                });
+
+                currentState = nextState;
+                stateData = nextStateData;
+              } else if (stateDef.type === 'parallel_children') {
+                // ── PARALLEL CHILDREN (Task 12 — placeholder) ──
+                return yield* Effect.fail(
+                  mkDefinitionError({
+                    message: `State "${currentState}" has type "parallel_children" which is not yet implemented`,
+                  }),
+                );
+              } else {
+                // ── ACTION EXECUTION (existing logic) ──
+
+                // e. Look up actionId in ActionRegistry
+                const actionId = stateDef.actionId;
+                if (!actionId) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `State "${currentState}" of type "action" has no actionId`,
+                    }),
+                  );
+                }
+
+                const { transitionResult, durationMs } = yield* executeAction(
+                  actionId,
+                  actionCtx,
+                  stateDef,
+                  middlewareCtx,
+                  loggerFactory,
+                );
+
+                // If an error occurred, break out of the loop
+                if (errorResult) return;
+
+                // g. Validate nextState is a legal transition
+                if (
+                  !isLegalTransition(
+                    currentState,
+                    transitionResult.nextState,
+                    definition.transitions,
+                  )
+                ) {
+                  return yield* Effect.fail(
+                    mkDefinitionError({
+                      message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
+                      details: [
+                        `Action "${actionId}" returned nextState "${transitionResult.nextState}" which is not in the definition's transitions`,
+                      ],
+                    }),
+                  );
+                }
+
+                // h. Run middleware afterTransition
+                yield* middlewareExec.runAfter({
+                  ...middlewareCtx,
+                  result: transitionResult,
+                });
+
+                // i. Record TransitionRecord in history
+                const transitionRecord: TransitionRecord = {
+                  id: crypto.randomUUID(),
+                  fromState: currentState,
+                  toState: transitionResult.nextState,
+                  data: transitionResult.data,
+                  timestamp: new Date().toISOString(),
+                  durationMs,
+                  actionId,
+                };
+
+                history = [...history, transitionRecord];
+
+                // j. Collect log entries from StateLogger
+                const logEntries = [...loggerFactory.getEntries()];
+                allLogs = [...allLogs, ...logEntries];
+
+                // k. Checkpoint 3: Persist history + logs + advance state
+                const nextState = transitionResult.nextState;
+                const nextStateData = transitionResult.data ?? stateData;
+
+                yield* store.updateInstance(instanceId, {
+                  currentState: nextState,
+                  stateData: nextStateData,
+                  history,
+                  logs: allLogs,
+                  updatedAt: new Date().toISOString(),
+                });
+
+                // Advance loop variables
+                currentState = nextState;
+                stateData = nextStateData;
+              }
             }
           });
 
