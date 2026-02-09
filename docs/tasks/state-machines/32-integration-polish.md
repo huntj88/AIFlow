@@ -14,15 +14,21 @@ Wire together all client and server components into a cohesive, polished experie
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–17 and from the existing client scaffold.
+> These details emerged from Tasks 01–22.1 and from the existing client scaffold.
 
 1. **HashRouter** — Client uses `HashRouter`. All URLs are hash-based: `/#/machines`, `/#/machines/instances/:id`, etc. Navigation helpers should generate paths without the `#` prefix (react-router handles it).
-2. **AppLayout.tsx** — Current layout has a `<header>` with app title + theme toggle, then `<Outlet />`. Nav links (Step 3 child machine navigation, Step 1 redirect) should integrate with this layout.
-3. **i18n flat key format** — Keys like `"machines.toast.definitionSaved": "Definition saved successfully"`. The nested JSON examples in Step 12 below need to be converted to flat keys.
+2. **AppLayout.tsx** — Current layout has a `<header>` with app title ("AIFlow") + theme toggle button, then `<main className="p-6"><Outlet /></main>`. **No navigation links exist yet** — Task 29 adds them. Integration polish may need to refine nav styling.
+3. **i18n flat key format** — Keys like `"machines.toast.definitionSaved": "Definition saved successfully"`. Existing keys: `app.title`, `nav.home`, `home.heading`, `home.hello_button`, `home.response_label`, `theme.toggle`. **Do NOT use nested JSON objects.**
 4. **Zustand pattern** — `useThemeStore.ts` uses `create<T>()(...)` with optional `persist`. The toast store (Step 7) should follow the same pattern.
-5. **Tailwind + CSS custom properties** — Use `var(--color-bg)`, `var(--color-text)`, etc. for theming. Skeleton elements use `animate-pulse`.
-6. **Error constructors in server** — API error responses from server use `_tag` discriminant: `ActionError`, `ValidationError`, `StoreError`, `NotFoundError`, `DefinitionError`. Error boundaries and toast messages should handle these tags.
-7. **Server API patterns** — API routes return JSON with appropriate HTTP status codes. Instance creation returns 201 with the full instance object (including `id`). Not-found returns 404 with `_tag: 'NotFoundError'`.
+5. **Tailwind + CSS custom properties** — Use `var(--color-bg)`, `var(--color-text)`, `var(--color-surface)`, `var(--color-border)` for theming. Skeleton elements use `animate-pulse`.
+6. **Server API error responses** — API error responses do NOT include `_tag` in the JSON body. They use:
+   - 400: `{ message, details[] }` (validation) or `{ message, path? }` (schema)
+   - 404: `{ message: "<Entity> not found", id }` (e.g., "Definition not found")
+   - 409: `{ message, details[] }` (conflict — cancel/resume)
+   - 500: `{ message }` or `{ message, cause? }`
+     Error boundaries and toast messages should handle these shapes directly.
+7. **Server API patterns** — Instance creation returns 201 with the **full `MachineInstance` object** (not just an ID). Cancel returns `{ message: 'Instance cancelled' }`. Resume returns `{ message: 'Instance resuming' }`.
+8. **Vite proxy** — `/api` is proxied to `http://localhost:3001`. WebSocket proxy may need to be added in Task 25 for `/api/machines/live`.
 
 ---
 

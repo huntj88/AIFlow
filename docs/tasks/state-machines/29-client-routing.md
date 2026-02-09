@@ -18,36 +18,73 @@ Add machine-related routes to the client router and integrate them into the app 
 
 ### Current router structure
 
-**`client/src/app/router/routes.ts`**:
+**`client/src/app/router/routes.ts`** (entire file):
 
 ```typescript
 export const ROUTES = { HOME: '/' } as const;
 ```
 
-**`client/src/app/router/AppRouter.tsx`**:
+**`client/src/app/router/AppRouter.tsx`** (entire file):
 
 ```tsx
-<HashRouter>
-  <Routes>
-    <Route element={<AppLayout />}>
-      <Route path={ROUTES.HOME} element={<HomePage />} />
-    </Route>
-    <Route path="*" element={<Navigate to={ROUTES.HOME} replace />} />
-  </Routes>
-</HashRouter>
+import { HashRouter, Navigate, Route, Routes } from 'react-router';
+import { AppLayout } from '@/app/layout/AppLayout';
+import { HomePage } from '@/pages/HomePage';
+import { ROUTES } from './routes';
+
+export function AppRouter() {
+  return (
+    <HashRouter>
+      <Routes>
+        <Route element={<AppLayout />}>
+          <Route path={ROUTES.HOME} element={<HomePage />} />
+        </Route>
+        <Route path="*" element={<Navigate to={ROUTES.HOME} replace />} />
+      </Routes>
+    </HashRouter>
+  );
+}
 ```
 
-**Key**: Uses `HashRouter` (not `BrowserRouter`) — all URLs are hash-based (`#/machines`, `#/machines/instances/:id`).
+**Key**: Uses `HashRouter` (not `BrowserRouter`) — all URLs are hash-based (`#/machines`, `#/machines/instances/:id`). Uses `react-router` (v7), not `react-router-dom`.
 
 ### Current layout
 
-**`client/src/app/layout/AppLayout.tsx`**:
+**`client/src/app/layout/AppLayout.tsx`** (entire file):
 
-- Header: Title ("AIFlow") + theme toggle button
-- Main area with `<Outlet />`
-- Uses Tailwind CSS with custom properties
+```tsx
+import { useTranslation } from 'react-i18next';
+import { Outlet } from 'react-router';
+import { useThemeStore } from '@/hooks/useThemeStore';
 
-Add a navigation link to "State Machines" in the header.
+export function AppLayout() {
+  const { t } = useTranslation();
+  const { preference, setPreference } = useThemeStore();
+  const cycleTheme = () => {
+    const order: ('light' | 'dark' | 'system')[] = ['light', 'dark', 'system'];
+    const next = order[(order.indexOf(preference) + 1) % order.length];
+    setPreference(next);
+  };
+  return (
+    <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
+      <header className="flex items-center justify-between border-b border-[var(--color-border)] px-6 py-4">
+        <h1 className="text-xl font-bold">{t('app.title')}</h1>
+        <button
+          onClick={cycleTheme}
+          className="rounded-md bg-[var(--color-surface)] px-3 py-1.5 text-sm"
+        >
+          {t('theme.toggle')} ({preference})
+        </button>
+      </header>
+      <main className="p-6">
+        <Outlet />
+      </main>
+    </div>
+  );
+}
+```
+
+**Changes needed**: Add a navigation section (e.g., between the `<h1>` and theme button, or as a nav bar below the header) with a link to "/machines". Use `Link` from `react-router` or `NavLink` for active state highlighting.
 
 ### Lazy loading
 

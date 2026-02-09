@@ -40,7 +40,10 @@ pnpm --filter @aiflow/server add \
 3. **Effect Service Tag pattern** — All services use `Context.GenericTag<T>('name')`. If creating an `OtelService` tag, follow this pattern.
 4. **Error types use `_tag` discriminant** — `MachineError` variants have `_tag: 'ActionError' | 'ValidationError' | ...`. TelemetryMiddleware can use `_tag` to categorize error spans.
 5. **MachineEvent uses `type` discriminant** — Events have `type: 'state_changed' | 'transition_recorded' | 'log_entry' | 'machine_completed' | 'machine_resumed' | 'child_spawned' | 'child_completed' | 'children_spawned' | 'children_completed' | 'artifact_created'` (10 total). Metrics instrumentation should key off the `type` field, not `_tag`.
-6. **TransitionMiddleware interface** — Defined in `types.ts` with `beforeTransition(ctx) → Effect<void, MachineError>`, `afterTransition(ctx & { result }) → Effect<void, MachineError>`, `onError(ctx & { error }) → Effect<void>` (never fails).
+6. **TransitionMiddleware interface** — Defined in `types.ts` with `beforeTransition(ctx) → Effect<void, MachineError>`, `afterTransition(ctx & { result }) → Effect<void, MachineError>`, `onError(ctx & { error }) → Effect<void>` (never fails). The `MiddlewareContext` has fields: `instance` (MachineInstance), `stateName` (string), `stateData` (unknown), `definition` (StateMachineDefinition). Note: `MiddlewareContext` does NOT have `definitionId`, `instanceId`, `stateType` as top-level fields — these must be extracted from `ctx.instance` and `ctx.definition.states[ctx.stateName]`.
+7. **MiddlewareExecutor factory** — Use `makeMiddlewareExecutorLayer([...middleware])` from `@/machines/middleware/MiddlewareExecutor.js`. The current server wiring passes an empty array `[]`. To add TelemetryMiddleware, update `HttpServer.ts` to pass it in the array.
+8. **Layer composition** — `MachineLive` in `HttpServer.ts` merges `StoreLive, RegistryLive, ArtifactLive, RunnerLive, SemaphoreLive`. OTel layers should be added alongside without disturbing existing layers.
+9. **Runner refactored** — Task 17.1 extracted a shared `executeStateLoop()` with `LoopState` interface. Effect spans added via `Effect.withSpan` in the runner may need to go inside `executeStateLoop`, `makeExecuteAction`, and `makeRunPreamble`.
 
 ---
 

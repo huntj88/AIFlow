@@ -38,18 +38,19 @@
        ├──→ 13 Runner Semaphore
        ├──→ 14 Runner Cancellation
        ├──→ 15 Runner Suspend & Resume
-       └──→ 16 Runner Events (PubSub)
+       └──→ 16 Runner Events (PubSub)  ⚠️ NOT DONE — blocks Task 23
 
  09–16 ──→ 17 Core Engine Tests
+ 17   ──→ 17.1 Runner Refactor (dedup)
 
- 17 ──→ 18 API Definitions
+ 17.1 ──→ 18 API Definitions
       ──→ 19 API Actions
       ──→ 20 API Instances
       ──→ 21 API Wiring
       ──→ 22 API Tests
            └──→ 22.1 Remaining API Tests (cancel running, artifact download)
 
- 21 ──→ 23 WebSocket Server
+ 16 + 21 ──→ 23 WebSocket Server    ⚠️ Requires Task 16 (PubSub)
 
  22.1 + 23
   ├──→ 24 Client API Client

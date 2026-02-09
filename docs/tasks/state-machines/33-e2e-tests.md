@@ -91,15 +91,18 @@ export const PARALLEL_DEFINITION = {
 
 ## Implementation Notes from Completed Tasks
 
-> These details emerged from Tasks 01–17 and from the existing project scaffold.
+> These details emerged from Tasks 01–22.1 and from the existing project scaffold.
 
 1. **HashRouter URLs** — Client uses `HashRouter`, so Playwright URLs are `http://localhost:5173/#/machines`, `http://localhost:5173/#/machines/instances/:id`, etc. Use `page.goto('http://localhost:5173/#/machines')` or navigate via UI clicks.
 2. **Server port 3001** — API is at `http://localhost:3001/api/...`. Helper functions that call the API directly (bypassing UI) should use this base URL.
-3. **Error constructor `_tag` discriminant** — Server API error responses include `_tag` field: `'ValidationError'`, `'NotFoundError'`, `'StoreError'`, etc. Test assertions on error responses should check `_tag`.
+3. **Error responses do NOT include `_tag`** — Server API error responses use `{ message, details[], id? }` format (not `_tag`). Specifically: 404 returns `{ message: "<Entity> not found", id }`, 400 returns `{ message, details[] }` or `{ message, path? }`, 409 returns `{ message, details[] }`. Test assertions on error responses should check `message` and `details` fields.
 4. **`MachineStore` auto-generates IDs** — `saveDefinition` and `saveInstance` use `crypto.randomUUID()` for IDs and auto-set timestamps. Don't include `id` in seed fixture objects for creation; read it from the response.
-5. **Schema validation** — Server uses `Schema.decodeUnknownEither` for request validation. Invalid payloads get 400 responses with parse error details.
+5. **Schema validation** — Server uses `Schema.decodeUnknownEither` for request validation. Invalid payloads get 400 responses with `{ message, details[] }`.
 6. **`MachineEvent` uses `type` field** — WebSocket events have `type: 'state_changed' | 'transition_recorded' | 'log_entry' | 'machine_completed' | ...` (10 total, not `_tag`). Tests that assert on WS messages should check the `type` field. All events have shape `{ type, instanceId, data }`.
 7. **Existing Playwright config** — `client/playwright.config.ts` already exists. Extend it rather than replacing.
+8. **Instance start is fire-and-forget** — `POST /api/machines/instances` returns 201 immediately with the full `MachineInstance` object. The machine runs asynchronously. Tests that need to verify completion must poll `GET /instances/:id` or wait for UI status badge updates.
+9. **In-memory store** — The server uses `InMemoryMachineStore` — all data is lost on restart. E2E tests that restart the server will lose all definitions and instances. Seed data must be created at the start of each test or suite.
+10. **Vite dev server** — Client runs on port 5173 with hot reload. API calls are proxied to port 3001.
 
 ---
 

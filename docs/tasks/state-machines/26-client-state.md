@@ -38,6 +38,22 @@ import { runWithLogging } from '@/utils/logger';
 
 Each `apiClient.*` method returns an `Effect.Effect<T, Error>`. Run them through `runWithLogging` in store actions.
 
+### Server returns full MachineInstance on POST /instances
+
+The `POST /api/machines/instances` route forks the runner as a daemon, yields to the scheduler (`Effect.yieldNow()`), then queries the store for the newest instance. It returns the **full `MachineInstance` object** (not just an ID). The instance will typically have:
+
+- `status: 'running'` (the machine started executing)
+- `currentState: <initialState>` (the first state)
+- All standard fields populated
+
+The store's `startInstance()` action can use the returned instance directly — no need for a follow-up `getInstance()` call. For live updates after that, subscribe via WebSocket.
+
+### Cancel/Resume responses are simple
+
+- `POST /instances/:id/cancel` returns `{ message: 'Instance cancelled' }` with status 200
+- `POST /instances/:id/resume` returns `{ message: 'Instance resuming' }` with status 200
+- After cancel/resume, re-fetch the instance via `GET /instances/:id` to get the updated state, or wait for WebSocket events.
+
 ### Client-side types
 
 Mirror types should be defined in `client/src/types/machines.ts` (Task 24). Stores import types from there.

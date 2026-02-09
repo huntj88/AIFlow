@@ -184,18 +184,31 @@ Shown when no node is selected, or as a collapsible top section:
 
 Create `client/src/utils/definitionValidator.ts`:
 
-Client-side subset of the server's 14 validation rules for immediate feedback:
+Client-side subset of the server's 14 validation rules for immediate feedback. The server's `DefinitionValidator.ts` returns `ValidationViolation` objects with `{ rule: string; message: string; path?: string }`. Mirror this shape on the client.
 
-- Rule 1: Unique state names
-- Rule 2: Initial state exists
-- Rule 3: At least one terminal state
-- Rule 4: All transition targets reference existing states
-- Rule 5: No orphan states (unreachable from initial)
-- Rule 6: Terminal states have no outgoing transitions
-- Rule 9: `action` states reference a known action (check against fetched registry)
-- Rule 12: No cycles through only `child_machine` states (advisory warning)
+**Rules to implement** (matching server rule numbering):
 
-Return structured errors with `{ rule, stateName?, message, severity: 'error' | 'warning' }`.
+- Rule 1: `initialState` must reference an existing key in `states`
+- Rule 2: All three required terminal states (`completed`, `cancelled`, `error`) must exist with `type: 'terminal'`
+- Rule 3: No transitions may originate FROM a terminal state
+- Rule 4: Every `from` and `to` in `transitions[]` must reference an existing state
+- Rule 5: Every non-terminal state must have at least one outgoing transition
+- Rule 6: No orphan non-terminal states (every non-terminal reachable from `initialState`)
+- Rule 7: `StateDefinition.name` must match its key in the `states` record
+- Rule 8: `action` states must have an `actionId` (can optionally check against fetched registry — advisory only since registry may change)
+- Rule 9: `child_machine` states must have `actionId`, `childMachineDefId`, and `childInputMapping`
+- Rule 10: `parallel_children` states must have `actionId` and a non-empty `children[]`
+- Rule 11: `terminal` states must NOT have `actionId`, `childMachineDefId`, or `children`
+- Rule 14: All `key` values within a `parallel_children` state's `children[]` must be unique
+
+**Rules NOT to implement on the client** (require server-side data):
+
+- Rule 12: Cycle detection through `childMachineDefId` references (requires loading other definitions)
+- Rule 13: JSON Schema structural validation (requires `ajv`)
+
+Return structured errors with `{ rule: string; stateName?: string; message: string; severity: 'error' | 'warning' }`.
+
+**Note**: The server validates in `'save'` mode when POST/PUT — it constructs a temporary full `StateMachineDefinition` (with placeholder `id`/`version`/`metadata`) and runs `validateDefinition()`. The server returns 400 with `{ message, details[] }` where `details` is an array of violation message strings. Surface these in the editor when the server rejects a save.
 
 ### 9. Import / Export
 

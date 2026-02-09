@@ -25,20 +25,22 @@ The current `HttpLive` in `server/src/lib/HttpServer.ts` creates the Node server
 ```typescript
 const ServerLive = NodeHttpServer.layer(() => createServer(), { port: PORT });
 
-export const HttpLive = HelloRouter.pipe(
+const AppRouter = HttpRouter.empty.pipe(
+  HttpRouter.mount('/', HelloRouter),
+  HttpRouter.mount('/', MachineRouter),
+);
+
+export const HttpLive = AppRouter.pipe(
   HttpServer.serve(HttpMiddleware.logger),
   HttpServer.withLogAddress,
   Layer.provide(ServerLive),
-);
-
-export const startServer = Layer.launch(HttpLive).pipe(
-  Effect.tap(() => Effect.log(`Server starting on port ${String(PORT)}`)),
+  Layer.provide(MachineLive),
 );
 ```
 
 The `createServer()` return value is NOT currently accessible outside this Layer. To share it for WS upgrade:
 
-1. **Option A**: Extract `createServer()` result to a module-level variable
+1. **Option A**: Extract `createServer()` result to a module-level variable (simplest)
 2. **Option B**: Create a shared `HttpServerRef` Effect service that holds the `http.Server`
 3. **Option C**: Use `NodeHttpServer` platform APIs to access the server from context — `@effect/platform-node` may provide this via `NodeHttpServer.HttpServer`
 
@@ -47,10 +49,43 @@ The `ws` library's `noServer: true` + manual `handleUpgrade` is the recommended 
 ### Current server entry point (`index.ts`)
 
 ```typescript
-startServer.pipe(Effect.provide(ServerLoggerLive), NodeRuntime.runMain);
+const main = Effect.gen(function* () {
+  const runner = yield* StateMachineRunner;
+  yield* Effect.sync(() => {
+    const shutdown = (signal: string) => {
+      Effect.log(`Received ${signal} — suspending all running machines…`).pipe(
+        Effect.andThen(() => runner.suspendAll()),
+        Effect.andThen(() => Effect.log('All machines suspended, shutting down.')),
+        Effect.catchAll((err: unknown) =>
+          Effect.log(`Shutdown error: ${err instanceof Error ? err.message : JSON.stringify(err)}`),
+        ),
+        Effect.provide(ServerLoggerLive),
+        Effect.runFork,
+      );
+    };
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+  });
+});
+
+startServer.pipe(
+  Effect.provide(ServerLoggerLive),
+  Effect.tap(() => main.pipe(Effect.provide(MachineLive))),
+  NodeRuntime.runMain,
+);
 ```
 
-Shutdown handlers exist (`SIGINT`, `SIGTERM`) but currently only log — they do NOT yet call `suspendAll()` or close WS connections.
+Shutdown handlers already call `runner.suspendAll()`. The WebSocket manager should also cleanly close connections on shutdown — either add `wsManager.close()` to the shutdown handler, or register an `Effect.addFinalizer` in the WS manager Layer.
+
+### ⚠️ CRITICAL: Task 16 (EventPubSub) must be completed FIRST
+
+`MachineEventPubSub` does **not yet exist** — no `EventPubSub.ts` file, and the runner does NOT currently publish any events. Task 16 must be completed before this task can subscribe to events. Without the PubSub:
+
+- The `WebSocketManager` has nothing to subscribe to
+- The runner currently has 5 service dependencies (not 6 — no PubSub)
+- `MachineLive` in `HttpServer.ts` does not include `MachineEventPubSubLive`
+
+**Task 16 is a hard blocker.** Alternatively, this task could create a stub PubSub that the runner doesn't use yet, but that defeats the purpose — no events would flow to clients.
 
 ### MachineEvent structure (CONFIRMED from types.ts)
 
@@ -83,9 +118,44 @@ The PubSub equivalent will likely be:
 ```typescript
 export const MachineEventPubSub =
   Context.GenericTag<PubSub.PubSub<MachineEvent>>('MachineEventPubSub');
+export const MachineEventPubSubLive = Layer.effect(
+  MachineEventPubSub,
+  PubSub.unbounded<MachineEvent>(),
+);
 ```
 
 Subscribe via `PubSub.subscribe(pubsub)` which returns a `Queue.Dequeue<MachineEvent>`.
+
+### Layer composition changes required
+
+After Task 16 creates `MachineEventPubSubLive`, the server's `HttpServer.ts` must add it to both the runner's dependency set and `MachineLive`:
+
+```typescript
+// In HttpServer.ts — add PubSubLive alongside SemaphoreLive:
+const PubSubLive = MachineEventPubSubLive;
+const RunnerLive = StateMachineRunnerLive.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      StoreLive,
+      RegistryLive,
+      ArtifactLive,
+      MiddlewareLive,
+      SemaphoreLive,
+      PubSubLive,
+    ),
+  ),
+);
+export const MachineLive = Layer.mergeAll(
+  StoreLive,
+  RegistryLive,
+  ArtifactLive,
+  RunnerLive,
+  SemaphoreLive,
+  PubSubLive,
+);
+```
+
+The `WebSocketManager` Layer should also depend on `MachineEventPubSub` to subscribe to events.
 
 ### WebSocket service should NOT be a runner dependency
 

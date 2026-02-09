@@ -23,14 +23,30 @@ Existing pages live at `client/src/pages/` (e.g., `HomePage.tsx` with `HomePage.
 ### Layout & styling
 
 - Uses **Tailwind CSS** with CSS custom properties (`var(--color-bg)`, `var(--color-text)`, `var(--color-surface)`, `var(--color-border)`).
-- `AppLayout` provides a header with title and theme toggle, and a `<main className="p-6">` wrapping `<Outlet />`.
+- `AppLayout` provides a header with title ("AIFlow") and theme toggle button, and a `<main className="p-6">` wrapping `<Outlet />`.
 - Pages render inside the Outlet.
+- The header currently has NO navigation links — just the title and theme toggle. Task 29 adds a nav link.
+
+### Instance statuses (6 total, confirmed from types.ts)
+
+The `MachineInstance.status` field can be:
+
+- `'running'` — actively executing
+- `'completed'` — reached completed terminal
+- `'cancelled'` — cancelled by user or parent
+- `'error'` — reached error terminal
+- `'waiting_for_child'` — suspended waiting for child machine(s)
+- `'suspended'` — paused by graceful shutdown
+
+All 6 statuses should have distinct badge colors in the instance list.
 
 ### i18n
 
 - Uses `react-i18next` with `useTranslation()` hook.
 - Translation file: `client/src/locales/en/common.json` (flat key format: `"machines.dashboard.title": "State Machines"`).
-- Add all machine-related translations to this file.
+- Existing keys in the file: `app.title`, `nav.home`, `home.heading`, `home.hello_button`, `home.response_label`, `theme.toggle`.
+- Add all machine-related translations to this file using the same flat key format.
+- **Do NOT use nested JSON objects** — every key must be dot-delimited at the top level.
 
 ### Router
 

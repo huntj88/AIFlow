@@ -21,20 +21,36 @@ Integrate Effect `PubSub` into the `StateMachineRunner` for publishing `MachineE
 - **Effect Service pattern**: Use `Context.GenericTag<PubSub.PubSub<MachineEvent>>('MachineEventPubSub')` for the PubSub tag.
 - **`PubSub`** is available from `effect` directly: `import { PubSub } from 'effect';`.
 
-### CRITICAL: Runner is 2480 lines with DUPLICATED state loops (Tasks 09–15)
+### Runner was refactored in Task 17.1 — shared `executeStateLoop`
 
-`StateMachineRunner.ts` is now **2480 lines**. The `run()` method and `resume()` method each contain their OWN copies of:
+`StateMachineRunner.ts` was refactored in Task 17.1 to extract a shared `executeStateLoop()` function. Both `run()` and `resume()` now call the same `executeStateLoop()` with a `LoopState` object. The shared helpers are:
 
-- `persistError` helper
-- `executeAction` helper (with timeout, error handling, middleware `onError`)
-- `runPreamble` helper (checkpoint 2, create logger/artifacts, build ActionContext, middleware `beforeTransition`)
-- The full state loop with all three type branches (`action`, `child_machine`, `parallel_children`)
-- Terminal state resolution (Checkpoint 4)
-- `Effect.onInterrupt` finalizer
+- `makePersistError(ls)` — closure factory bound to loop state
+- `makeExecuteAction(ls, persistError)` — action execution with timeout/error handling
+- `makeRunPreamble(ls)` — checkpoint 2, logger/artifacts, ActionContext, middleware
+- `executeStateLoop(ls, executeAction, runPreamble, opts?)` — the full state loop with all three type branches
+- `resolveTerminalState(ls)` — terminal state resolution (Checkpoint 4)
 
-**Event publishing must be added in BOTH `run()` AND `resume()` code paths.** Consider refactoring shared helpers to reduce duplication before adding events, or ensure every publish call is added in both places.
+**Event publishing only needs to be added ONCE** — inside the shared `executeStateLoop` and helpers. The `LoopState` interface holds all mutable state:
 
-### Runner depends on 5 services (not 4)
+```typescript
+interface LoopState {
+  readonly instanceId: string;
+  readonly definition: StateMachineDefinition;
+  readonly machineInput: unknown;
+  readonly parentContext?: { parentInstanceId: string; parentStateName: string };
+  readonly depth: number;
+  currentState: string;
+  stateData: unknown;
+  history: TransitionRecord[];
+  allLogs: LogEntry[];
+  errorResult: MachineResult | null;
+}
+```
+
+Add the PubSub to the runner's service dependencies and pass it into the shared helpers (or capture it in the `Layer.effect` closure alongside `store`, `registry`, etc.).
+
+### Runner depends on 5 services — PubSub will be the 6th
 
 `StateMachineRunnerLive` currently depends on: `MachineStore`, `ActionRegistry`, `ArtifactStoreFactory`, `MiddlewareExecutor`, **`ExecutionSemaphore`** (added in Task 13). PubSub will be the 6th dependency:
 
@@ -47,6 +63,31 @@ const semaphore = yield * ExecutionSemaphore;
 // Add:
 const pubsub = yield * MachineEventPubSub;
 ```
+
+### Layer composition must be updated in `HttpServer.ts`
+
+The current `HttpServer.ts` composes layers as:
+
+```typescript
+const RunnerLive = StateMachineRunnerLive.pipe(
+  Layer.provide(
+    Layer.mergeAll(StoreLive, RegistryLive, ArtifactLive, MiddlewareLive, SemaphoreLive),
+  ),
+);
+export const MachineLive = Layer.mergeAll(
+  StoreLive,
+  RegistryLive,
+  ArtifactLive,
+  RunnerLive,
+  SemaphoreLive,
+);
+```
+
+After adding `MachineEventPubSub`, update `RunnerLive` to also provide `MachineEventPubSubLive`, and add it to `MachineLive` so the WebSocket manager (Task 23) can access it.
+
+### Test layers must also be updated
+
+Both `definitions.test.ts` and `instances.test.ts` construct their own `TestLayer` mirroring the server's `MachineLive`. After adding PubSub to the runner, these test layers must also include `MachineEventPubSubLive`.
 
 ### `ExecutionSemaphore` uses `Effect.Semaphore` (not `Semaphore.Semaphore`)
 
@@ -101,9 +142,9 @@ const artifacts: ArtifactStore = {
 };
 ```
 
-### Event publishing insertion points — BOTH `run()` AND `resume()`
+### Event publishing insertion points — shared `executeStateLoop`
 
-The runner has TWO separate state loops. Events must be added in both. The insertion points are identical in structure:
+After the Task 17.1 refactor, there is ONE shared state loop (`executeStateLoop`). Events only need to be added once. The insertion points are:
 
 **Inside the `action` branch (within `semaphore.withPermits(1)(...)`)**:
 

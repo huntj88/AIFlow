@@ -21,6 +21,30 @@ Create a WebSocket client for the browser that connects to `ws://host/api/machin
 - **Zustand pattern**: Existing stores use `create<T>()(...)` from `zustand` with `persist` middleware. See `useThemeStore.ts`. The WebSocket client should be a plain module, not a Zustand store, with a React hook wrapper.
 - **Router**: Uses `HashRouter` from `react-router` (hash-based URLs like `#/machines/instances/123`).
 
+### ⚠️ Vite proxy does NOT cover WebSocket
+
+The current `vite.config.ts` proxies `/api` to `http://localhost:3001` but does **not** configure a WebSocket proxy. Two options:
+
+1. **Add a WS proxy** to `vite.config.ts`:
+
+   ```typescript
+   server: {
+     proxy: {
+       '/api/machines/live': {
+         target: 'ws://localhost:3001',
+         ws: true,
+       },
+       '/api': { target: 'http://localhost:3001', changeOrigin: true },
+     },
+   },
+   ```
+
+   The WebSocket proxy rule must come **before** the general `/api` rule.
+
+2. **Connect directly** to the server port: `new WebSocket('ws://localhost:3001/api/machines/live')`. But this breaks in production where client and server may share a host. Better to use relative URLs and configure the Vite proxy.
+
+**Recommendation**: Option 1 — add the WS proxy entry in this task.
+
 ---
 
 ## Steps

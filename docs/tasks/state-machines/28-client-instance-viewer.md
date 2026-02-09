@@ -18,10 +18,27 @@ Build the machine instance viewer page — the primary page for observing and in
 
 > These details emerged from the existing client codebase.
 
-- **Layout**: Uses Tailwind CSS with custom properties. The page renders inside `AppLayout`'s `<Outlet />` with `p-6` padding.
+- **Layout**: Uses Tailwind CSS with custom properties (`var(--color-bg)`, `var(--color-text)`, `var(--color-surface)`, `var(--color-border)`). The page renders inside `AppLayout`'s `<Outlet />` with `p-6` padding.
 - **Router**: `HashRouter` from `react-router`. Instance page URL: `#/machines/instances/:id`. Use `useParams()` to extract `id`.
 - **Component convention**: Machine components should go in `client/src/components/machines/`.
-- **WebSocket events**: `MachineEvent` uses `type` as discriminant. Route events to panels by `type`: `state_changed` → diagram, `transition_recorded` → history, `log_entry` → logs, etc.
+- **WebSocket events**: `MachineEvent` uses `type` as discriminant (not `_tag`). Route events to panels by `type`: `state_changed` → diagram, `transition_recorded` → history, `log_entry` → logs, etc.
+- **i18n flat keys**: Use flat key format like `"machines.instance.title": "Instance Viewer"` in `client/src/locales/en/common.json`.
+- **AppLayout header**: Currently has NO nav links — just title + theme toggle. Navigation links are added in Task 29.
+
+### State diagram data comes from the definition
+
+The instance viewer needs BOTH the `MachineInstance` (for current state, history, etc.) AND the `StateMachineDefinition` (for the full state graph). The `MachineInstance` has `definitionId` but does NOT embed the definition. You must:
+
+1. Fetch the instance: `GET /instances/:id`
+2. Fetch the definition: `GET /definitions/:instanceDefinitionId`
+3. Render the diagram from the definition's `states` and `transitions`
+4. Overlay the current state highlight from the instance's `currentState`
+
+**Edge case**: If the definition was deleted after the instance completed, the definition fetch will 404. Handle this gracefully (show "Definition unavailable" warning but still display instance data).
+
+### Artifact download returns binary
+
+The `GET /instances/:id/artifacts/:name` endpoint returns raw binary content with the appropriate `Content-Type` header (from `ArtifactRecord.contentType`). The client must handle this differently from JSON endpoints — use `response.blob()` or `response.arrayBuffer()` and trigger a browser download.
 
 ---
 

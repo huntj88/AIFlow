@@ -49,6 +49,31 @@ Key patterns to follow:
 - `Effect.tap` for logging, `Effect.withLogSpan` for tracing
 - Each method returns a typed `Effect.Effect<ResponseType, Error>`
 
+### Vite dev proxy is configured
+
+`client/vite.config.ts` proxies `/api` to `http://localhost:3001`:
+
+```typescript
+server: {
+  proxy: {
+    '/api': { target: 'http://localhost:3001', changeOrigin: true },
+  },
+},
+```
+
+This means the client can use **relative paths** like `/api/machines/definitions` — Vite forwards them to port 3001 in dev. **No `ws://` proxy is configured** — Task 25 (WebSocket) may need to add a `ws` entry or connect to the server port directly.
+
+### Running Effects in client code
+
+The client uses `runWithLogging` from `client/src/utils/logger.ts`:
+
+```typescript
+export const runWithLogging = <A, E>(effect: Effect.Effect<A, E>) =>
+  effect.pipe(Effect.provide(ClientLoggerLive), Effect.runPromise);
+```
+
+Zustand store actions will call `runWithLogging(apiClient.getDefinitions())` to execute API calls.
+
 ### Important: Instance start is asynchronous
 
 The server's `StateMachineRunner.run()` BLOCKS until the machine completes (it forks a fiber internally but awaits it). The API route (Task 20) must fork `run()` into a background fiber and return `201 Created` with the `instanceId` immediately. This means:
@@ -57,11 +82,49 @@ The server's `StateMachineRunner.run()` BLOCKS until the machine completes (it f
 - To get the final result, poll `getInstance(id)` or subscribe via WebSocket
 - The `status` field on the instance object tracks progress: `running` → `completed` / `error` / `cancelled` / `suspended`
 
+### Server API response shapes (CONFIRMED from implementation)
+
+These are the **exact** response shapes returned by the server routes:
+
+| Endpoint                             | Success                                                                                 | Error shapes                                                   |
+| ------------------------------------ | --------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `POST /definitions`                  | 201: Full `StateMachineDefinition` (with auto-generated `id`, `version: 1`, timestamps) | 400: `{ message, details[] }` (validation), 500: `{ message }` |
+| `GET /definitions`                   | 200: `StateMachineDefinition[]`                                                         | 500                                                            |
+| `GET /definitions/:id`               | 200: `StateMachineDefinition`                                                           | 404: `{ message, id }`                                         |
+| `PUT /definitions/:id`               | 200: Updated `StateMachineDefinition` (version incremented)                             | 400, 404                                                       |
+| `DELETE /definitions/:id`            | 204: empty body                                                                         | 404                                                            |
+| `GET /actions`                       | 200: `ActionMetadata[]` (each: `{ id, description, inputSchema?, outputSchema? }`)      | 500                                                            |
+| `GET /actions/:id`                   | 200: `ActionMetadata`                                                                   | 404                                                            |
+| `POST /instances`                    | 201: Full `MachineInstance` (the newest for that def)                                   | 400, 404, 500                                                  |
+| `GET /instances`                     | 200: `MachineInstance[]`                                                                | 500                                                            |
+| `GET /instances/:id`                 | 200: `MachineInstance`                                                                  | 404                                                            |
+| `GET /instances/:id/history`         | 200: `TransitionRecord[]`                                                               | 404                                                            |
+| `GET /instances/:id/logs`            | 200: `LogEntry[]` (supports `?state=X` filter)                                          | 404                                                            |
+| `POST /instances/:id/cancel`         | 200: `{ message: 'Instance cancelled' }`                                                | 404, 409: `{ message, details[] }`                             |
+| `POST /instances/:id/resume`         | 200: `{ message: 'Instance resuming' }`                                                 | 404, 409: `{ message, details[] }`                             |
+| `GET /instances/:id/artifacts`       | 200: `ArtifactRecord[]` or `ArtifactTree` (if `?tree=true`)                             | 404                                                            |
+| `GET /instances/:id/artifacts/:name` | 200: binary content with content-type                                                   | 404                                                            |
+
+**Error response format**: 404 uses `{ message: "<Entity> not found", id: "..." }` where the entity is capitalized (e.g., "Definition not found", "Instance not found"). 409 uses `{ message, details[] }`. 400 validation uses `{ message, details[] }` or `{ message, path? }`.
+
+**Note on error `_tag`**: The server's error types use `_tag` internally for Effect error handling, but the HTTP responses do **not** include `_tag` in the JSON body — they use `message`/`details`/`id` fields. The `_tag` is only used server-side with `Effect.catchTag`.
+
+### Instance query filter params (CONFIRMED)
+
+The `GET /instances` endpoint supports these query parameters:
+
+- `status` — filter by status string
+- `definitionId` — filter by definition ID
+- `parentInstanceId` — filter by parent instance
+- `limit` — max results (number)
+- `offset` — pagination offset (number)
+
 ### Extending for POST/PUT/DELETE
 
 The existing pattern only has `client.get(path)`. For other methods:
 
 ```typescript
+import { HttpBody } from '@effect/platform';
 // POST:
 const response = yield * client.post(path, { body: HttpBody.json(body) });
 // PUT:
@@ -72,9 +135,46 @@ const response = yield * client.del(path);
 
 Import `HttpBody` from `@effect/platform` for request bodies.
 
+**Important for DELETE**: The server returns 204 (no content) for successful deletes, so `response.json` will fail. Use `response.text` or just check the status code.
+
+**Important for artifact download**: `GET /instances/:id/artifacts/:name` returns raw binary content (not JSON). Use `response.arrayBuffer` or `response.blob` instead of `response.json`.
+
 ### Client-side machine types
 
 Define mirrored types in `client/src/types/machines.ts` since the client doesn’t share server code directly. The types should match the server interfaces from `server/src/machines/types.ts` (Task 01).
+**Key types to mirror** (with confirmed field names from the server):
+
+```typescript
+// StateMachineDefinition fields: id, name, version, inputSchema, outputSchema,
+//   states (Record<string, StateDefinition>), initialState, transitions (TransitionRule[]),
+//   metadata ({ createdAt, updatedAt, description?, tags? })
+
+// StateDefinition fields: name, type ('action'|'child_machine'|'parallel_children'|'terminal'),
+//   actionId?, childMachineDefId?, childInputMapping?, children? (ChildSpawnDefinition[]),
+//   description?, dataSchema?, timeoutMs?, parallelMode? ('all_or_interrupt'|'all_settled')
+
+// MachineInstance fields: id, definitionId, definitionVersion, status
+//   ('running'|'completed'|'cancelled'|'error'|'waiting_for_child'|'suspended'),
+//   currentState, stateData, input, output?, error?, parentInstanceId?,
+//   childInstanceId?, childInstanceIds? (Record<string, string>),
+//   history (TransitionRecord[]), logs (LogEntry[]), artifacts (ArtifactRecord[]),
+//   createdAt, updatedAt
+
+// TransitionRecord fields: id, fromState, toState, data?, timestamp, durationMs,
+//   actionId?, childInstanceId?, childDefinitionId?, childInstanceIds?,
+//   middlewareResults?
+
+// LogEntry fields: id, instanceId, stateName, level, message, data?, timestamp
+
+// ArtifactRecord fields: name, size, contentType, stateName, metadata?, createdAt
+
+// ArtifactTree fields: instanceId, definitionId?, artifacts (ArtifactRecord[]),
+//   children (ArtifactTree[]) (recursive)
+
+// ActionMetadata fields: id, description?, inputSchema?, outputSchema?
+
+// MachineEvent: uses 'type' discriminant (NOT '_tag'), shape: { type, instanceId, data }
+```
 
 ---
 
