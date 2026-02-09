@@ -33,3 +33,6 @@ Thumbs.db
 # IDE
 .idea/
 .vscode/
+
+# Test artifacts
+server/data/
