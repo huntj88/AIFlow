@@ -158,13 +158,13 @@ When a machine (or child) tries to acquire a semaphore permit and none are avail
 
 ## Validation Checklist
 
-- [ ] `server/src/machines/ExecutionSemaphore.ts` creates the semaphore Layer
-- [ ] `MAX_CONCURRENT_MACHINES` configurable via env var (default: 50)
-- [ ] Permit acquired per step, not per machine lifetime
-- [ ] Permit released before waiting for any child machine
-- [ ] Permit released before waiting for parallel children
-- [ ] Excess machines queue (not reject) when no permits available
-- [ ] No deadlock in linked-list recursion scenario
-- [ ] No deadlock in fan-out scenario
-- [ ] No deadlock in mixed nesting scenario
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
+- [x] `server/src/machines/ExecutionSemaphore.ts` creates the semaphore Layer
+- [x] `MAX_CONCURRENT_MACHINES` configurable via env var (default: 50)
+- [x] Permit acquired per step, not per machine lifetime
+- [x] Permit released before waiting for any child machine
+- [x] Permit released before waiting for parallel children
+- [x] Excess machines queue (not reject) when no permits available
+- [x] No deadlock in linked-list recursion scenario
+- [x] No deadlock in fan-out scenario
+- [x] No deadlock in mixed nesting scenario
+- [x] `pnpm --filter @aiflow/server run build` succeeds

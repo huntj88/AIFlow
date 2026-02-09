@@ -7,7 +7,7 @@ flow for plan reviewer to make sure it fits in the context of the rest of the ap
 
 separate flow to mark checklist items.
 
-- "Mark the completed items in the checklist in each tasks. Review each to make sure it can be marked as complete first"
+- "Mark the completed items in the task checklist. Review each to make sure it can be marked as complete first. Commit the changes and handle any precommit hooks" or maybe review after impl agent commits?
 
 flow after planning to create questions to ask user for further plan refinement
 
