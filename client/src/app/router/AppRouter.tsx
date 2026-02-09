@@ -2,6 +2,7 @@ import { HashRouter, Navigate, Route, Routes } from 'react-router';
 
 import { AppLayout } from '@/app/layout/AppLayout';
 import { HomePage } from '@/pages/HomePage';
+import { MachineInstancePage } from '@/pages/MachineInstancePage';
 import { MachinesPage } from '@/pages/MachinesPage';
 
 import { ROUTES } from './routes';
@@ -13,6 +14,7 @@ export function AppRouter() {
         <Route element={<AppLayout />}>
           <Route path={ROUTES.HOME} element={<HomePage />} />
           <Route path={ROUTES.MACHINES} element={<MachinesPage />} />
+          <Route path={ROUTES.MACHINE_INSTANCE} element={<MachineInstancePage />} />
         </Route>
         <Route path="*" element={<Navigate to={ROUTES.HOME} replace />} />
       </Routes>

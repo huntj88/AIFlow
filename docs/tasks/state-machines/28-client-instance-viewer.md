@@ -143,53 +143,53 @@ Route WebSocket events to appropriate panels:
 
 ### §18.1 — State Diagram
 
-- [ ] Instance page renders state diagram from definition
-- [ ] Current state node visually highlighted
-- [ ] Terminal states visually distinct from action states
-- [ ] Transitions labeled from definition
-- [ ] Highlighted node updates in real time via WebSocket
+- [x] Instance page renders state diagram from definition
+- [x] Current state node visually highlighted
+- [x] Terminal states visually distinct from action states
+- [x] Transitions labeled from definition
+- [x] Highlighted node updates in real time via WebSocket
 
 ### §18.2 — Transition History
 
-- [ ] History panel shows all completed transitions in chronological order
-- [ ] Each row: from → to, action ID, duration, timestamp
-- [ ] Transition data expandable per row
-- [ ] New transitions appear in real time
+- [x] History panel shows all completed transitions in chronological order
+- [x] Each row: from → to, action ID, duration, timestamp
+- [x] Transition data expandable per row
+- [x] New transitions appear in real time
 
 ### §18.3 — Logs Panel
 
-- [ ] Logs panel displays all log entries
-- [ ] Filterable by state name
-- [ ] Filterable by level (debug, info, warn, error)
-- [ ] New entries appear in real time via WebSocket
-- [ ] Entries show timestamp, state, level, message, data
+- [x] Logs panel displays all log entries
+- [x] Filterable by state name
+- [x] Filterable by level (debug, info, warn, error)
+- [x] New entries appear in real time via WebSocket
+- [x] Entries show timestamp, state, level, message, data
 
 ### §18.4 — Child Machine Tree
 
-- [ ] Tree view shows parent → child hierarchy
-- [ ] Clicking child navigates to child's viewer page
-- [ ] Parallel children grouped under parent state
-- [ ] Tree updates live on child spawn/complete
+- [x] Tree view shows parent → child hierarchy
+- [x] Clicking child navigates to child's viewer page
+- [x] Parallel children grouped under parent state
+- [x] Tree updates live on child spawn/complete
 
 ### §18.5 — Artifacts Panel
 
-- [ ] File-explorer-style tree of all artifacts
-- [ ] Mirrors instance hierarchy (parent files, child folders)
-- [ ] Click to download/preview
-- [ ] New artifacts appear via WebSocket events
-- [ ] Tree expandable/collapsible per child level
+- [x] File-explorer-style tree of all artifacts
+- [x] Mirrors instance hierarchy (parent files, child folders)
+- [x] Click to download/preview
+- [x] New artifacts appear via WebSocket events
+- [x] Tree expandable/collapsible per child level
 
 ---
 
 ## Validation Checklist
 
-- [ ] `@xyflow/react` and `dagre` added to client dependencies
-- [ ] `MachineInstancePage.tsx` renders with all panels
-- [ ] State diagram renders from definition with correct nodes and edges
-- [ ] Current state highlighted; updates on state_changed events
-- [ ] Transition history table with expandable data
-- [ ] Log viewer with state and level filtering
-- [ ] Child machine tree with navigation
-- [ ] Artifact viewer with download and tree structure
-- [ ] All panels update in real time via WebSocket
-- [ ] `pnpm --filter @aiflow/client run build` succeeds
+- [x] `@xyflow/react` and `dagre` added to client dependencies
+- [x] `MachineInstancePage.tsx` renders with all panels
+- [x] State diagram renders from definition with correct nodes and edges
+- [x] Current state highlighted; updates on state_changed events
+- [x] Transition history table with expandable data
+- [x] Log viewer with state and level filtering
+- [x] Child machine tree with navigation
+- [x] Artifact viewer with download and tree structure
+- [x] All panels update in real time via WebSocket
+- [x] `pnpm --filter @aiflow/client run build` succeeds
