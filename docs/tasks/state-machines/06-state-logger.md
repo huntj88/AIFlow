@@ -103,11 +103,11 @@ Effect.log(message).pipe(
 
 ## Validation Checklist
 
-- [ ] `server/src/machines/StateLogger.ts` exists and compiles
-- [ ] Factory function creates a scoped logger for a given instanceId + stateName
-- [ ] All 4 log levels produce correctly structured `LogEntry` records
-- [ ] Log entries include `id`, `instanceId`, `stateName`, `level`, `message`, `timestamp`
-- [ ] Optional `data` field is captured
-- [ ] Entries are also emitted via `Effect.log` with annotations
-- [ ] Unit tests pass
-- [ ] `pnpm --filter @aiflow/server run test` passes
+- [x] `server/src/machines/StateLogger.ts` exists and compiles
+- [x] Factory function creates a scoped logger for a given instanceId + stateName
+- [x] All 4 log levels produce correctly structured `LogEntry` records
+- [x] Log entries include `id`, `instanceId`, `stateName`, `level`, `message`, `timestamp`
+- [x] Optional `data` field is captured
+- [x] Entries are also emitted via `Effect.log` with annotations
+- [x] Unit tests pass
+- [x] `pnpm --filter @aiflow/server run test` passes
