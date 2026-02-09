@@ -81,7 +81,7 @@ export const InstancesRouter = HttpRouter.empty.pipe(
 
       // Fork the run so the HTTP response returns immediately
       const runner = yield* StateMachineRunner;
-      yield* Effect.fork(runner.run(definition, body.input));
+      yield* Effect.forkDaemon(runner.run(definition, body.input));
 
       // Yield to the scheduler so the forked fiber can save the instance
       yield* Effect.yieldNow();
@@ -296,7 +296,7 @@ export const InstancesRouter = HttpRouter.empty.pipe(
 
       // Fork the resume so the HTTP response returns immediately
       const runner = yield* StateMachineRunner;
-      yield* Effect.fork(runner.resume(id));
+      yield* Effect.forkDaemon(runner.resume(id));
 
       return yield* HttpServerResponse.json({ message: 'Instance resuming' });
     }).pipe(

@@ -2,6 +2,7 @@
 
 > **Phase**: 2 (REST API)
 > **Depends on**: Tasks 18–21 (all API routes and wiring)
+> **Continued by**: Task 22.1 (cancel running & artifact download)
 > **Blocks**: Phase 3 (WebSocket), Phase 4 (Client)
 
 ---
@@ -92,6 +93,19 @@ This is the same 5-layer pattern used in `StateMachineRunner.test.ts`.
 - Invalid input (schema violation) → Effect fails with `ValidationError`
 - Instance already running → Effect fails with `DefinitionError`
 
+### Items removed from scope
+
+- **`POST with missing input → 400`** — The route schema uses `Schema.Unknown` for `input`,
+  which accepts `undefined`. A missing `input` field passes route-level decode and falls
+  through to definition lookup (404 if non-existent, or 201 if valid). Not a 400.
+- **`POST with input violating inputSchema → 400`** — Input schema validation happens
+  **asynchronously** inside the forked runner fiber, _after_ the route returns 201. A
+  violation causes the instance to enter `'error'` status, not a synchronous 400 response.
+- **`POST resume on suspended instance → success`** — Suspension is triggered only by
+  `StateMachineRunner.suspendAll()` (SIGTERM/SIGINT). There is no user-facing API to
+  suspend a single instance, so this cannot be tested in the HTTP harness. Covered by
+  `StateMachineRunner.test.ts`.
+
 ### Existing test patterns from StateMachineRunner.test.ts
 
 The runner test file uses helper functions for definition creation and action registration — consider extracting shared test fixtures:
@@ -145,9 +159,7 @@ const registerAction = (id: string, fn: ActionFunction) =>
 
 - [x] POST with valid definition ID and input → 201 with instance ID
 - [x] POST with missing `definitionId` → 400
-- [ ] POST with missing `input` → 400
 - [x] POST with non-existent definition ID → 404
-- [ ] POST with input violating `inputSchema` → 400
 - [x] GET list returns instances; supports status/definitionId filters
 - [x] GET by id returns full instance
 - [x] GET non-existent instance → 404
@@ -160,7 +172,7 @@ const registerAction = (id: string, fn: ActionFunction) =>
 
 #### Cancel (§11)
 
-- [ ] POST cancel on running instance → success
+- [x] POST cancel on running instance → 200 _(completed in Task 22.1)_
 - [x] POST cancel on completed → 409
 - [x] POST cancel on cancelled → 409
 - [x] POST cancel on errored → 409
@@ -168,7 +180,12 @@ const registerAction = (id: string, fn: ActionFunction) =>
 
 #### Resume (§12)
 
-- [ ] POST resume on suspended instance → success
+> **Note:** Suspension is an infrastructure-level mechanism triggered only by
+> `StateMachineRunner.suspendAll()` (server shutdown / SIGTERM). There is no
+> user-facing API or action to suspend a single instance, so the "resume
+> suspended → success" happy path cannot be tested in the in-process HTTP
+> harness. That path is covered by `StateMachineRunner.test.ts` instead.
+
 - [x] POST resume on running → 409
 - [x] POST resume on completed → 409
 - [x] POST resume on non-existent → 404
@@ -177,7 +194,7 @@ const registerAction = (id: string, fn: ActionFunction) =>
 
 - [x] GET `/instances/:id/artifacts` returns artifact list
 - [x] GET `/instances/:id/artifacts?tree=true` returns recursive tree
-- [ ] GET `/instances/:id/artifacts/:name` downloads file content
+- [x] GET `/instances/:id/artifacts/:name` downloads file content _(completed in Task 22.1)_
 - [x] GET `/instances/:id/artifacts/:name` for non-existent → 404
 
 #### Concurrent Operations (§21.2)
@@ -199,9 +216,9 @@ const registerAction = (id: string, fn: ActionFunction) =>
 - §2 (Definition Validation via API) — validation error responses
 - §3 (Action Registry) — list and get actions
 - §4.1, §4.3, §4.4, §4.5 — instance start, query, history, logs
-- §11.5 — cancel conflict responses
-- §12.5 — resume conflict responses
-- §15.4 — artifact API endpoints
+- §11 — cancel conflict responses; cancel running deferred to Task 22.1
+- §12 — resume conflict responses (suspend/resume happy path covered in runner unit tests)
+- §15.4 — artifact list, tree, non-existent; download deferred to Task 22.1
 - §21.1 — error responses for missing fields, non-existent resources
 - §21.2 — concurrent operations
 - §21.3 — definition mutation during execution
@@ -215,7 +232,8 @@ const registerAction = (id: string, fn: ActionFunction) =>
 - [x] Validation error responses include `message` and `details[]`
 - [x] Instance lifecycle tested (start, query, cancel, resume)
 - [x] History and log endpoints tested with filtering
-- [ ] Artifact endpoints tested (list, tree, download)
 - [x] Error responses (400, 404, 409, 500) tested for each case
 - [x] Concurrent operations tested
 - [x] `pnpm --filter @aiflow/server run test` passes
+
+> **Remaining:** Cancel running instance & artifact download deferred to **Task 22.1**.

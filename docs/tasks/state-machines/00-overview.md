@@ -7,14 +7,14 @@
 
 ## Phase Summary
 
-| Phase | Tasks   | Description                                            |
-| ----- | ------- | ------------------------------------------------------ |
-| 1     | 01 – 17 | Core Engine (Server) — types, store, registry, runner  |
-| 2     | 18 – 22 | REST API — CRUD, instance management, artifacts        |
-| 3     | 23      | WebSocket — live event streaming                       |
-| 4     | 24 – 29 | Client Viewer — API client, dashboard, instance viewer |
-| 5     | 30      | Client Editor — visual definition editor               |
-| 6     | 31 – 33 | Polish — observability, integration, E2E tests         |
+| Phase | Tasks     | Description                                            |
+| ----- | --------- | ------------------------------------------------------ |
+| 1     | 01 – 17   | Core Engine (Server) — types, store, registry, runner  |
+| 2     | 18 – 22.1 | REST API — CRUD, instance management, artifacts        |
+| 3     | 23        | WebSocket — live event streaming                       |
+| 4     | 24 – 29   | Client Viewer — API client, dashboard, instance viewer |
+| 5     | 30        | Client Editor — visual definition editor               |
+| 6     | 31 – 33   | Polish — observability, integration, E2E tests         |
 
 ---
 
@@ -47,10 +47,11 @@
       ──→ 20 API Instances
       ──→ 21 API Wiring
       ──→ 22 API Tests
+           └──→ 22.1 Remaining API Tests (cancel running, artifact download)
 
  21 ──→ 23 WebSocket Server
 
- 22 + 23
+ 22.1 + 23
   ├──→ 24 Client API Client
   ├──→ 25 Client WebSocket Client
   ├──→ 26 Client State Management
@@ -81,11 +82,11 @@
 | §8 Single Child Machine              | 11, 17                      |
 | §9 Parallel Children                 | 12, 17                      |
 | §10 Concurrency & Semaphore          | 13, 17                      |
-| §11 Cancellation                     | 14, 17, 20                  |
+| §11 Cancellation                     | 14, 17, 20, 22.1            |
 | §12 Resumability & Graceful Shutdown | 15, 17, 20                  |
 | §13 Persistence Checkpoints          | 09, 15, 17                  |
 | §14 Middleware                       | 07, 17                      |
-| §15 Artifacts                        | 08, 17, 20                  |
+| §15 Artifacts                        | 08, 17, 20, 22.1            |
 | §16 WebSocket — Live Updates         | 23, 25                      |
 | §17 Dashboard                        | 27                          |
 | §18 Instance Viewer                  | 28                          |

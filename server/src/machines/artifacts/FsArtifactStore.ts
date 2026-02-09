@@ -171,35 +171,51 @@ export function makeScopedArtifactStore(
 
   return {
     write(name, content, metadata?) {
-      return Effect.tryPromise({
-        try: async () => {
-          validateFilename(name);
-          const filePath = safeResolve(dir, name);
-          await fs.mkdir(path.dirname(filePath), { recursive: true });
-          await fs.writeFile(filePath, content);
+      return Effect.gen(function* () {
+        const record = yield* Effect.tryPromise({
+          try: async () => {
+            validateFilename(name);
+            const filePath = safeResolve(dir, name);
+            await fs.mkdir(path.dirname(filePath), { recursive: true });
+            await fs.writeFile(filePath, content);
 
-          const record: ArtifactRecord = {
-            name,
-            instanceId,
-            stateName,
-            size: content.byteLength,
-            mimeType:
-              // eslint-disable-next-line @typescript-eslint/dot-notation
-              metadata && typeof metadata['mimeType'] === 'string'
-                ? // eslint-disable-next-line @typescript-eslint/dot-notation
-                  metadata['mimeType']
-                : undefined,
-            metadata: metadata ?? undefined,
-            createdAt: new Date().toISOString(),
-          };
+            const rec: ArtifactRecord = {
+              name,
+              instanceId,
+              stateName,
+              size: content.byteLength,
+              mimeType:
+                // eslint-disable-next-line @typescript-eslint/dot-notation
+                metadata && typeof metadata['mimeType'] === 'string'
+                  ? // eslint-disable-next-line @typescript-eslint/dot-notation
+                    metadata['mimeType']
+                  : undefined,
+              metadata: metadata ?? undefined,
+              createdAt: new Date().toISOString(),
+            };
 
-          // Persist record metadata as a sidecar JSON file
-          const metaPath = filePath + '.meta.json';
-          await fs.writeFile(metaPath, JSON.stringify(record, null, 2), 'utf-8');
+            // Persist record metadata as a sidecar JSON file
+            const metaPath = filePath + '.meta.json';
+            await fs.writeFile(metaPath, JSON.stringify(rec, null, 2), 'utf-8');
 
-          return record;
-        },
-        catch: (cause) => mkStoreError({ operation: 'write', cause }),
+            return rec;
+          },
+          catch: (cause) => mkStoreError({ operation: 'write', cause }),
+        });
+
+        // Append the artifact record to the instance in the MachineStore
+        const instance = yield* store
+          .getInstance(instanceId)
+          .pipe(Effect.catchAll(() => Effect.succeed(null)));
+        if (instance) {
+          yield* store
+            .updateInstance(instanceId, {
+              artifacts: [...instance.artifacts, record],
+            })
+            .pipe(Effect.catchAll(() => Effect.void));
+        }
+
+        return record;
       });
     },
 

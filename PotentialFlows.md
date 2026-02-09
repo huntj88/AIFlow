@@ -26,3 +26,11 @@ flow after planning to create questions to ask user for further plan refinement
 "review the code for <feature spec>"
 
 ## "Create a plan at task x.1 to fix the issues, but make sure they are consistent with future task requirments"
+
+---
+
+---
+
+"why are there remaining items in the task checklist?"
+
+## "update plan to remove the the items from the checklist that aren't achievable because the plan changed. Update unfished task plans with new behavior if relevant"

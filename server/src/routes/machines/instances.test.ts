@@ -12,12 +12,13 @@ import { HttpApp, HttpRouter } from '@effect/platform';
 import { Effect, Layer, ManagedRuntime } from 'effect';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { ActionRegistryLive } from '@/machines/ActionRegistry.js';
+import { ActionRegistry, ActionRegistryLive } from '@/machines/ActionRegistry.js';
 import { FsArtifactStoreLive } from '@/machines/artifacts/FsArtifactStore.js';
 import { ExecutionSemaphoreLive } from '@/machines/ExecutionSemaphore.js';
 import { makeMiddlewareExecutorLayer } from '@/machines/middleware/MiddlewareExecutor.js';
 import { StateMachineRunnerLive } from '@/machines/StateMachineRunner.js';
 import { InMemoryMachineStoreLive } from '@/machines/store/index.js';
+import { mkActionError } from '@/machines/types.js';
 
 import { MachineRouter } from './index.js';
 
@@ -50,6 +51,42 @@ const TestLayer = Layer.mergeAll(StoreLive, RegistryLive, ArtifactLive, RunnerLi
 async function makeHandler() {
   const managedRuntime = ManagedRuntime.make(TestLayer);
   const runtime = await managedRuntime.runtime();
+
+  // Register a test-only action that writes an artifact
+  await managedRuntime.runPromise(
+    Effect.gen(function* () {
+      const registry = yield* ActionRegistry;
+      yield* registry.register(
+        'save-artifact',
+        (ctx) =>
+          Effect.gen(function* () {
+            const content = ctx.stateData as {
+              filename?: string;
+              content?: string;
+              nextState?: string;
+            };
+            const filename = content.filename ?? 'output.txt';
+            const fileContent = content.content ?? 'hello from artifact';
+            const nextState = content.nextState ?? 'completed';
+
+            yield* ctx.artifacts.write(filename, new TextEncoder().encode(fileContent)).pipe(
+              Effect.mapError((e) =>
+                mkActionError({
+                  actionId: 'save-artifact',
+                  stateName: ctx.stateName,
+                  cause: e.cause,
+                }),
+              ),
+            );
+            yield* ctx.logger.info(`Wrote artifact: ${filename}`);
+
+            return { nextState, data: { artifact: filename } };
+          }),
+        { description: 'Test action that writes an artifact file' },
+      );
+    }),
+  );
+
   const served = MachineRouter.pipe(HttpRouter.use((httpApp) => Effect.provide(httpApp, runtime)));
   return HttpApp.toWebHandler(served);
 }
@@ -97,6 +134,27 @@ const slowDefinitionBody = {
   outputSchema: { type: 'object' },
   states: {
     start: { name: 'start', type: 'action', actionId: 'delay' },
+    completed: { name: 'completed', type: 'terminal' },
+    cancelled: { name: 'cancelled', type: 'terminal' },
+    error: { name: 'error', type: 'terminal' },
+  },
+  initialState: 'start',
+  transitions: [
+    { from: 'start', to: 'completed' },
+    { from: 'start', to: 'cancelled' },
+    { from: 'start', to: 'error' },
+  ],
+};
+
+/**
+ * A machine that uses a save-artifact action so we can test artifact download.
+ */
+const artifactDefinitionBody = {
+  name: 'artifact-machine',
+  inputSchema: { type: 'object' },
+  outputSchema: { type: 'object' },
+  states: {
+    start: { name: 'start', type: 'action', actionId: 'save-artifact' },
     completed: { name: 'completed', type: 'terminal' },
     cancelled: { name: 'cancelled', type: 'terminal' },
     error: { name: 'error', type: 'terminal' },
@@ -382,6 +440,34 @@ describe('InstancesRouter', () => {
       expect(res.status).toBe(404);
     });
 
+    it('POST cancel on running instance → 200', async () => {
+      const defId = await createDefinition(slowDefinitionBody);
+      const instance = await startInstance(defId, {
+        delayMs: 5000,
+        nextState: 'completed',
+      });
+
+      // Wait for the runner fiber to start executing
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Verify it's running
+      const getRes = await getInstance(instance.id);
+      const inst = (await getRes.json()) as { status: string };
+      expect(inst.status).toBe('running');
+
+      // Cancel it
+      const cancelRes = await postCancel(instance.id);
+      expect(cancelRes.status).toBe(200);
+
+      // Wait for the fiber interruption finalizer to persist
+      await new Promise((r) => setTimeout(r, 200));
+
+      // Verify the instance is now cancelled
+      const afterRes = await getInstance(instance.id);
+      const afterBody = (await afterRes.json()) as { status: string };
+      expect(afterBody.status).toBe('cancelled');
+    });
+
     it('POST cancel on completed → 409', async () => {
       const defId = await createDefinition();
       const instance = await startInstance(defId);
@@ -404,7 +490,7 @@ describe('InstancesRouter', () => {
     it('POST cancel on cancelled → 409', async () => {
       const defId = await createDefinition(slowDefinitionBody);
       const instance = await startInstance(defId, {
-        durationMs: 5000,
+        delayMs: 5000,
         nextState: 'completed',
       });
 
@@ -486,7 +572,7 @@ describe('InstancesRouter', () => {
     it('POST resume on running → 409', async () => {
       const defId = await createDefinition(slowDefinitionBody);
       const instance = await startInstance(defId, {
-        durationMs: 5000,
+        delayMs: 5000,
         nextState: 'completed',
       });
 
@@ -536,6 +622,36 @@ describe('InstancesRouter', () => {
     it('GET /instances/:id/artifacts for non-existent instance → 404', async () => {
       const res = await getArtifacts('non-existent');
       expect(res.status).toBe(404);
+    });
+
+    it('GET /instances/:id/artifacts/:name downloads file content', async () => {
+      const defId = await createDefinition(artifactDefinitionBody);
+      const instance = await startInstance(defId, {
+        filename: 'report.txt',
+        content: 'artifact content here',
+        nextState: 'completed',
+      });
+
+      // Wait for machine to complete and artifact to be written
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Verify the instance completed
+      const instRes = await getInstance(instance.id);
+      const instBody = (await instRes.json()) as { status: string };
+      expect(instBody.status).toBe('completed');
+
+      // List artifacts — should include our file
+      const listRes = await getArtifacts(instance.id);
+      expect(listRes.status).toBe(200);
+      const artifacts = (await listRes.json()) as { name: string }[];
+      expect(artifacts.some((a) => a.name === 'report.txt')).toBe(true);
+
+      // Download the artifact
+      const downloadRes = await getArtifact(instance.id, 'report.txt');
+      expect(downloadRes.status).toBe(200);
+
+      const body = await downloadRes.text();
+      expect(body).toBe('artifact content here');
     });
 
     it('GET /instances/:id/artifacts/:name for non-existent artifact → 404', async () => {
@@ -602,7 +718,7 @@ describe('InstancesRouter', () => {
     it('Updating a definition while instance is running → running instance unaffected', async () => {
       const defId = await createDefinition(slowDefinitionBody);
       const instance = await startInstance(defId, {
-        durationMs: 3000,
+        delayMs: 3000,
         nextState: 'completed',
       });
 
