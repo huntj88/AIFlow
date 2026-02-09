@@ -13,6 +13,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      '/api/machines/live': {
+        target: 'ws://localhost:3001',
+        ws: true,
+      },
       '/api': {
         target: 'http://localhost:3001',
         changeOrigin: true,

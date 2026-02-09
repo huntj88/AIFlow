@@ -137,11 +137,11 @@ const useMachineSocket = (instanceId: string, onEvent: (event: MachineEvent) => 
 
 ## Validation Checklist
 
-- [ ] `client/src/utils/machineSocket.ts` implements WebSocket client
-- [ ] Connection to `ws://host/api/machines/live` works
-- [ ] Subscribe/unsubscribe sends correct messages to server
-- [ ] Callbacks dispatched for matching instanceId events
-- [ ] Exponential backoff reconnection: 1s → 2s → 4s → … → 30s cap
-- [ ] Re-subscribe on reconnect
-- [ ] React hook `useMachineSocket` properly subscribes/cleans up
-- [ ] `pnpm --filter @aiflow/client run build` succeeds
+- [x] `client/src/utils/machineSocket.ts` implements WebSocket client
+- [x] Connection to `ws://host/api/machines/live` works
+- [x] Subscribe/unsubscribe sends correct messages to server
+- [x] Callbacks dispatched for matching instanceId events
+- [x] Exponential backoff reconnection: 1s → 2s → 4s → … → 30s cap
+- [x] Re-subscribe on reconnect
+- [x] React hook `useMachineSocket` properly subscribes/cleans up
+- [x] `pnpm --filter @aiflow/client run build` succeeds
