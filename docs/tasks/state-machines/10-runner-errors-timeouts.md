@@ -138,12 +138,12 @@ Before creating the instance, validate `input` against `definition.inputSchema` 
 
 ## Validation Checklist
 
-- [ ] Per-state `timeoutMs` wraps action in `Effect.timeout`
-- [ ] Machine-level `timeoutMs` wraps entire state loop
-- [ ] `MAX_MACHINE_DEPTH` read from env var with default 10
-- [ ] Depth 10 is allowed; depth 11 is rejected with `DefinitionError`
-- [ ] Input validation against `inputSchema` works (reject on violation, skip if no schema)
-- [ ] All error scenarios produce correct `MachineError` variant
-- [ ] Errors transition machine to `error` terminal state
-- [ ] `onError` middleware hooks fire on errors
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
+- [x] Per-state `timeoutMs` wraps action in `Effect.timeout`
+- [x] Machine-level `timeoutMs` wraps entire state loop
+- [x] `MAX_MACHINE_DEPTH` read from env var with default 10
+- [x] Depth 10 is allowed; depth 11 is rejected with `DefinitionError`
+- [x] Input validation against `inputSchema` works (reject on violation, skip if no schema)
+- [x] All error scenarios produce correct `MachineError` variant
+- [x] Errors transition machine to `error` terminal state
+- [x] `onError` middleware hooks fire on errors
+- [x] `pnpm --filter @aiflow/server run build` succeeds
