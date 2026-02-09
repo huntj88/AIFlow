@@ -19,6 +19,10 @@ flow after planning to create questions to ask user for further plan refinement
 
 "Review the <feature> tasks that have been done starting from task <number>. Were there any decisions or implementation details that would affect unfinished tasks? Update unfinished tasks with relevant details that emerged from tasks done so far. Think really hard on this."
 
+"Review the State machine tasks that have been done starting from task 18. Were there any decisions or implementation details that would affect unfinished tasks? Update unfinished tasks with relevant details that emerged from tasks done so far. Call out any issues you find. Think really hard on this."
+
+"Were there any decisions or implementation details from task <x> that would affect Task <X+1>? Update task <x+1> with relevant details."
+
 ## "create schedule to run <codeReview prompt> and <decisions/implementationDetails prompt> after a dependency group is done"
 
 ---
