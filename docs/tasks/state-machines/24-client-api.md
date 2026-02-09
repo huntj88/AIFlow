@@ -254,10 +254,10 @@ This task enables all client-side behaviors by providing the API layer. No speci
 
 ## Validation Checklist
 
-- [ ] `client/src/utils/apiClient.ts` extended with all machine endpoints
-- [ ] Client-side machine types defined
-- [ ] All endpoints use the established `makeRequest` pattern
-- [ ] POST/PUT/DELETE variants added
-- [ ] Response types are correct
-- [ ] Error mapping for 400/404/409/500
-- [ ] `pnpm --filter @aiflow/client run build` succeeds (or `tsc --noEmit`)
+- [x] `client/src/utils/apiClient.ts` extended with all machine endpoints
+- [x] Client-side machine types defined
+- [x] All endpoints use the established `makeRequest` pattern
+- [x] POST/PUT/DELETE variants added
+- [x] Response types are correct
+- [x] Error mapping for 400/404/409/500
+- [x] `pnpm --filter @aiflow/client run build` succeeds (or `tsc --noEmit`)
