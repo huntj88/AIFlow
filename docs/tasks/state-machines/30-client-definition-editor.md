@@ -294,17 +294,17 @@ Add to `client/src/locales/en/common.json`:
 
 ## Validation Checklist
 
-- [ ] New definition can be created from blank canvas
-- [ ] Existing definition loads into editor with correct node positions
-- [ ] States can be added, removed, renamed
-- [ ] Transitions can be drawn between states
-- [ ] State config panel shows correct fields per state type
-- [ ] Client-side validation runs and shows errors/warnings
-- [ ] Import/export JSON works round-trip
-- [ ] Undo/redo works across all mutations
-- [ ] Dirty tracking prevents accidental navigation
-- [ ] Save creates or updates via API
-- [ ] Server validation errors are displayed
-- [ ] i18n keys used for all UI text
-- [ ] `pnpm --filter @aiflow/client run build` succeeds
-- [ ] `pnpm --filter @aiflow/client run test` passes
+- [x] New definition can be created from blank canvas
+- [x] Existing definition loads into editor with correct node positions
+- [x] States can be added, removed, renamed
+- [x] Transitions can be drawn between states
+- [x] State config panel shows correct fields per state type
+- [x] Client-side validation runs and shows errors/warnings
+- [x] Import/export JSON works round-trip
+- [x] Undo/redo works across all mutations
+- [x] Dirty tracking prevents accidental navigation
+- [x] Save creates or updates via API
+- [x] Server validation errors are displayed
+- [x] i18n keys used for all UI text
+- [x] `pnpm --filter @aiflow/client run build` succeeds
+- [x] `pnpm --filter @aiflow/client run test` passes

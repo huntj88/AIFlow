@@ -1,25 +1,88 @@
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router';
 
+import { DefinitionEditor } from '@/components/machines/editor/DefinitionEditor';
+import type { StateMachineDefinition } from '@/types/machines';
+import { apiClient } from '@/utils/apiClient';
+import { runWithLogging } from '@/utils/logger';
+
 // ────────────────────────────────────────────────────────────────────────────
-// Placeholder — Task 30 will implement the full definition editor.
+// Page — wraps DefinitionEditor with route param handling
 // ────────────────────────────────────────────────────────────────────────────
 
 export function MachineDefinitionPage() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
-  const isNew = !id;
+  const isNew = !id || id === 'new';
+
+  const [definition, setDefinition] = useState<StateMachineDefinition | undefined>(undefined);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isNew || !id) return;
+
+    let cancelled = false;
+
+    const fetchDef = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const def = await runWithLogging(apiClient.getDefinition(id));
+        if (!cancelled) {
+          setDefinition(def);
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void fetchDef();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, isNew]);
+
+  if (isLoading) {
+    return (
+      <div
+        className="flex items-center justify-center py-12 text-[var(--color-text-muted)]"
+        data-testid="machine-definition-page"
+      >
+        {t('machines.editor.loading')}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div
+        className="flex items-center justify-center py-12 text-red-500"
+        data-testid="machine-definition-page"
+      >
+        {error}
+      </div>
+    );
+  }
 
   return (
-    <div data-testid="machine-definition-page">
-      <h2 className="mb-4 text-2xl font-semibold">
+    <div className="flex h-[calc(100vh-4rem)] flex-col" data-testid="machine-definition-page">
+      <h2 className="shrink-0 px-4 py-2 text-lg font-semibold">
         {isNew
           ? t('machines.definition_editor.title_new')
           : t('machines.definition_editor.title_edit')}
       </h2>
-      <p className="text-[var(--color-text-muted)]">
-        {t('machines.definition_editor.placeholder')}
-      </p>
+      <div className="flex-1 overflow-hidden">
+        <DefinitionEditor existingDefinition={definition} />
+      </div>
     </div>
   );
 }
