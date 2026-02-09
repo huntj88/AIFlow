@@ -139,11 +139,11 @@ export const registerBuiltinActions = (registry: ActionRegistry): Effect.Effect<
 
 ## Validation Checklist
 
-- [ ] `server/src/machines/ActionRegistry.ts` defines Effect Service Tag and interface
-- [ ] All 5 built-in actions are implemented in separate files under `server/src/machines/actions/`
-- [ ] `server/src/machines/actions/index.ts` re-exports and provides `registerBuiltinActions`
-- [ ] `ActionRegistryLive` Layer pre-registers all built-in actions
-- [ ] `delay` action uses `Effect.sleep` (interruptible)
-- [ ] `conditional-branch` evaluates conditions and routes correctly
-- [ ] Unit tests pass for registry and all actions
-- [ ] `pnpm --filter @aiflow/server run test` passes
+- [x] `server/src/machines/ActionRegistry.ts` defines Effect Service Tag and interface
+- [x] All 5 built-in actions are implemented in separate files under `server/src/machines/actions/`
+- [x] `server/src/machines/actions/index.ts` re-exports and provides `registerBuiltinActions`
+- [x] `ActionRegistryLive` Layer pre-registers all built-in actions
+- [x] `delay` action uses `Effect.sleep` (interruptible)
+- [x] `conditional-branch` evaluates conditions and routes correctly
+- [x] Unit tests pass for registry and all actions
+- [x] `pnpm --filter @aiflow/server run test` passes
