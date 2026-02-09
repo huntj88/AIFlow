@@ -151,13 +151,13 @@ Note: The existing file uses flat key format (not nested JSON objects).
 
 ## Validation Checklist
 
-- [ ] `client/src/pages/MachinesPage.tsx` exists with definitions and instances sections
-- [ ] Definition list shows name, version, description, tags
-- [ ] Create, edit, delete actions work on definitions
-- [ ] Instance list shows status with color badges
-- [ ] Status filter tabs work
-- [ ] Suspended instances show Resume button
-- [ ] Quick Start panel: select definition, input JSON, launch
-- [ ] Launch redirects to instance viewer
-- [ ] i18n translations added
-- [ ] `pnpm --filter @aiflow/client run build` succeeds
+- [x] `client/src/pages/MachinesPage.tsx` exists with definitions and instances sections
+- [x] Definition list shows name, version, description, tags
+- [x] Create, edit, delete actions work on definitions
+- [x] Instance list shows status with color badges
+- [x] Status filter tabs work
+- [x] Suspended instances show Resume button
+- [x] Quick Start panel: select definition, input JSON, launch
+- [x] Launch redirects to instance viewer
+- [x] i18n translations added
+- [x] `pnpm --filter @aiflow/client run build` succeeds
