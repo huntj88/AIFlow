@@ -12,6 +12,19 @@ Implement the `ArtifactStoreFactory` Effect Service and the filesystem-backed `A
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect this task's implementation.
+
+- **`ArtifactStore` interface** (from `types.ts`) uses **`Uint8Array`** for binary content — both `write(name, content: Uint8Array, ...)` and `read(name): Effect<Uint8Array, ...>`. Use `Uint8Array` throughout, NOT `Buffer`. Convert if needed: `new Uint8Array(buffer)` or `Buffer.from(uint8array)`.
+- **Error constructors** use the `mk` prefix: `mkStoreError({ operation, cause })`, `mkNotFoundError({ entityType, id })` — imported from `../types.js`.
+- **`NotFoundError.entityType`** only allows `'definition' | 'instance' | 'action'`. For artifact not-found, either reuse with a descriptive `id` or consider `mkStoreError` with a descriptive operation message.
+- **Effect Service pattern**: Use `Context.GenericTag<ArtifactStoreFactory>('ArtifactStoreFactory')` — matching `MachineStore` and `ActionRegistry`.
+- **`MachineStore` access**: Import from `'../store/index.js'` (barrel) or `'../store/MachineStore.js'`. The `listInstances` method supports `{ parentInstanceId }` filter for descendant lookup.
+- **Module path convention**: Artifact files go under `server/src/machines/artifacts/` subfolder.
+
+---
+
 ## Steps
 
 ### 1. Create `server/src/machines/artifacts/ArtifactStoreFactory.ts`

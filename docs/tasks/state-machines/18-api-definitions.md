@@ -12,6 +12,76 @@ Implement the REST API routes for state machine definition CRUD operations. Thes
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect this task’s implementation.
+
+### Route composition pattern
+
+The existing server uses `@effect/platform` `HttpRouter`. See `server/src/routes/hello.ts` for the established pattern. The current `HttpLive` in `server/src/lib/HttpServer.ts` is:
+
+```typescript
+export const HttpLive = HelloRouter.pipe(
+  HttpServer.serve(HttpMiddleware.logger),
+  HttpServer.withLogAddress,
+  Layer.provide(ServerLive),
+);
+```
+
+New machine routes should be composed as a separate router and merged in Task 21.
+
+### Schema decode returns `Either`, not `Effect`
+
+The decode utilities from `schemas.ts` use `Schema.decodeUnknownEither`, returning `Either<A, ParseError>`:
+
+```typescript
+import { decodeCreateDefinition } from '@/machines/schemas.js';
+// Returns Either — use Either.match or Either.isLeft to handle:
+const decoded = decodeCreateDefinition(requestBody);
+if (Either.isLeft(decoded)) {
+  // Return 400 with parse error details
+}
+const body = decoded.right;
+```
+
+Alternatively, use `Schema.decodeUnknown(CreateDefinitionRequestSchema)` directly in Effect context for an effectful version.
+
+### Store method signatures
+
+- **`saveDefinition`** takes `Omit<StateMachineDefinition, 'id' | 'version' | 'metadata'> & { metadata?: Partial<...> }` — the store auto-generates `id`, sets `version: 1`, populates `createdAt`/`updatedAt`.
+- **`updateDefinition(id, patch)`** — `patch` is `Partial<Omit<...>>` with partial metadata. Store auto-increments `version` and refreshes `updatedAt`.
+- **`deleteDefinition(id)`** returns `Effect.Effect<void, NotFoundError>`.
+
+### DefinitionValidator signature
+
+```typescript
+import { validateDefinition } from '@/machines/DefinitionValidator.js';
+// validateDefinition(def: StateMachineDefinition, mode: 'save' | 'runtime', actionRegistry?)
+// For save-time: pass mode: 'save', optionally pass the ActionRegistry adapter
+// The validator needs a FULL StateMachineDefinition (with id, version, metadata)
+// So validate AFTER store.saveDefinition (or construct a temporary full def for validation BEFORE saving)
+```
+
+**Important**: `validateDefinition` expects a full `StateMachineDefinition` (with `id`). For POST (create), either:
+
+- Validate the request body by constructing a temporary full definition with placeholder id/version/metadata, OR
+- Save first, then validate, and delete if invalid (simpler but creates then deletes)
+- OR restructure the validator to accept the partial create request shape
+
+### Error constructors
+
+Use `mk*` constructors: `mkNotFoundError({ entityType: 'definition', id })`, `mkDefinitionError({ message, details })`, `mkValidationError({ message, path })` — from `'@/machines/types.js'`.
+
+### Import paths
+
+The server uses `@/` path aliases:
+
+- `import { MachineStore } from '@/machines/store/index.js';`
+- `import { validateDefinition } from '@/machines/DefinitionValidator.js';`
+- `import { decodeCreateDefinition } from '@/machines/schemas.js';`
+
+---
+
 ## Steps
 
 ### 1. Create `server/src/routes/machines/definitions.ts`
@@ -27,6 +97,7 @@ Implement routes using `@effect/platform` `HttpRouter`:
 
 - Decode request body via `CreateDefinitionRequestSchema`
 - Run `DefinitionValidator` in `'save'` mode
+  - **Note**: The validator expects a full `StateMachineDefinition`. Construct a temporary object with placeholder `id`/`version`/`metadata` for pre-save validation, or save first then validate and rollback on failure.
 - Call `MachineStore.saveDefinition()` (auto-generates `id`, `version: 1`, timestamps)
 - Return **201** with the created definition including generated `id`
 

@@ -12,6 +12,82 @@ Wire all machine routes into the existing `HttpServer`, compose the full Effect 
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect this task’s implementation **significantly**.
+
+### Current server architecture (as built)
+
+**`server/src/routes/hello.ts`** — Route pattern:
+
+```typescript
+import { HttpRouter, HttpServerResponse } from '@effect/platform';
+
+export const HelloRouter = HttpRouter.empty.pipe(
+  HttpRouter.get('/api/hello', HttpServerResponse.json({ message: 'hello world' })),
+);
+```
+
+**`server/src/lib/HttpServer.ts`** — Server composition:
+
+```typescript
+import { HelloRouter } from '@/routes/hello.js';
+
+const PORT = Number(process.env.PORT ?? 3001);
+const ServerLive = NodeHttpServer.layer(() => createServer(), { port: PORT });
+
+export const HttpLive = HelloRouter.pipe(
+  HttpServer.serve(HttpMiddleware.logger),
+  HttpServer.withLogAddress,
+  Layer.provide(ServerLive),
+);
+
+export const startServer = Layer.launch(HttpLive).pipe(
+  Effect.tap(() => Effect.log(`Server starting on port ${String(PORT)}`)),
+);
+```
+
+**`server/src/index.ts`** — Entry point:
+
+```typescript
+import { startServer } from '@/lib/HttpServer.js';
+import { ServerLoggerLive } from '@/lib/Logger.js';
+
+startServer.pipe(Effect.provide(ServerLoggerLive), NodeRuntime.runMain);
+```
+
+### Key takeaways for wiring
+
+1. Routes are `HttpRouter` instances composed via `.pipe()`.
+2. The `HelloRouter` is piped directly into `HttpServer.serve()` — to add machine routes, merge routers first or mount the machine router alongside.
+3. `ServerLive` wraps Node’s `createServer()` — this `http.Server` instance is needed by the WebSocket server (Task 23) for upgrade handling.
+4. `ServerLoggerLive` provides structured logging — all new layers should be compatible.
+5. Service layers must be provided BEFORE `Layer.launch(HttpLive)` in the composition chain.
+
+### Actual layer names from completed tasks
+
+| Layer                        | Import Path                                                                   | Description                        |
+| ---------------------------- | ----------------------------------------------------------------------------- | ---------------------------------- |
+| `InMemoryMachineStoreLive`   | `'@/machines/store/index.js'` or `'@/machines/store/InMemoryMachineStore.js'` | Implements MachineStore            |
+| `ActionRegistryLive`         | `'@/machines/ActionRegistry.js'`                                              | Pre-loaded with 5 built-in actions |
+| `InMemoryActionRegistryLive` | `'@/machines/ActionRegistry.js'`                                              | Bare empty registry (for tests)    |
+
+Layers from Tasks 06–16 (to be built): `StateMachineRunnerLive`, `ExecutionSemaphoreLive`, `FsArtifactStoreLive`, `MachineEventPubSubLive`, `MiddlewareExecutorLive`.
+
+### Service access in routes
+
+Routes access services from the Effect context via `yield*`:
+
+```typescript
+Effect.gen(function* () {
+  const store = yield* MachineStore; // from '@/machines/store/index.js'
+  const runner = yield* StateMachineRunner;
+  // handle request...
+});
+```
+
+---
+
 ## Steps
 
 ### 1. Create `server/src/routes/machines/index.ts`
@@ -24,53 +100,52 @@ import { DefinitionRoutes } from './definitions.js';
 import { ActionRoutes } from './actions.js';
 import { InstanceRoutes } from './instances.js';
 
-export const MachineRouter = HttpRouter.empty.pipe(
-  HttpRouter.mount(
-    '/api/machines',
-    HttpRouter.empty
-      .pipe
-      // definitions routes
-      // actions routes
-      // instances routes
-      (),
-  ),
-);
+// Merge all machine route groups into one router
+export const MachineRouter = HttpRouter.empty
+  .pipe
+  // ... mount definition routes
+  // ... mount action routes
+  // ... mount instance routes
+  ();
 ```
-
-Or merge all routes at the `/api/machines` prefix using the @effect/platform routing.
 
 ### 2. Modify `server/src/lib/HttpServer.ts`
 
-Add `MachineRouter` alongside the existing `HelloRouter`:
+Merge `HelloRouter` and `MachineRouter` before serving. The current pattern pipes a single router into `HttpServer.serve()`. To add the machine router:
 
 ```typescript
-export const HttpLive = HttpRouter.empty.pipe(
+import { HelloRouter } from '@/routes/hello.js';
+import { MachineRouter } from '@/routes/machines/index.js';
+
+// Option A: Merge routers
+const AppRouter = HttpRouter.empty.pipe(
   HttpRouter.mount('/', HelloRouter),
   HttpRouter.mount('/', MachineRouter),
+);
+
+export const HttpLive = AppRouter.pipe(
   HttpServer.serve(HttpMiddleware.logger),
   HttpServer.withLogAddress,
   Layer.provide(ServerLive),
-  // New: provide all machine service layers
+  // Provide all machine service layers:
   Layer.provide(ActionRegistryLive),
-  Layer.provide(StateMachineRunnerLive),
-  Layer.provide(ExecutionSemaphoreLive),
   Layer.provide(InMemoryMachineStoreLive),
-  Layer.provide(FsArtifactStoreLive),
-  Layer.provide(MachineEventPubSubLive),
-  Layer.provide(MiddlewareExecutorLive),
+  // ... other layers from Tasks 06–16 once built
 );
 ```
 
+**Note**: The existing `HelloRouter.pipe(HttpServer.serve(...))` pattern must change to accommodate multiple routers.
+
 ### 3. Full Layer composition
 
-The complete dependency graph:
+The complete dependency graph (building on the actual `HttpLive` + `startServer` + `ServerLoggerLive` pattern):
 
 ```
 HttpLive
-  = (HelloRouter + MachineRouter)
+  = AppRouter (HelloRouter + MachineRouter)
   |> HttpServer.serve(HttpMiddleware.logger)
   |> HttpServer.withLogAddress
-  |> Layer.provide(ServerLive)                 // NodeHttpServer
+  |> Layer.provide(ServerLive)                 // NodeHttpServer.layer(() => createServer(), { port: 3001 })
   |> Layer.provide(ActionRegistryLive)         // Built-in actions pre-registered
   |> Layer.provide(StateMachineRunnerLive)     // Depends on: ActionRegistry, MachineStore,
   |                                            //   Semaphore, PubSub, Middleware, ArtifactStoreFactory
@@ -79,7 +154,16 @@ HttpLive
   |> Layer.provide(FsArtifactStoreLive)        // Implements ArtifactStoreFactory
   |> Layer.provide(MachineEventPubSubLive)     // PubSub<MachineEvent>
   |> Layer.provide(MiddlewareExecutorLive)     // Default middleware stack
+
+startServer = Layer.launch(HttpLive).pipe(
+  Effect.tap(() => Effect.log('Server starting on port ...')),
+);
+
+// In index.ts:
+startServer.pipe(Effect.provide(ServerLoggerLive), NodeRuntime.runMain);
 ```
+
+**Important**: Layer ordering matters — dependent layers must be provided after their dependents. If `StateMachineRunnerLive` needs `MachineStore`, provide `InMemoryMachineStoreLive` before or alongside it. Use `Layer.merge` or `Layer.provideMerge` for complex graphs.
 
 ### 4. Service access in routes
 
@@ -96,14 +180,17 @@ Effect.gen(function* () {
 
 ### 5. Wire shutdown handler
 
-In `server/src/index.ts`, register `SIGTERM`/`SIGINT` handlers that call `runner.suspendAll()`:
+In `server/src/index.ts`, the current entry point is:
 
 ```typescript
-process.on('SIGTERM', () => {
-  // Call runner.suspendAll() via the runtime
-  // Then exit
-});
+startServer.pipe(Effect.provide(ServerLoggerLive), NodeRuntime.runMain);
 ```
+
+`NodeRuntime.runMain` already handles SIGTERM/SIGINT by interrupting the running Effect. To integrate suspension:
+
+- Register the runner's `suspendAll()` as an `Effect.addFinalizer` in the server's scope, OR
+- Use `Effect.onInterrupt` in `startServer` to call `suspendAll()` before exit
+- The interruption from `NodeRuntime.runMain` will trigger the finalizer chain
 
 ### 6. Verify server starts
 

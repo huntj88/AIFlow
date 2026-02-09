@@ -12,6 +12,50 @@ Implement the REST API routes for machine instance lifecycle: starting, listing,
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect this task’s implementation.
+
+### Schema decoding
+
+`decodeStartInstance` (from `schemas.ts`) returns `Either`, not `Effect`:
+
+```typescript
+import { decodeStartInstance } from '@/machines/schemas.js';
+const decoded = decodeStartInstance(requestBody);
+if (Either.isLeft(decoded)) {
+  /* return 400 */
+}
+```
+
+Or use `Schema.decodeUnknown(StartInstanceRequestSchema)` for an effectful version.
+
+### Store method signatures
+
+- **`MachineStore.listInstances(filter?)`** — filter supports `status`, `definitionId`, `parentInstanceId`, `limit`, `offset`. All optional.
+- **`MachineStore.getInstance(id)`** returns `Effect.Effect<MachineInstance, NotFoundError>`.
+- **`MachineStore.getDefinition(id)`** returns `Effect.Effect<StateMachineDefinition, NotFoundError>`. Use to verify definition exists before starting.
+
+### Error constructors
+
+`mkNotFoundError({ entityType: 'instance', id })`, `mkDefinitionError({ message })` — from `'@/machines/types.js'`.
+
+### Runner access
+
+The `StateMachineRunner` is an Effect Service:
+
+```typescript
+import { StateMachineRunner } from '@/machines/StateMachineRunner.js';
+const runner = yield * StateMachineRunner;
+yield * runner.run(definition, input);
+```
+
+### Instance filter query params
+
+For `GET /api/machines/instances`, use `decodeInstanceFilter` from `schemas.ts` or parse query params manually. The `InstanceFilterSchema` validates `status`, `definitionId`, `parentInstanceId`, `limit`, `offset`.
+
+---
+
 ## Steps
 
 ### 1. Create `server/src/routes/machines/instances.ts`

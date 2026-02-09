@@ -14,6 +14,17 @@ Build the machine instance viewer page — the primary page for observing and in
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from the existing client codebase.
+
+- **Layout**: Uses Tailwind CSS with custom properties. The page renders inside `AppLayout`'s `<Outlet />` with `p-6` padding.
+- **Router**: `HashRouter` from `react-router`. Instance page URL: `#/machines/instances/:id`. Use `useParams()` to extract `id`.
+- **Component convention**: Machine components should go in `client/src/components/machines/`.
+- **WebSocket events**: `MachineEvent` uses `type` as discriminant. Route events to panels by `type`: `state_changed` → diagram, `transition_recorded` → history, `log_entry` → logs, etc.
+
+---
+
 ## Steps
 
 ### 1. Install dependencies

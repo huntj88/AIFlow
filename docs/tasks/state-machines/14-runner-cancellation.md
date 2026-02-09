@@ -12,6 +12,17 @@ Implement machine instance cancellation. When `cancel(instanceId)` is called, th
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect this task's implementation.
+
+- **`MachineStore.getInstance`** returns `Effect.Effect<MachineInstance, NotFoundError>`. Use to verify instance status before cancellation.
+- **`MachineStore.updateInstance`** takes `Partial<Omit<MachineInstance, 'id' | 'createdAt'>>`. The store auto-refreshes `updatedAt`.
+- **Error constructors**: `mkNotFoundError({ entityType: 'instance', id })`, `mkDefinitionError({ message })` for 409 Conflict scenarios.
+- **For 409 Conflict** on already-terminal instances: Use `mkDefinitionError({ message: 'Cannot cancel instance with status: completed' })` or create a custom error — the API layer (Task 20) maps `DefinitionError` to 400/409 as needed.
+
+---
+
 ## Steps
 
 ### 1. Add `cancel()` method to `StateMachineRunner`

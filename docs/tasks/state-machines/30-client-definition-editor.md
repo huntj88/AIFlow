@@ -12,6 +12,20 @@ Build a visual state-machine definition editor using React Flow (`@xyflow/react`
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and from the existing client scaffold.
+
+1. **i18n flat key format** — `client/src/locales/en/common.json` uses **flat keys** (e.g. `"machines.editor.title": "Definition Editor"`), NOT nested JSON objects. The i18n examples below (Step 12) show nested JSON; convert to flat keys when implementing.
+2. **HashRouter** — Client uses `HashRouter`, so all machine URLs are hash-based (e.g. `http://localhost:5173/#/machines/definitions/new`). Route params work the same way with `useParams()`.
+3. **Zustand pattern** — Existing stores (`useThemeStore.ts`) use the `create<T>()(...)` double-invocation pattern. Follow this for `useDefinitionEditor`.
+4. **Tailwind + CSS custom properties** — UI uses `var(--color-bg)`, `var(--color-text)`, etc. via Tailwind utility classes. Use these for editor panel theming.
+5. **Server types reference** — `StateMachineDefinition`, `StateDefinition`, etc. are defined in `server/src/machines/types.ts`. The client-side validation subset (Step 8) should replicate the relevant logic, not import server code directly.
+6. **Server validation rules** — The server's `DefinitionValidator.ts` (669 lines) implements 14 rules with `validateDefinition(def, mode, actionRegistry?)`. The `ValidationViolation` interface has `{ rule: string; message: string; path?: string }`. Mirror this shape for client-side errors.
+7. **Error constructors use `mk` prefix** — Server errors use `mkValidationError(...)`, `mkDefinitionError(...)`, etc. API error responses from the server will have `_tag` discriminant fields.
+
+---
+
 ## New Dependencies
 
 ```bash
@@ -216,27 +230,25 @@ Add to `client/src/locales/en/common.json`:
 
 ```json
 {
-  "machines": {
-    "editor": {
-      "title": "Definition Editor",
-      "newTitle": "New Definition",
-      "save": "Save",
-      "validate": "Validate",
-      "import": "Import JSON",
-      "export": "Export JSON",
-      "undo": "Undo",
-      "redo": "Redo",
-      "addState": "Add State",
-      "deleteState": "Delete State",
-      "stateConfig": "State Configuration",
-      "metaConfig": "Definition Settings",
-      "unsavedChanges": "You have unsaved changes. Are you sure you want to leave?",
-      "validationPassed": "Definition is valid",
-      "validationFailed": "{{count}} validation error(s) found"
-    }
-  }
+  "machines.editor.title": "Definition Editor",
+  "machines.editor.newTitle": "New Definition",
+  "machines.editor.save": "Save",
+  "machines.editor.validate": "Validate",
+  "machines.editor.import": "Import JSON",
+  "machines.editor.export": "Export JSON",
+  "machines.editor.undo": "Undo",
+  "machines.editor.redo": "Redo",
+  "machines.editor.addState": "Add State",
+  "machines.editor.deleteState": "Delete State",
+  "machines.editor.stateConfig": "State Configuration",
+  "machines.editor.metaConfig": "Definition Settings",
+  "machines.editor.unsavedChanges": "You have unsaved changes. Are you sure you want to leave?",
+  "machines.editor.validationPassed": "Definition is valid",
+  "machines.editor.validationFailed": "{{count}} validation error(s) found"
 }
 ```
+
+> **Note:** Flat key format per project convention — see Implementation Notes above.
 
 ---
 

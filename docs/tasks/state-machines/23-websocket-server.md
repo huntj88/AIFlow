@@ -14,6 +14,42 @@ Implement the WebSocket server for real-time event streaming to clients. Clients
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect this task's implementation.
+
+### Accessing the underlying Node HTTP server
+
+The current `HttpLive` in `server/src/lib/HttpServer.ts` creates the Node server via:
+
+```typescript
+const ServerLive = NodeHttpServer.layer(() => createServer(), { port: PORT });
+```
+
+The `createServer()` return value is the raw `http.Server` needed for the WebSocket upgrade handler. To share it:
+
+- Extract `createServer()` to a module-level variable, OR
+- Use `NodeHttpServer` platform APIs to access the underlying server from the Effect context
+- The `ws` library's `noServer: true` + manual `handleUpgrade` is the recommended approach
+
+### MachineEvent structure
+
+`MachineEvent` (from `types.ts`) uses **`type`** as the discriminant (NOT `_tag`):
+
+```typescript
+{ type: 'state_changed', instanceId: '...', data: { previousState, currentState, stateData, timestamp } }
+{ type: 'machine_completed', instanceId: '...', data: MachineResult }
+// etc.
+```
+
+All 10 event types have `type` + `instanceId` + `data` at the top level.
+
+### PubSub access
+
+The `MachineEventPubSub` (from Task 16) is a `Context.GenericTag<PubSub.PubSub<MachineEvent>>('MachineEventPubSub')`. Subscribe via `PubSub.subscribe(pubsub)` which returns a `Queue.Dequeue<MachineEvent>`.
+
+---
+
 ## Steps
 
 ### 1. Install dependencies

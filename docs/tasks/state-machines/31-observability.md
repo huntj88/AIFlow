@@ -31,6 +31,19 @@ pnpm --filter @aiflow/server add \
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and from the existing server scaffold.
+
+1. **Layer composition pattern** — Current `HttpLive` in `server/src/lib/HttpServer.ts` uses `HelloRouter.pipe(HttpServer.serve(HttpMiddleware.logger), HttpServer.withLogAddress, Layer.provide(ServerLive))`. The OTel bridge layer should be merged into this composition or provided alongside it.
+2. **Server entry point** — `server/src/index.ts` runs `startServer.pipe(Effect.provide(ServerLoggerLive), NodeRuntime.runMain)`. The OTel SDK init should happen before `NodeRuntime.runMain`.
+3. **Effect Service Tag pattern** — All services use `Context.GenericTag<T>('name')`. If creating an `OtelService` tag, follow this pattern.
+4. **Error types use `_tag` discriminant** — `MachineError` variants have `_tag: 'ActionError' | 'ValidationError' | ...`. TelemetryMiddleware can use `_tag` to categorize error spans.
+5. **MachineEvent uses `type` discriminant** — Events have `type: 'state_changed' | 'action_started' | ...`. Metrics instrumentation should key off the `type` field, not `_tag`.
+6. **TransitionMiddleware interface** — Defined in `types.ts` with `beforeTransition(ctx) → Effect<void, MachineError>`, `afterTransition(ctx & { result }) → Effect<void, MachineError>`, `onError(ctx & { error }) → Effect<void>` (never fails).
+
+---
+
 ## Steps
 
 ### 1. OTel SDK initialization

@@ -12,6 +12,64 @@ Extend the existing `client/src/utils/apiClient.ts` with machine-specific API fu
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from the existing client codebase.
+
+### Current `apiClient.ts` pattern
+
+The existing client (`client/src/utils/apiClient.ts`) uses:
+
+```typescript
+import { FetchHttpClient, HttpClient } from '@effect/platform';
+import { Effect } from 'effect';
+
+const makeRequest = (path: string) =>
+  Effect.gen(function* () {
+    const client = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk);
+    const response = yield* client.get(path);
+    return yield* response.json;
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(FetchHttpClient.layer),
+    Effect.tap((res) => Effect.log('API response received', { path, response: res })),
+    Effect.withLogSpan(`api.GET ${path}`),
+  );
+
+export const apiClient = {
+  hello: () => makeRequest('/api/hello') as Effect.Effect<{ message: string }, Error>,
+};
+```
+
+Key patterns to follow:
+
+- Uses `Effect.gen` with `HttpClient.HttpClient` from context
+- `HttpClient.filterStatusOk` for automatic error on non-2xx status
+- `Effect.scoped` + `FetchHttpClient.layer` provided inline
+- `Effect.tap` for logging, `Effect.withLogSpan` for tracing
+- Each method returns a typed `Effect.Effect<ResponseType, Error>`
+
+### Extending for POST/PUT/DELETE
+
+The existing pattern only has `client.get(path)`. For other methods:
+
+```typescript
+// POST:
+const response = yield * client.post(path, { body: HttpBody.json(body) });
+// PUT:
+const response = yield * client.put(path, { body: HttpBody.json(body) });
+// DELETE:
+const response = yield * client.del(path);
+```
+
+Import `HttpBody` from `@effect/platform` for request bodies.
+
+### Client-side machine types
+
+Define mirrored types in `client/src/types/machines.ts` since the client doesn’t share server code directly. The types should match the server interfaces from `server/src/machines/types.ts` (Task 01).
+
+---
+
 ## Steps
 
 ### 1. Extend `client/src/utils/apiClient.ts`

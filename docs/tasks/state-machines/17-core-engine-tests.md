@@ -12,6 +12,51 @@ Write comprehensive unit and integration tests for the entire core engine. Tests
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect test setup.
+
+### Layer names for test composition
+
+- **`InMemoryMachineStoreLive`** — from `'../store/InMemoryMachineStore.js'` or `'../store/index.js'`
+- **`ActionRegistryLive`** — pre-loaded with 5 built-in actions (from `'../ActionRegistry.js'`)
+- **`InMemoryActionRegistryLive`** — bare empty registry (from `'../ActionRegistry.js'`)
+
+Tests that need built-in actions use `ActionRegistryLive`; tests that want to register custom test actions use `InMemoryActionRegistryLive`.
+
+### Store method signatures for test setup
+
+```typescript
+// saveDefinition takes Omit<> — store generates id, version, timestamps:
+const def = yield* store.saveDefinition({
+  name: 'test', inputSchema: {}, outputSchema: {},
+  states: { ... }, initialState: 'init', transitions: [...],
+  metadata: { description: 'test def' },
+});
+// def.id, def.version (1), def.metadata.createdAt are auto-populated
+
+// saveInstance takes Omit<> — store generates id, createdAt, updatedAt:
+const inst = yield* store.saveInstance({
+  definitionId: def.id, definitionVersion: def.version,
+  status: 'running', currentState: 'init', stateData: {},
+  input: {}, history: [], logs: [], artifacts: [],
+});
+```
+
+### Error constructors in assertions
+
+Use `mk*` constructors: `mkActionError`, `mkDefinitionError`, `mkValidationError`, `mkNotFoundError`, `mkStoreError` — all from `'../types.js'`. Match on `_tag` for error assertions:
+
+```typescript
+Expect the effect to fail with an error where error._tag === 'DefinitionError'
+```
+
+### Existing test patterns
+
+See `server/src/machines/DefinitionValidator.test.ts`, `ActionRegistry.test.ts`, `store/InMemoryMachineStore.test.ts`, and `actions/actions.test.ts` for established test patterns and helpers.
+
+---
+
 ## Test Files & Coverage
 
 ### 1. `server/src/machines/StateMachineRunner.test.ts`

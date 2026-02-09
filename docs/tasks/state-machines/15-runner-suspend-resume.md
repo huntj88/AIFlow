@@ -12,6 +12,18 @@ Implement graceful shutdown (suspend all running instances), the resume protocol
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect this task's implementation.
+
+- **`MachineStore.listInstances`** supports `{ status: 'suspended' }` filter for startup recovery. Also supports `parentInstanceId` filter to find children.
+- **`MachineStore.getDefinition`** returns `Effect.Effect<StateMachineDefinition, NotFoundError>`. Use to verify definition still exists and version matches.
+- **`MachineStore.updateInstance`** takes `Partial<Omit<MachineInstance, 'id' | 'createdAt'>>`. The store auto-refreshes `updatedAt`.
+- **Error constructors**: `mkNotFoundError({ entityType: 'definition' | 'instance', id })`, `mkDefinitionError({ message: 'definition version changed' })`.
+- **Server entry** (`server/src/index.ts`): Currently uses `NodeRuntime.runMain` with `ServerLoggerLive`. Shutdown handlers for SIGTERM/SIGINT need to integrate with this existing startup pattern.
+
+---
+
 ## Steps
 
 ### 1. Graceful Shutdown — `suspendAll()`

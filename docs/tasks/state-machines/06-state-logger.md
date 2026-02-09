@@ -12,6 +12,17 @@ Implement `StateLogger` — a scoped logger for individual state executions with
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect this task's implementation.
+
+- **`StateLogger` interface** (from `types.ts`): Each method (`debug`, `info`, `warn`, `error`) returns `Effect.Effect<void>` with NO error channel (i.e., `Effect.Effect<void, never>` — but expressed as `Effect.Effect<void>` in the type since `never` is the default). Logging must never fail.
+- **`LogEntry` interface** (from `types.ts`): `{ id, instanceId, stateName, level: 'debug' | 'info' | 'warn' | 'error', message, data?, timestamp }`. The `id` field is a UUID (use `crypto.randomUUID()`). The `timestamp` field is an ISO string.
+- **Module convention**: File goes at `server/src/machines/StateLogger.ts` (top-level in the `machines/` folder, not a subfolder).
+- **UUID generation**: The existing store uses `crypto.randomUUID()` for IDs (built-in Node, no dependency needed).
+
+---
+
 ## Steps
 
 ### 1. Create `server/src/machines/StateLogger.ts`

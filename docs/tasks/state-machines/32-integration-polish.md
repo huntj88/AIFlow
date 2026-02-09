@@ -12,6 +12,20 @@ Wire together all client and server components into a cohesive, polished experie
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and from the existing client scaffold.
+
+1. **HashRouter** — Client uses `HashRouter`. All URLs are hash-based: `/#/machines`, `/#/machines/instances/:id`, etc. Navigation helpers should generate paths without the `#` prefix (react-router handles it).
+2. **AppLayout.tsx** — Current layout has a `<header>` with app title + theme toggle, then `<Outlet />`. Nav links (Step 3 child machine navigation, Step 1 redirect) should integrate with this layout.
+3. **i18n flat key format** — Keys like `"machines.toast.definitionSaved": "Definition saved successfully"`. The nested JSON examples in Step 12 below need to be converted to flat keys.
+4. **Zustand pattern** — `useThemeStore.ts` uses `create<T>()(...)` with optional `persist`. The toast store (Step 7) should follow the same pattern.
+5. **Tailwind + CSS custom properties** — Use `var(--color-bg)`, `var(--color-text)`, etc. for theming. Skeleton elements use `animate-pulse`.
+6. **Error constructors in server** — API error responses from server use `_tag` discriminant: `ActionError`, `ValidationError`, `StoreError`, `NotFoundError`, `DefinitionError`. Error boundaries and toast messages should handle these tags.
+7. **Server API patterns** — API routes return JSON with appropriate HTTP status codes. Instance creation returns 201 with the full instance object (including `id`). Not-found returns 404 with `_tag: 'NotFoundError'`.
+
+---
+
 ## Steps
 
 ### 1. Launch instance → redirect to viewer
@@ -155,35 +169,27 @@ Ensure all new UI text uses i18n keys. Add any missing keys:
 
 ```json
 {
-  "machines": {
-    "toast": {
-      "definitionSaved": "Definition saved successfully",
-      "definitionDeleted": "Definition deleted",
-      "instanceStarted": "Instance started",
-      "instanceCancelled": "Instance cancelled",
-      "instanceResumed": "Instance resumed",
-      "error": "An error occurred: {{message}}"
-    },
-    "confirm": {
-      "deleteDefinition": "Are you sure you want to delete this definition?",
-      "cancelInstance": "Are you sure you want to cancel this instance?",
-      "unsavedChanges": "You have unsaved changes. Discard?"
-    },
-    "empty": {
-      "noDefinitions": "No definitions yet",
-      "noInstances": "No instances yet",
-      "noLogs": "No log entries",
-      "noArtifacts": "No artifacts",
-      "noChildren": "No child machines"
-    },
-    "websocket": {
-      "connected": "Live updates active",
-      "reconnecting": "Reconnecting...",
-      "disconnected": "Live updates disconnected"
-    }
-  }
+  "machines.toast.definitionSaved": "Definition saved successfully",
+  "machines.toast.definitionDeleted": "Definition deleted",
+  "machines.toast.instanceStarted": "Instance started",
+  "machines.toast.instanceCancelled": "Instance cancelled",
+  "machines.toast.instanceResumed": "Instance resumed",
+  "machines.toast.error": "An error occurred: {{message}}",
+  "machines.confirm.deleteDefinition": "Are you sure you want to delete this definition?",
+  "machines.confirm.cancelInstance": "Are you sure you want to cancel this instance?",
+  "machines.confirm.unsavedChanges": "You have unsaved changes. Discard?",
+  "machines.empty.noDefinitions": "No definitions yet",
+  "machines.empty.noInstances": "No instances yet",
+  "machines.empty.noLogs": "No log entries",
+  "machines.empty.noArtifacts": "No artifacts",
+  "machines.empty.noChildren": "No child machines",
+  "machines.websocket.connected": "Live updates active",
+  "machines.websocket.reconnecting": "Reconnecting...",
+  "machines.websocket.disconnected": "Live updates disconnected"
 }
 ```
+
+> **Note:** Flat key format per project convention — see Implementation Notes above.
 
 ---
 

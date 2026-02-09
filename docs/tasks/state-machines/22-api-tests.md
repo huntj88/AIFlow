@@ -12,6 +12,28 @@ Write integration tests for all machine REST API endpoints. Tests should make re
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect test setup.
+
+### Layer composition for test harness
+
+Use `InMemoryMachineStoreLive` and `ActionRegistryLive` in the test layer. The existing test files (e.g., `store/InMemoryMachineStore.test.ts`, `ActionRegistry.test.ts`) show how to compose layers with `Effect.provide(...)` and `Effect.runPromise()`.
+
+### Effect test client pattern
+
+`@effect/platform` provides `HttpClient.fetch` for in-process testing without starting a real server. Alternatively, start the full `HttpLive` layer in tests and make real HTTP requests.
+
+### Existing route test pattern
+
+See `server/src/routes/hello.test.ts` for the existing test pattern.
+
+### Schema decode returns `Either`
+
+When checking response bodies in tests, remember the schemas return `Either`. For test assertions, parse with `JSON.parse` and assert structure directly.
+
+---
+
 ## Test Files
 
 ### 1. `server/src/routes/machines/definitions.test.ts`

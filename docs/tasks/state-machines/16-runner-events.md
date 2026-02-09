@@ -12,6 +12,17 @@ Integrate Effect `PubSub` into the `StateMachineRunner` for publishing `MachineE
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect this task's implementation.
+
+- **`MachineEvent` uses `type` as discriminant** (NOT `_tag`). Example: `{ type: 'state_changed', instanceId: '...', data: { ... } }`. The `type` field is a string union; `_tag` is used only for errors.
+- **`MachineResult` uses `status` as discriminant**: `{ status: 'completed', output, instanceId }`.
+- **Effect Service pattern**: Use `Context.GenericTag<PubSub.PubSub<MachineEvent>>('MachineEventPubSub')` for the PubSub tag.
+- **`PubSub`** is available from `effect` directly: `import { PubSub } from 'effect';`.
+
+---
+
 ## Steps
 
 ### 1. Create the PubSub Layer

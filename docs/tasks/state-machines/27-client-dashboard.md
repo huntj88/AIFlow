@@ -12,6 +12,34 @@ Build the machines dashboard page — the primary landing page for the state mac
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from the existing client codebase.
+
+### Page convention
+
+Existing pages live at `client/src/pages/` (e.g., `HomePage.tsx` with `HomePage.test.tsx`). Follow the same pattern.
+
+### Layout & styling
+
+- Uses **Tailwind CSS** with CSS custom properties (`var(--color-bg)`, `var(--color-text)`, `var(--color-surface)`, `var(--color-border)`).
+- `AppLayout` provides a header with title and theme toggle, and a `<main className="p-6">` wrapping `<Outlet />`.
+- Pages render inside the Outlet.
+
+### i18n
+
+- Uses `react-i18next` with `useTranslation()` hook.
+- Translation file: `client/src/locales/en/common.json` (flat key format: `"machines.dashboard.title": "State Machines"`).
+- Add all machine-related translations to this file.
+
+### Router
+
+- Uses `HashRouter` from `react-router` — URLs are hash-based (e.g., `#/machines`).
+- Routes defined in `client/src/app/router/routes.ts` (`ROUTES` const object).
+- New routes added in `client/src/app/router/AppRouter.tsx`.
+
+---
+
 ## Steps
 
 ### 1. Create `client/src/pages/MachinesPage.tsx`
@@ -79,13 +107,15 @@ Add machine-related translations to `client/src/locales/en/common.json`:
 
 ```json
 {
-  "machines": {
-    "dashboard": { "title": "State Machines", ... },
-    "definitions": { ... },
-    "instances": { ... }
-  }
+  "machines.dashboard.title": "State Machines",
+  "machines.definitions.title": "Definitions",
+  "machines.definitions.create": "Create New",
+  "machines.instances.title": "Instances",
+  "machines.instances.start": "Launch"
 }
 ```
+
+Note: The existing file uses flat key format (not nested JSON objects).
 
 ---
 

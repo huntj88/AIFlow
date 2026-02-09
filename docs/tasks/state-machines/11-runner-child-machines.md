@@ -10,17 +10,28 @@
 
 Extend the `StateMachineRunner` to handle `child_machine` state type. When the runner encounters a state with `type: 'child_machine'`, it evaluates the `childInputMapping` JSONPath expression, spawns a child machine instance, suspends the parent until the child completes, then executes the parent's `actionId` with the child result as `stateData`.
 
-**New server dependency**: `jsonpath-plus` (for evaluating JSONPath expressions).
+~~**New server dependency**: `jsonpath-plus` (for evaluating JSONPath expressions).~~
+
+---
+
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect this task's implementation.
+
+- **`jsonpath-plus` is ALREADY installed** as a dependency from Task 05 (`transform-data` action). `@types/jsonpath-plus` is also already a devDependency. **Skip Step 1 (install).**
+- Import as: `import { JSONPath } from 'jsonpath-plus';` — same as in `server/src/machines/actions/transform-data.ts`.
+- **`MachineStore.saveInstance`** takes `Omit<MachineInstance, 'id' | 'createdAt' | 'updatedAt'>` — the store generates `id`, `createdAt`, `updatedAt`. The child instance should include `parentInstanceId: instance.id`.
+- **`MachineStore.updateInstance`** takes `Partial<Omit<MachineInstance, 'id' | 'createdAt'>>`. Use this to set `status: 'waiting_for_child'` and `childInstanceId` on the parent.
+- **`MachineStore.getDefinition`** returns `Effect.Effect<StateMachineDefinition, NotFoundError>`. Use to load the child definition by `childMachineDefId`.
+- **Error constructors**: `mkActionError({ actionId, stateName, cause })`, `mkNotFoundError({ entityType: 'definition', id })` — imported from `'../machines/types.js'`.
 
 ---
 
 ## Steps
 
-### 1. Install `jsonpath-plus`
+### 1. ~~Install `jsonpath-plus`~~ (Already installed — skip)
 
-```bash
-cd server && pnpm add jsonpath-plus && pnpm add -D @types/jsonpath-plus
-```
+`jsonpath-plus` and `@types/jsonpath-plus` were already added in Task 05. No action needed.
 
 ### 2. Implement child machine spawning in the state loop
 
@@ -117,7 +128,7 @@ If the child machine errors:
 
 ## Validation Checklist
 
-- [ ] `jsonpath-plus` is added to server dependencies
+- [ ] ~~`jsonpath-plus` is added to server dependencies~~ (already present from Task 05)
 - [ ] `childInputMapping` JSONPath expression evaluates correctly
 - [ ] Invalid JSONPath expression → error (not null)
 - [ ] Parent status changes to `'waiting_for_child'` during child execution

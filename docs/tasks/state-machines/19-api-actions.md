@@ -12,6 +12,36 @@ Implement REST API routes for browsing the action registry. These routes allow t
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect this task’s implementation.
+
+### ActionRegistry access in route handlers
+
+The `ActionRegistry` is an Effect Service — access it from the Effect context:
+
+```typescript
+import { ActionRegistry } from '@/machines/ActionRegistry.js';
+
+Effect.gen(function* () {
+  const registry = yield* ActionRegistry;
+  const actions = yield* registry.list(); // returns ActionMetadata[]
+});
+```
+
+- `registry.list()` returns `Effect.Effect<ActionMetadata[]>` — metadata only (no function references). Each item has `{ id, description?, inputSchema?, outputSchema? }`.
+- `registry.get(id)` returns `Effect.Effect<{ fn: ActionFunction; metadata: ActionMetadata }, NotFoundError>`. For the API response, return only `metadata` (not `fn`).
+
+### Route composition pattern
+
+Follow the `HelloRouter` pattern from `server/src/routes/hello.ts` using `@effect/platform` `HttpRouter`.
+
+### Error constructors
+
+`mkNotFoundError({ entityType: 'action', id })` — imported from `'@/machines/types.js'`.
+
+---
+
 ## Steps
 
 ### 1. Create `server/src/routes/machines/actions.ts`

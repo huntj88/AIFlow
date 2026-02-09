@@ -12,6 +12,15 @@ Implement the global `Semaphore`-based concurrency control for machine execution
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect this task's implementation.
+
+- **Effect Service pattern**: Use `Context.GenericTag<Semaphore.Semaphore>('ExecutionSemaphore')` — same pattern as `MachineStore` and `ActionRegistry`. Both the tag and the interface can share a variable name.
+- **`Semaphore`** is available from `effect` package directly: `import { Semaphore } from 'effect';`.
+
+---
+
 ## Steps
 
 ### 1. Create the execution semaphore Layer

@@ -12,6 +12,42 @@ Create Zustand stores for machine definitions, instances, and logs. The stores p
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from the existing client codebase.
+
+### Zustand pattern
+
+Existing stores follow `create<T>()(...)` with optional `persist` middleware:
+
+```typescript
+import { create } from 'zustand';
+export const useThemeStore = create<ThemeState>()(persist((set) => ({ ... }), { name: 'key' }));
+```
+
+Machine stores probably don't need `persist` (data is fetched from the server).
+
+### Effect execution in the client
+
+The client uses `runWithLogging` from `client/src/utils/logger.ts` to run Effects:
+
+```typescript
+import { runWithLogging } from '@/utils/logger';
+// runWithLogging(apiClient.getDefinitions()).then(setDefinitions).catch(setError);
+```
+
+Each `apiClient.*` method returns an `Effect.Effect<T, Error>`. Run them through `runWithLogging` in store actions.
+
+### Client-side types
+
+Mirror types should be defined in `client/src/types/machines.ts` (Task 24). Stores import types from there.
+
+### Hook file convention
+
+Existing hooks are at `client/src/hooks/useXxx.ts`. Follow the same convention: `useMachineDefinitions.ts`, `useMachineInstances.ts`, `useMachineLogs.ts`, `useMachineArtifacts.ts`.
+
+---
+
 ## Steps
 
 ### 1. Create `client/src/hooks/useMachineDefinitions.ts`

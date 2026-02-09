@@ -12,11 +12,54 @@ Add machine-related routes to the client router and integrate them into the app 
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from the existing client codebase.
+
+### Current router structure
+
+**`client/src/app/router/routes.ts`**:
+
+```typescript
+export const ROUTES = { HOME: '/' } as const;
+```
+
+**`client/src/app/router/AppRouter.tsx`**:
+
+```tsx
+<HashRouter>
+  <Routes>
+    <Route element={<AppLayout />}>
+      <Route path={ROUTES.HOME} element={<HomePage />} />
+    </Route>
+    <Route path="*" element={<Navigate to={ROUTES.HOME} replace />} />
+  </Routes>
+</HashRouter>
+```
+
+**Key**: Uses `HashRouter` (not `BrowserRouter`) — all URLs are hash-based (`#/machines`, `#/machines/instances/:id`).
+
+### Current layout
+
+**`client/src/app/layout/AppLayout.tsx`**:
+
+- Header: Title ("AIFlow") + theme toggle button
+- Main area with `<Outlet />`
+- Uses Tailwind CSS with custom properties
+
+Add a navigation link to "State Machines" in the header.
+
+### Lazy loading
+
+Use React `lazy()` + `<Suspense>` for machine pages to avoid increasing the initial bundle.
+
+---
+
 ## Steps
 
 ### 1. Update `client/src/app/router/routes.ts`
 
-Add machine route constants:
+Extend the existing `ROUTES` constant (currently only has `HOME: '/'`):
 
 ```typescript
 export const ROUTES = {
@@ -31,7 +74,7 @@ export const ROUTES = {
 
 ### 2. Update `client/src/app/router/AppRouter.tsx`
 
-Add route entries for each machine page:
+Add route entries inside the existing `<Route element={<AppLayout />}>` wrapper. Use lazy loading:
 
 ```tsx
 <Route path={ROUTES.MACHINES} element={<MachinesPage />} />

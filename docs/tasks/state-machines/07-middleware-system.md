@@ -12,6 +12,18 @@ Implement the middleware framework and all 4 built-in middleware. Middleware wra
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect this task's implementation.
+
+- **Error constructors** use the `mk` prefix: `mkValidationError({ message, path })`, `mkDefinitionError({ message, details })`, etc. — imported from `../types.js`.
+- **Ajv CJS interop** (needed by `ValidationMiddleware`): Follow the pattern established in `DefinitionValidator.ts` — `import AjvModule from 'ajv'` then normalize: `const Ajv = typeof (AjvModule as any).default === 'function' ? (AjvModule as any).default : AjvModule;`. Add the same eslint-disable comments.
+- **`TransitionMiddleware` interface** (from `types.ts`): `beforeTransition` returns `Effect.Effect<void, MachineError>`, `afterTransition` receives `ctx & { result: TransitionResult }` returning `Effect.Effect<void, MachineError>`, `onError` receives `ctx & { error: MachineError }` returning `Effect.Effect<void>` (never fails).
+- **Effect Service pattern**: Use `Context.GenericTag<MiddlewareExecutor>('MiddlewareExecutor')` — same pattern as `MachineStore` and `ActionRegistry`.
+- **Module path convention**: Middleware files go under `server/src/machines/middleware/` subfolder, matching `store/` and `actions/` conventions.
+
+---
+
 ## Steps
 
 ### 1. Create `server/src/machines/middleware/MiddlewareExecutor.ts`
@@ -37,7 +49,8 @@ interface MiddlewareExecutor {
 ### 2. Create `server/src/machines/middleware/ValidationMiddleware.ts`
 
 - In `beforeTransition`: If the current state has a `dataSchema`, validate `stateData` against it using `ajv`
-- Fails with `ValidationError` if validation fails (machine transitions to error before the action runs)
+- Use the same ajv CJS interop pattern from `DefinitionValidator.ts` (see Implementation Notes above)
+- Fail with `mkValidationError({ message: '...schema details...', path: stateName })` on validation failure
 - Skips validation if no `dataSchema` is defined on the state
 
 ### 3. Create `server/src/machines/middleware/LoggingMiddleware.ts`

@@ -12,6 +12,17 @@ Create a WebSocket client for the browser that connects to `ws://host/api/machin
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from the existing client codebase and server types.
+
+- **`MachineEvent` structure**: Uses `type` as the discriminant (not `_tag`). Top-level fields: `type`, `instanceId`, `data`. Example: `{ type: 'state_changed', instanceId: '...', data: { previousState, currentState, stateData, timestamp } }`.
+- **Client Effect pattern**: The existing client uses `runWithLogging` from `client/src/utils/logger.ts` to execute Effects with `ClientLoggerLive`. The WebSocket client doesn't need Effect — it's a plain TypeScript singleton managing native `WebSocket`.
+- **Zustand pattern**: Existing stores use `create<T>()(...)` from `zustand` with `persist` middleware. See `useThemeStore.ts`. The WebSocket client should be a plain module, not a Zustand store, with a React hook wrapper.
+- **Router**: Uses `HashRouter` from `react-router` (hash-based URLs like `#/machines/instances/123`).
+
+---
+
 ## Steps
 
 ### 1. Create `client/src/utils/machineSocket.ts`

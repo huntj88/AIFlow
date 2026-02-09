@@ -12,6 +12,16 @@ Extend the `StateMachineRunner` with robust error handling, per-state action tim
 
 ---
 
+## Implementation Notes from Completed Tasks
+
+> These details emerged from Tasks 01–05 and affect this task's implementation.
+
+- **Error constructors** use the `mk` prefix: `mkActionError({ actionId, stateName, cause })`, `mkDefinitionError({ message, details })`, `mkValidationError({ message, path })` — imported from `'../machines/types.js'`.
+- **Ajv CJS interop** for input validation against `inputSchema`: Use the same pattern from `DefinitionValidator.ts` — `import AjvModule from 'ajv'` with runtime `.default` normalization. Or share the ajv instance from the validator module.
+- **`MachineStore.updateInstance`** signature: `updateInstance(id, patch: Partial<Omit<MachineInstance, 'id' | 'createdAt'>>)` — the store auto-refreshes `updatedAt`.
+
+---
+
 ## Steps
 
 ### 1. Per-state action timeout (`timeoutMs`)
