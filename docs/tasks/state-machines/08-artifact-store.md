@@ -133,12 +133,12 @@ export const FsArtifactStoreLive = Layer.succeed(ArtifactStoreFactory, { ... });
 
 ## Validation Checklist
 
-- [ ] `server/src/machines/artifacts/ArtifactStoreFactory.ts` defines Effect Service Tag
-- [ ] `server/src/machines/artifacts/FsArtifactStore.ts` implements filesystem operations
-- [ ] `server/src/machines/artifacts/ArtifactTreeBuilder.ts` builds recursive tree
-- [ ] Path traversal (`../`, absolute paths) is rejected
-- [ ] Directory structure mirrors instance hierarchy
-- [ ] `readChild` validates descendant relationship via store
-- [ ] `ARTIFACT_ROOT` is configurable via environment variable
-- [ ] Unit tests pass for write, read, list, security, and tree
-- [ ] `pnpm --filter @aiflow/server run test` passes
+- [x] `server/src/machines/artifacts/ArtifactStoreFactory.ts` defines Effect Service Tag
+- [x] `server/src/machines/artifacts/FsArtifactStore.ts` implements filesystem operations
+- [x] `server/src/machines/artifacts/ArtifactTreeBuilder.ts` builds recursive tree
+- [x] Path traversal (`../`, absolute paths) is rejected
+- [x] Directory structure mirrors instance hierarchy
+- [x] `readChild` validates descendant relationship via store
+- [x] `ARTIFACT_ROOT` is configurable via environment variable
+- [x] Unit tests pass for write, read, list, security, and tree
+- [x] `pnpm --filter @aiflow/server run test` passes
