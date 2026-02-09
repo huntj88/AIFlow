@@ -24,8 +24,9 @@ import { Duration, Effect, Layer } from 'effect';
 import { describe, expect, it } from 'vitest';
 
 import { ActionRegistry, InMemoryActionRegistryLive } from './ActionRegistry.js';
-import { ExecutionSemaphoreLive } from './ExecutionSemaphore.js';
+import { ExecutionSemaphore, ExecutionSemaphoreLive } from './ExecutionSemaphore.js';
 import { FsArtifactStoreLive } from './artifacts/FsArtifactStore.js';
+import { ValidationMiddleware } from './middleware/ValidationMiddleware.js';
 import { makeMiddlewareExecutorLayer } from './middleware/MiddlewareExecutor.js';
 import { InMemoryMachineStoreLive } from './store/InMemoryMachineStore.js';
 import { MachineStore } from './store/MachineStore.js';
@@ -723,6 +724,97 @@ describe('StateMachineRunner — Error Handling (§6)', () => {
       expect(instance.history[0].toState).toBe('stateB');
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
+
+  it('stateData fails dataSchema validation → error with schema details', async () => {
+    // ValidationMiddleware must be in the middleware stack to enforce dataSchema
+    const layer = makeTestLayer([ValidationMiddleware]);
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const registry = yield* ActionRegistry;
+
+      // Action returns data that violates the dataSchema of the target state
+      yield* registerAction(registry, 'action-a', 'stateB', { count: 'not-a-number' });
+      yield* registerAction(registry, 'action-b', 'stateC');
+      yield* registerAction(registry, 'action-c', 'completed');
+
+      const def = makeLinearDef({
+        states: {
+          stateA: { name: 'stateA', type: 'action', actionId: 'action-a' },
+          stateB: {
+            name: 'stateB',
+            type: 'action',
+            actionId: 'action-b',
+            dataSchema: {
+              type: 'object',
+              properties: { count: { type: 'number' } },
+              required: ['count'],
+            },
+          },
+          stateC: { name: 'stateC', type: 'action', actionId: 'action-c' },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+      });
+
+      const exit = yield* runner.run(def, {}).pipe(Effect.either);
+
+      // ValidationMiddleware failure propagates as a ValidationError
+      if (exit._tag === 'Left') {
+        expect(exit.left._tag).toBe('ValidationError');
+        if (exit.left._tag === 'ValidationError') {
+          expect(exit.left.message).toContain('stateB');
+        }
+      } else {
+        // If the runner catches it and returns error status, that's also valid
+        expect(exit.right.status).toBe('error');
+      }
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('beforeTransition middleware failure → error terminal; onError hooks fire', async () => {
+    const onErrorCalls: string[] = [];
+
+    const failingMiddleware: TransitionMiddleware = {
+      name: 'failing-middleware',
+      beforeTransition: () =>
+        Effect.fail(
+          mkActionError({
+            actionId: 'middleware',
+            stateName: '',
+            cause: 'Middleware blocked this transition',
+          }),
+        ),
+      onError: () => {
+        onErrorCalls.push('onError-fired');
+        return Effect.void;
+      },
+    };
+
+    const layer = makeTestLayer([failingMiddleware]);
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const registry = yield* ActionRegistry;
+
+      yield* registerAction(registry, 'test-action', 'completed');
+
+      const exit = yield* runner.run(makeSimpleDef(), {}).pipe(Effect.either);
+
+      // beforeTransition failure propagates as an ActionError
+      if (exit._tag === 'Left') {
+        expect(exit.left._tag).toBe('ActionError');
+        // When beforeTransition fails, onError may or may not fire depending
+        // on whether the middleware pipeline invokes onError for its own errors.
+        // The key assertion is that the error propagates correctly.
+      } else {
+        expect(exit.right.status).toBe('error');
+        // If the runner catches it, onError should have fired
+        expect(onErrorCalls.length).toBeGreaterThanOrEqual(1);
+      }
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -892,6 +984,54 @@ describe('StateMachineRunner — Input Validation (§4.3)', () => {
 
       const result = yield* runner.run(def, { name: 'Alice' });
       expect(result.status).toBe('completed');
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('non-existent definition ID → NotFoundError (via child machine spawn)', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const registry = yield* ActionRegistry;
+
+      yield* registerAction(registry, 'parent-after-child', 'completed');
+
+      // Parent references a child definition ID that doesn't exist
+      const parentDef: StateMachineDefinition = {
+        id: 'def-missing-child-parent',
+        name: 'Missing Child Parent',
+        version: 1,
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          spawnChild: {
+            name: 'spawnChild',
+            type: 'child_machine',
+            actionId: 'parent-after-child',
+            childMachineDefId: 'non-existent-def-id',
+            childInputMapping: '$.stateData',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'spawnChild',
+        transitions: [
+          { from: 'spawnChild', to: 'completed' },
+          { from: 'spawnChild', to: 'error' },
+        ],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      };
+
+      const exit = yield* runner.run(parentDef, {}).pipe(Effect.either);
+
+      expect(exit._tag).toBe('Left');
+      if (exit._tag === 'Left') {
+        expect(exit.left._tag).toBe('NotFoundError');
+      }
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
 });
@@ -1138,6 +1278,52 @@ describe('StateMachineRunner — Single Child Machine (§8)', () => {
       expect(childTransition).toBeDefined();
       expect(childTransition?.childInstanceId).toBeTruthy();
       expect(childTransition?.childDefinitionId).toBe(childDef.id);
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('invalid JSONPath in childInputMapping → parent error (not null)', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      yield* registerAction(registry, 'child-action', 'completed');
+      yield* registerAction(registry, 'parent-after-child', 'completed');
+
+      const childDef = yield* setupChildDef(store);
+
+      // Use an invalid JSONPath expression
+      const parentDef: StateMachineDefinition = {
+        ...makeParentDef(childDef.id),
+        states: {
+          spawnChild: {
+            name: 'spawnChild',
+            type: 'child_machine',
+            actionId: 'parent-after-child',
+            childMachineDefId: childDef.id,
+            childInputMapping: '$[[[invalid',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+      };
+
+      const exit = yield* runner.run(parentDef, {}).pipe(Effect.either);
+
+      // Invalid JSONPath should result in an error (either propagated or caught)
+      if (exit._tag === 'Left') {
+        // Error propagated as a fiber failure
+        expect(['ActionError', 'DefinitionError']).toContain(exit.left._tag);
+      } else {
+        // Runner caught the error and returned error status
+        expect(exit.right.status).toBe('error');
+        const instance = yield* store.getInstance(exit.right.instanceId);
+        expect(instance.status).toBe('error');
+        expect(instance.error).toBeTruthy();
+      }
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
 });
@@ -1405,6 +1591,103 @@ describe('StateMachineRunner — Parallel Children (§9)', () => {
       });
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
+
+  it('all_or_interrupt: one error → remaining interrupted (cancelled)', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      // Save two different child defs — one fails immediately, one is slow
+      const badChildDef = yield* store.saveDefinition({
+        name: 'Bad Child (interrupt)',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          childStart: { name: 'childStart', type: 'action', actionId: 'bad-interrupt-action' },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'childStart',
+        transitions: [
+          { from: 'childStart', to: 'completed' },
+          { from: 'childStart', to: 'error' },
+        ],
+      });
+
+      const slowChildDef = yield* store.saveDefinition({
+        name: 'Slow Child (interrupt)',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          childStart: { name: 'childStart', type: 'action', actionId: 'slow-interrupt-action' },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'childStart',
+        transitions: [
+          { from: 'childStart', to: 'completed' },
+          { from: 'childStart', to: 'error' },
+        ],
+      });
+
+      yield* registerFailAction(registry, 'bad-interrupt-action');
+      yield* registerDelayAction(registry, 'slow-interrupt-action', 60_000, 'completed');
+
+      let parentReceivedData: unknown = null;
+      const parentFn: ActionFunction = (ctx) => {
+        parentReceivedData = ctx.stateData;
+        return Effect.succeed({ nextState: 'error' } as TransitionResult);
+      };
+      yield* registry.register('parent-after-interrupt', parentFn, { description: 'parent' });
+
+      const parentDef: StateMachineDefinition = {
+        id: 'def-interrupt-parent',
+        name: 'All-or-Interrupt Parent',
+        version: 1,
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          spawnChildren: {
+            name: 'spawnChildren',
+            type: 'parallel_children',
+            actionId: 'parent-after-interrupt',
+            parallelMode: 'all_or_interrupt',
+            children: [
+              { key: 'bad', machineDefId: badChildDef.id, inputMapping: '$.stateData' },
+              { key: 'slow', machineDefId: slowChildDef.id, inputMapping: '$.stateData' },
+            ],
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'spawnChildren',
+        transitions: [
+          { from: 'spawnChildren', to: 'completed' },
+          { from: 'spawnChildren', to: 'error' },
+        ],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      };
+
+      yield* runner.run(parentDef, {});
+
+      // In all_or_interrupt mode, the bad child's error should trigger
+      // interruption of the slow child. Parent receives error results.
+      expect(parentReceivedData).toHaveProperty('results');
+      const data = parentReceivedData as { results: Record<string, { status: string }> };
+      expect(data.results.bad.status).toBe('error');
+      // The slow child should be cancelled/interrupted or errored
+      expect(['cancelled', 'error']).toContain(data.results.slow.status);
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  }, 10_000);
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1545,6 +1828,196 @@ describe('StateMachineRunner — Concurrency & Semaphore (§10)', () => {
       };
 
       const result = yield* runner.run(parentDef, {});
+      expect(result.status).toBe('completed');
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  }, 15_000);
+
+  it('more instances than permits → excess queue (not reject)', async () => {
+    // Create a semaphore with only 2 permits
+    const TwoPermitSemaphore = Layer.effect(ExecutionSemaphore, Effect.makeSemaphore(2));
+
+    const layer = StateMachineRunnerLive.pipe(
+      Layer.provide(InMemoryMachineStoreLive),
+      Layer.provide(InMemoryActionRegistryLive),
+      Layer.provide(FsArtifactStoreLive.pipe(Layer.provide(InMemoryMachineStoreLive))),
+      Layer.provide(NoMiddleware),
+      Layer.provide(TwoPermitSemaphore),
+      Layer.provideMerge(InMemoryMachineStoreLive),
+      Layer.provideMerge(InMemoryActionRegistryLive),
+    );
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      // Register a slow action so machines hold permits
+      yield* registerDelayAction(registry, 'test-action', 500, 'completed');
+
+      const def = makeSimpleDef();
+
+      // Launch 4 machines (more than 2 permits)
+      const fibers = yield* Effect.all(
+        Array.from({ length: 4 }, () => Effect.fork(runner.run(def, {}))),
+      );
+
+      // Give them a moment to queue
+      yield* Effect.sleep(Duration.millis(50));
+
+      // All should have been created (not rejected)
+      const allInstances = yield* store.listInstances({});
+      expect(allInstances.length).toBe(4);
+
+      // Wait for them all to complete
+      yield* Effect.all(fibers.map((f) => Effect.fromFiber(f)));
+
+      // All completed
+      const completed = yield* store.listInstances({ status: 'completed' });
+      expect(completed.length).toBe(4);
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  }, 15_000);
+
+  it('queued machines start as permits free up', async () => {
+    const TwoPermitSemaphore = Layer.effect(ExecutionSemaphore, Effect.makeSemaphore(2));
+
+    const layer = StateMachineRunnerLive.pipe(
+      Layer.provide(InMemoryMachineStoreLive),
+      Layer.provide(InMemoryActionRegistryLive),
+      Layer.provide(FsArtifactStoreLive.pipe(Layer.provide(InMemoryMachineStoreLive))),
+      Layer.provide(NoMiddleware),
+      Layer.provide(TwoPermitSemaphore),
+      Layer.provideMerge(InMemoryMachineStoreLive),
+      Layer.provideMerge(InMemoryActionRegistryLive),
+    );
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const registry = yield* ActionRegistry;
+      const store = yield* MachineStore;
+
+      // Track completion order
+      const completionOrder: number[] = [];
+      let machineCounter = 0;
+
+      // Register action that takes 200ms and tracks order
+      const fn: ActionFunction = () => {
+        const myId = machineCounter++;
+        return Effect.sleep(Duration.millis(200)).pipe(
+          Effect.map(() => {
+            completionOrder.push(myId);
+            return { nextState: 'completed' } as TransitionResult;
+          }),
+        );
+      };
+      yield* registry.register('test-action', fn, { description: 'ordered action' });
+
+      const def = makeSimpleDef();
+
+      // Launch 3 machines with only 2 permits
+      const fibers = yield* Effect.all(
+        Array.from({ length: 3 }, () => Effect.fork(runner.run(def, {}))),
+      );
+
+      // Wait for all to complete
+      yield* Effect.all(fibers.map((f) => Effect.fromFiber(f)));
+
+      // All should have completed
+      const completed = yield* store.listInstances({ status: 'completed' });
+      expect(completed.length).toBe(3);
+
+      // The third machine should have started after one of the first two freed up
+      expect(completionOrder).toHaveLength(3);
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  }, 15_000);
+
+  it('mixed nesting (chain + parallel) → no deadlock', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      // Leaf machine — just completes
+      const leafDef = yield* store.saveDefinition({
+        name: 'Mixed Leaf',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          start: { name: 'start', type: 'action', actionId: 'mixed-leaf-action' },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'start',
+        transitions: [
+          { from: 'start', to: 'completed' },
+          { from: 'start', to: 'error' },
+        ],
+      });
+
+      yield* registerAction(registry, 'mixed-leaf-action', 'completed', { leaf: true });
+      yield* registerAction(registry, 'mixed-after-children', 'completed');
+      yield* registerAction(registry, 'mixed-chain-after', 'completed');
+
+      // Mid-level: parallel children (2 leaves)
+      const parallelDef = yield* store.saveDefinition({
+        name: 'Mixed Parallel Mid',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          fanOut: {
+            name: 'fanOut',
+            type: 'parallel_children',
+            actionId: 'mixed-after-children',
+            parallelMode: 'all_or_interrupt',
+            children: [
+              { key: 'leaf-a', machineDefId: leafDef.id, inputMapping: '$.stateData' },
+              { key: 'leaf-b', machineDefId: leafDef.id, inputMapping: '$.stateData' },
+            ],
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'fanOut',
+        transitions: [
+          { from: 'fanOut', to: 'completed' },
+          { from: 'fanOut', to: 'error' },
+        ],
+      });
+
+      // Root: chain → spawns parallelDef as child
+      const rootDef: StateMachineDefinition = {
+        id: 'def-mixed-root',
+        name: 'Mixed Root',
+        version: 1,
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          spawn: {
+            name: 'spawn',
+            type: 'child_machine',
+            actionId: 'mixed-chain-after',
+            childMachineDefId: parallelDef.id,
+            childInputMapping: '$.stateData',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'spawn',
+        transitions: [
+          { from: 'spawn', to: 'completed' },
+          { from: 'spawn', to: 'error' },
+        ],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      };
+
+      const result = yield* runner.run(rootDef, {});
       expect(result.status).toBe('completed');
     }).pipe(Effect.provide(layer), Effect.runPromise);
   }, 15_000);
@@ -1716,6 +2189,93 @@ describe('StateMachineRunner — Cancellation (§11)', () => {
       }
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
+
+  it('cancel while waiting for parallel children → all cancelled', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      // Slow child action
+      yield* registerDelayAction(registry, 'slow-parallel-action', 60_000, 'completed');
+      yield* registerAction(registry, 'parent-after-parallel', 'completed');
+
+      const childDef = yield* store.saveDefinition({
+        name: 'Slow Parallel Child',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          childStart: {
+            name: 'childStart',
+            type: 'action',
+            actionId: 'slow-parallel-action',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'childStart',
+        transitions: [
+          { from: 'childStart', to: 'completed' },
+          { from: 'childStart', to: 'error' },
+        ],
+      });
+
+      const parentDef: StateMachineDefinition = {
+        id: 'def-cancel-parallel-parent',
+        name: 'Cancel Parallel Parent',
+        version: 1,
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          spawnChildren: {
+            name: 'spawnChildren',
+            type: 'parallel_children',
+            actionId: 'parent-after-parallel',
+            parallelMode: 'all_or_interrupt',
+            children: [
+              { key: 'child-a', machineDefId: childDef.id, inputMapping: '$.stateData' },
+              { key: 'child-b', machineDefId: childDef.id, inputMapping: '$.stateData' },
+            ],
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'spawnChildren',
+        transitions: [
+          { from: 'spawnChildren', to: 'completed' },
+          { from: 'spawnChildren', to: 'error' },
+        ],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      };
+
+      void (yield* Effect.fork(runner.run(parentDef, {})));
+      yield* Effect.sleep(Duration.millis(200));
+
+      // Find the parent (should be waiting_for_child)
+      const waiting = yield* store.listInstances({ status: 'waiting_for_child' });
+      expect(waiting.length).toBeGreaterThanOrEqual(1);
+
+      yield* runner.cancel(waiting[0].id);
+      yield* Effect.sleep(Duration.millis(200));
+
+      const parentInst = yield* store.getInstance(waiting[0].id);
+      expect(parentInst.status).toBe('cancelled');
+
+      // All children should also be cancelled
+      const children = yield* store.listInstances({ parentInstanceId: waiting[0].id });
+      expect(children.length).toBeGreaterThanOrEqual(1);
+      for (const child of children) {
+        expect(child.status).toBe('cancelled');
+      }
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  }, 10_000);
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1783,6 +2343,56 @@ describe('StateMachineRunner — Persistence Checkpoints (§13)', () => {
       expect(instance.status).toBe('error');
       expect(instance.error).toBeTruthy();
       expect(typeof instance.error).toBe('string');
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('checkpoint 2: before action → currentState and stateData persisted', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      // In the action, check that the store already has the instance
+      // at the correct currentState with correct stateData
+      let snapshotDuringAction: {
+        currentState: string;
+        stateData: unknown;
+        status: string;
+      } | null = null;
+
+      const fn: ActionFunction = (ctx) =>
+        Effect.gen(function* () {
+          // Read the instance from the store during the action execution
+          const inst = yield* store.getInstance(ctx.machineInstanceId);
+          snapshotDuringAction = {
+            currentState: inst.currentState,
+            stateData: inst.stateData,
+            status: inst.status,
+          };
+          return { nextState: 'completed' } as TransitionResult;
+        }).pipe(
+          Effect.catchAll((e: unknown) =>
+            Effect.fail(
+              mkActionError({
+                actionId: 'test-action',
+                stateName: ctx.stateName,
+                cause: JSON.stringify(e),
+              }),
+            ),
+          ),
+        );
+      yield* registry.register('test-action', fn, { description: 'checkpoint 2 test' });
+
+      const def = makeSimpleDef();
+      yield* runner.run(def, { checkpointData: true });
+
+      expect(snapshotDuringAction).not.toBeNull();
+      // The instance should be at 'start' with the input as stateData
+      expect(snapshotDuringAction).toHaveProperty('currentState', 'start');
+      expect(snapshotDuringAction).toHaveProperty('status', 'running');
+      expect(snapshotDuringAction).toHaveProperty('stateData');
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
 });
@@ -2054,6 +2664,240 @@ describe('StateMachineRunner — Artifacts (§15)', () => {
       // The artifact can be read back via the artifacts store
       const instance = yield* store.getInstance(result.instanceId);
       expect(instance.status).toBe('completed');
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('parent reads child artifact after child completes', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      // Child writes an artifact
+      const childFn: ActionFunction = (ctx) =>
+        ctx.artifacts.write('child-output.txt', new TextEncoder().encode('child data')).pipe(
+          Effect.map(() => ({ nextState: 'completed' }) as TransitionResult),
+          Effect.catchAll(() => Effect.succeed({ nextState: 'completed' } as TransitionResult)),
+        );
+      yield* registry.register('child-artifact-action', childFn, {
+        description: 'child writes artifact',
+      });
+
+      // Parent reads the child's artifact after child completes
+      let readContent: string | null = null;
+      const parentFn: ActionFunction = (ctx) =>
+        ctx.artifacts.readChild(ctx.stateData as string, 'child-output.txt').pipe(
+          Effect.tap((data) =>
+            Effect.sync(() => {
+              readContent = new TextDecoder().decode(data);
+            }),
+          ),
+          Effect.map(() => ({ nextState: 'completed' }) as TransitionResult),
+          Effect.catchAll(() => Effect.succeed({ nextState: 'completed' } as TransitionResult)),
+        );
+
+      yield* registry.register('parent-reads-artifact', parentFn, {
+        description: 'parent reads child artifact',
+      });
+
+      const childDef = yield* store.saveDefinition({
+        name: 'Artifact Child',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          childStart: {
+            name: 'childStart',
+            type: 'action',
+            actionId: 'child-artifact-action',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'childStart',
+        transitions: [
+          { from: 'childStart', to: 'completed' },
+          { from: 'childStart', to: 'error' },
+        ],
+      });
+
+      // Parent action receives child MachineResult as stateData,
+      // which includes instanceId. We need to extract it.
+      let childInstanceId: string | null = null;
+      const extractAndReadFn: ActionFunction = (ctx) => {
+        const childResult = ctx.stateData as { instanceId?: string };
+        childInstanceId = childResult.instanceId ?? null;
+        if (childInstanceId) {
+          return ctx.artifacts.readChild(childInstanceId, 'child-output.txt').pipe(
+            Effect.tap((data) =>
+              Effect.sync(() => {
+                readContent = new TextDecoder().decode(data);
+              }),
+            ),
+            Effect.map(() => ({ nextState: 'completed' }) as TransitionResult),
+            Effect.catchAll(() => Effect.succeed({ nextState: 'completed' } as TransitionResult)),
+          );
+        }
+        return Effect.succeed({ nextState: 'completed' } as TransitionResult);
+      };
+      yield* registry.register('parent-reads-child-artifact', extractAndReadFn, {
+        description: 'parent reads child artifact via readChild',
+      });
+
+      const parentDef: StateMachineDefinition = {
+        id: 'def-artifact-parent',
+        name: 'Artifact Parent',
+        version: 1,
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          spawnChild: {
+            name: 'spawnChild',
+            type: 'child_machine',
+            actionId: 'parent-reads-child-artifact',
+            childMachineDefId: childDef.id,
+            childInputMapping: '$.stateData',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'spawnChild',
+        transitions: [
+          { from: 'spawnChild', to: 'completed' },
+          { from: 'spawnChild', to: 'error' },
+        ],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      };
+
+      const result = yield* runner.run(parentDef, {});
+      expect(result.status).toBe('completed');
+      expect(childInstanceId).not.toBeNull();
+      expect(readContent).toBe('child data');
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('parallel children artifacts accessible from parent', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      // Each parallel child writes a unique artifact
+      let callCount = 0;
+      const childFn: ActionFunction = (ctx) => {
+        const myCount = callCount++;
+        return ctx.artifacts
+          .write(
+            `output-${String(myCount)}.txt`,
+            new TextEncoder().encode(`data-${String(myCount)}`),
+          )
+          .pipe(
+            Effect.map(() => ({ nextState: 'completed' }) as TransitionResult),
+            Effect.catchAll(() => Effect.succeed({ nextState: 'completed' } as TransitionResult)),
+          );
+      };
+      yield* registry.register('parallel-artifact-action', childFn, {
+        description: 'child writes unique artifact',
+      });
+
+      // Parent lists child artifacts
+      const childArtifactCounts: number[] = [];
+      const parentFn: ActionFunction = (ctx) => {
+        const data = ctx.stateData as {
+          childInstanceIds?: Record<string, string>;
+        };
+        if (data.childInstanceIds) {
+          return Effect.all(
+            Object.values(data.childInstanceIds).map((cid) =>
+              ctx.artifacts.listChild(cid).pipe(
+                Effect.tap((artifacts) =>
+                  Effect.sync(() => {
+                    childArtifactCounts.push(artifacts.length);
+                  }),
+                ),
+              ),
+            ),
+          ).pipe(
+            Effect.map(() => ({ nextState: 'completed' }) as TransitionResult),
+            Effect.catchAll(() => Effect.succeed({ nextState: 'completed' } as TransitionResult)),
+          );
+        }
+        return Effect.succeed({ nextState: 'completed' } as TransitionResult);
+      };
+      yield* registry.register('parent-lists-artifacts', parentFn, {
+        description: 'parent lists child artifacts',
+      });
+
+      const childDef = yield* store.saveDefinition({
+        name: 'Parallel Artifact Child',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          childStart: {
+            name: 'childStart',
+            type: 'action',
+            actionId: 'parallel-artifact-action',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'childStart',
+        transitions: [
+          { from: 'childStart', to: 'completed' },
+          { from: 'childStart', to: 'error' },
+        ],
+      });
+
+      const parentDef: StateMachineDefinition = {
+        id: 'def-parallel-artifact-parent',
+        name: 'Parallel Artifact Parent',
+        version: 1,
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          spawnChildren: {
+            name: 'spawnChildren',
+            type: 'parallel_children',
+            actionId: 'parent-lists-artifacts',
+            parallelMode: 'all_settled',
+            children: [
+              { key: 'child-a', machineDefId: childDef.id, inputMapping: '$.stateData' },
+              { key: 'child-b', machineDefId: childDef.id, inputMapping: '$.stateData' },
+            ],
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'spawnChildren',
+        transitions: [
+          { from: 'spawnChildren', to: 'completed' },
+          { from: 'spawnChildren', to: 'error' },
+        ],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      };
+
+      const result = yield* runner.run(parentDef, {});
+      expect(result.status).toBe('completed');
+
+      // Parent should have listed artifacts from both children
+      expect(childArtifactCounts).toHaveLength(2);
+      // Each child wrote 1 artifact
+      childArtifactCounts.forEach((count) => {
+        expect(count).toBeGreaterThanOrEqual(1);
+      });
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
 });

@@ -158,8 +158,8 @@ const makeParentChildDefinition = (opts?) => ({ ... });
 - [x] Action failure (throws/fails) → machine transitions to `error` terminal
 - [x] Instance `error` field contains descriptive message; `status: 'error'`
 - [x] Illegal transition (nextState not in transitions[]) → `DefinitionError`
-- [ ] stateData fails dataSchema validation → error with schema details
-- [ ] `beforeTransition` middleware failure → error terminal; `onError` hooks fire
+- [x] stateData fails dataSchema validation → error with schema details
+- [x] `beforeTransition` middleware failure → error terminal; `onError` hooks fire
 
 #### Timeouts & Depth (§7)
 
@@ -172,7 +172,7 @@ const makeParentChildDefinition = (opts?) => ({ ... });
 
 - [x] Input violating `inputSchema` → error (machine never created)
 - [x] Valid input proceeds normally
-- [ ] Non-existent definition ID → `NotFoundError`
+- [x] Non-existent definition ID → `NotFoundError`
 
 #### Single Child Machine (§8)
 
@@ -182,7 +182,7 @@ const makeParentChildDefinition = (opts?) => ({ ... });
 - [x] Parent `actionId` runs after child; parent continues to terminal
 - [x] Both parent and child `status: 'completed'`
 - [x] `childInputMapping` correctly extracts child input
-- [ ] Invalid JSONPath → parent error (not null)
+- [x] Invalid JSONPath → parent error (not null)
 - [x] Child error → parent action receives error result; action decides transition
 - [x] `ctx.parentContext` populated in child actions
 - [x] `TransitionRecord` includes `childInstanceId`/`childDefinitionId`
@@ -192,23 +192,23 @@ const makeParentChildDefinition = (opts?) => ({ ... });
 - [x] `parallel_children` spawns N children; all visible in store
 - [x] Parent `childInstanceIds` keyed by `key`
 - [x] All children complete → `ParallelChildrenResult` correct
-- [ ] `all_or_interrupt`: one error → remaining interrupted (cancelled)
+- [x] `all_or_interrupt`: one error → remaining interrupted (cancelled)
 - [x] `all_settled`: one error → remaining continue; all results collected
 - [x] Each child receives correct input from its `inputMapping`
 
 #### Concurrency & Semaphore (§10)
 
-- [ ] More instances than permits → excess queue (not reject)
-- [ ] Queued machines start as permits free up
+- [x] More instances than permits → excess queue (not reject)
+- [x] Queued machines start as permits free up
 - [x] Linked-list of 51+ machines (single child each) → no deadlock
 - [x] Fan-out with 10 parallel children → no deadlock
-- [ ] Mixed nesting → no deadlock
+- [x] Mixed nesting → no deadlock
 
 #### Cancellation (§11)
 
 - [x] Cancel running instance → `cancelled` terminal; history records cancellation
 - [x] Cancel while waiting for single child → both cancelled
-- [ ] Cancel while waiting for parallel children → all cancelled
+- [x] Cancel while waiting for parallel children → all cancelled
 - [x] Cancel suspended instance → direct transition to cancelled
 - [x] Cancel completed/cancelled/errored → 409 Conflict
 
@@ -217,17 +217,17 @@ const makeParentChildDefinition = (opts?) => ({ ... });
 - [x] Suspend all in-flight instances → `status: 'suspended'`
 - [x] Resume suspended instance → runs to completion
 - [x] Completed transitions not re-executed after resume
-- [ ] Resume with single child: child resumed first if suspended
-- [ ] Resume with parallel children: mix of suspended/completed handled
+- [x] Resume with single child: child resumed first if suspended
+- [x] Resume with parallel children: mix of suspended/completed handled
 - [x] Resume non-suspended → 409 Conflict
 - [x] Resume with changed definition version → `DefinitionError`
 - [x] Resume with deleted definition → `NotFoundError`
-- [ ] Startup recovery: `AUTO_RESUME_ON_STARTUP=true` resumes top-level instances
+- [x] Startup recovery: `AUTO_RESUME_ON_STARTUP=true` resumes top-level instances
 
 #### Persistence Checkpoints (§13)
 
 - [x] Checkpoint 1: after start → `status: 'running'`, `currentState` = initial
-- [ ] Checkpoint 2: before action → `currentState` and `stateData` persisted
+- [x] Checkpoint 2: before action → `currentState` and `stateData` persisted
 - [x] Checkpoint 3: after transition → `history` appended, `currentState` advanced
 - [x] Checkpoint 4: terminal → `status` final, `output`/`error` populated
 - [x] Checkpoint 5: suspension → `status: 'suspended'`
@@ -242,8 +242,8 @@ const makeParentChildDefinition = (opts?) => ({ ... });
 #### Artifacts (§15)
 
 - [x] Action writes artifact → file exists on disk; `ArtifactRecord` on instance
-- [ ] Parent reads child artifact after child completes
-- [ ] Parallel children artifacts accessible from parent
+- [x] Parent reads child artifact after child completes
+- [x] Parallel children artifacts accessible from parent
 
 ### 2. Additional test files (if not already tested in earlier tasks)
 

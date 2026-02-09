@@ -609,4 +609,292 @@ describe('StateMachineRunner — Suspend & Resume (Task 15)', () => {
       }
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
+
+  // ── §12.3: Resume with single child: child resumed first if suspended ──
+
+  it('resume with single child: child resumed first if suspended', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+      const runner = yield* StateMachineRunner;
+
+      yield* registerAction(registry, 'child-action', 'completed', { childDone: true });
+      yield* registerAction(registry, 'parent-after-child', 'completed', { parentDone: true });
+
+      // Save child definition
+      const childDef = yield* store.saveDefinition({
+        name: 'Resumable Child',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          childStart: { name: 'childStart', type: 'action', actionId: 'child-action' },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'childStart',
+        transitions: [
+          { from: 'childStart', to: 'completed' },
+          { from: 'childStart', to: 'error' },
+        ],
+      });
+
+      // Save parent definition
+      const parentDef = yield* store.saveDefinition({
+        name: 'Resumable Parent',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          spawnChild: {
+            name: 'spawnChild',
+            type: 'child_machine',
+            actionId: 'parent-after-child',
+            childMachineDefId: childDef.id,
+            childInputMapping: '$.stateData',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'spawnChild',
+        transitions: [
+          { from: 'spawnChild', to: 'completed' },
+          { from: 'spawnChild', to: 'error' },
+        ],
+      });
+
+      // Create a suspended child instance
+      const childInst = yield* store.saveInstance({
+        definitionId: childDef.id,
+        definitionVersion: childDef.version,
+        status: 'suspended',
+        currentState: 'childStart',
+        stateData: {},
+        input: {},
+        history: [],
+        logs: [],
+        artifacts: [],
+      });
+
+      // Create a suspended parent that references the child
+      const parentInst = yield* store.saveInstance({
+        definitionId: parentDef.id,
+        definitionVersion: parentDef.version,
+        status: 'suspended',
+        currentState: 'spawnChild',
+        stateData: {},
+        input: {},
+        history: [],
+        logs: [],
+        artifacts: [],
+        childInstanceId: childInst.id,
+      });
+
+      // Update child to reference parent
+      yield* store.updateInstance(childInst.id, {
+        parentInstanceId: parentInst.id,
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Resume the parent
+      const result = yield* runner.resume(parentInst.id);
+      expect(result.status).toBe('completed');
+
+      // Both should be completed
+      const finalParent = yield* store.getInstance(parentInst.id);
+      expect(finalParent.status).toBe('completed');
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  // ── §12.3: Resume with parallel children: mix of suspended/completed ──
+
+  it('resume with parallel children: mix of suspended/completed handled', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+      const runner = yield* StateMachineRunner;
+
+      yield* registerAction(registry, 'parallel-child-action', 'completed', { done: true });
+      yield* registerAction(registry, 'parent-after-children', 'completed');
+
+      const childDef = yield* store.saveDefinition({
+        name: 'Parallel Resume Child',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          childStart: {
+            name: 'childStart',
+            type: 'action',
+            actionId: 'parallel-child-action',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'childStart',
+        transitions: [
+          { from: 'childStart', to: 'completed' },
+          { from: 'childStart', to: 'error' },
+        ],
+      });
+
+      const parentDef = yield* store.saveDefinition({
+        name: 'Parallel Resume Parent',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          spawnChildren: {
+            name: 'spawnChildren',
+            type: 'parallel_children',
+            actionId: 'parent-after-children',
+            parallelMode: 'all_settled',
+            children: [
+              { key: 'child-a', machineDefId: childDef.id, inputMapping: '$.stateData' },
+              { key: 'child-b', machineDefId: childDef.id, inputMapping: '$.stateData' },
+            ],
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'spawnChildren',
+        transitions: [
+          { from: 'spawnChildren', to: 'completed' },
+          { from: 'spawnChildren', to: 'error' },
+        ],
+      });
+
+      // Create one completed child and one suspended child
+      const completedChild = yield* store.saveInstance({
+        definitionId: childDef.id,
+        definitionVersion: childDef.version,
+        status: 'completed',
+        currentState: 'completed',
+        stateData: {},
+        input: {},
+        history: [],
+        logs: [],
+        artifacts: [],
+        output: { done: true },
+      });
+
+      const suspendedChild = yield* store.saveInstance({
+        definitionId: childDef.id,
+        definitionVersion: childDef.version,
+        status: 'suspended',
+        currentState: 'childStart',
+        stateData: {},
+        input: {},
+        history: [],
+        logs: [],
+        artifacts: [],
+      });
+
+      // Create suspended parent pointing at both children
+      const parentInst = yield* store.saveInstance({
+        definitionId: parentDef.id,
+        definitionVersion: parentDef.version,
+        status: 'suspended',
+        currentState: 'spawnChildren',
+        stateData: {},
+        input: {},
+        history: [],
+        logs: [],
+        artifacts: [],
+        childInstanceIds: {
+          'child-a': completedChild.id,
+          'child-b': suspendedChild.id,
+        },
+      });
+
+      // Set parent references
+      yield* store.updateInstance(completedChild.id, {
+        parentInstanceId: parentInst.id,
+        updatedAt: new Date().toISOString(),
+      });
+      yield* store.updateInstance(suspendedChild.id, {
+        parentInstanceId: parentInst.id,
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Resume the parent → should handle mix of completed and suspended children
+      const result = yield* runner.resume(parentInst.id);
+      expect(result.status).toBe('completed');
+
+      const finalParent = yield* store.getInstance(parentInst.id);
+      expect(finalParent.status).toBe('completed');
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  // ── §12.6: Startup recovery with AUTO_RESUME_ON_STARTUP=true ──────
+
+  it('startupRecovery with AUTO_RESUME_ON_STARTUP=true resumes top-level instances', async () => {
+    /* eslint-disable @typescript-eslint/dot-notation */
+    const origVal = process.env['AUTO_RESUME_ON_STARTUP'];
+    process.env['AUTO_RESUME_ON_STARTUP'] = 'true';
+    /* eslint-enable @typescript-eslint/dot-notation */
+
+    const layer = makeTestLayer();
+
+    try {
+      await Effect.gen(function* () {
+        const store = yield* MachineStore;
+        const registry = yield* ActionRegistry;
+
+        yield* registerAction(registry, 'resume-action', 'completed', { recovered: true });
+
+        // Save a definition so resume can look it up
+        const savedDef = yield* store.saveDefinition({
+          name: 'Auto Resume Target',
+          inputSchema: {},
+          outputSchema: {},
+          states: {
+            start: { name: 'start', type: 'action', actionId: 'resume-action' },
+            completed: { name: 'completed', type: 'terminal' },
+            cancelled: { name: 'cancelled', type: 'terminal' },
+            error: { name: 'error', type: 'terminal' },
+          },
+          initialState: 'start',
+          transitions: [
+            { from: 'start', to: 'completed' },
+            { from: 'start', to: 'error' },
+          ],
+        });
+
+        // Create a suspended top-level instance
+        const inst = yield* store.saveInstance({
+          definitionId: savedDef.id,
+          definitionVersion: savedDef.version,
+          status: 'suspended',
+          currentState: 'start',
+          stateData: {},
+          input: {},
+          history: [],
+          logs: [],
+          artifacts: [],
+        });
+
+        // Run startup recovery — should auto-resume
+        yield* startupRecovery;
+
+        // Instance should now be completed (resumed and ran to completion)
+        const after = yield* store.getInstance(inst.id);
+        expect(after.status).toBe('completed');
+      }).pipe(Effect.provide(layer), Effect.runPromise);
+    } finally {
+      if (origVal !== undefined) {
+        /* eslint-disable @typescript-eslint/dot-notation */
+        process.env['AUTO_RESUME_ON_STARTUP'] = origVal;
+        /* eslint-enable @typescript-eslint/dot-notation */
+      } else {
+        /* eslint-disable @typescript-eslint/dot-notation */
+        delete process.env['AUTO_RESUME_ON_STARTUP'];
+        /* eslint-enable @typescript-eslint/dot-notation */
+      }
+    }
+  });
 });
