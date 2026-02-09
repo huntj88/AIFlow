@@ -494,6 +494,14 @@ export const validateDefinition = (
         message: 'Definition validation failed',
         details: violations.map((v) => `Rule ${String(v.rule)}: ${v.message}`),
       }),
+    ).pipe(
+      Effect.withSpan('machine.definition.validate', {
+        attributes: {
+          'machine.definition_id': def.id,
+          'validation.mode': mode,
+          'validation.passed': false,
+        },
+      }),
     );
   }
 
@@ -501,10 +509,27 @@ export const validateDefinition = (
   if (warnings.length > 0) {
     return Effect.logWarning(
       `Definition validation warnings: ${warnings.map((w) => `Rule ${String(w.rule)}: ${w.message}`).join('; ')}`,
-    ).pipe(Effect.as(undefined));
+    ).pipe(
+      Effect.as(undefined),
+      Effect.withSpan('machine.definition.validate', {
+        attributes: {
+          'machine.definition_id': def.id,
+          'validation.mode': mode,
+          'validation.passed': true,
+        },
+      }),
+    );
   }
 
-  return Effect.void;
+  return Effect.void.pipe(
+    Effect.withSpan('machine.definition.validate', {
+      attributes: {
+        'machine.definition_id': def.id,
+        'validation.mode': mode,
+        'validation.passed': true,
+      },
+    }),
+  );
 };
 
 /**

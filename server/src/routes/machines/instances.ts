@@ -102,6 +102,7 @@ export const InstancesRouter = HttpRouter.empty.pipe(
 
       return yield* HttpServerResponse.json(newest, { status: 201 });
     }).pipe(
+      Effect.withSpan('api.post.instances'),
       Effect.catchTag('NotFoundError', (err) =>
         HttpServerResponse.json(
           {
@@ -241,6 +242,7 @@ export const InstancesRouter = HttpRouter.empty.pipe(
       yield* runner.cancel(id);
       return yield* HttpServerResponse.json({ message: 'Instance cancelled' });
     }).pipe(
+      Effect.withSpan('api.post.cancel'),
       Effect.catchTag('NotFoundError', (err) =>
         HttpServerResponse.json({ message: 'Instance not found', id: err.id }, { status: 404 }),
       ),
@@ -300,6 +302,7 @@ export const InstancesRouter = HttpRouter.empty.pipe(
 
       return yield* HttpServerResponse.json({ message: 'Instance resuming' });
     }).pipe(
+      Effect.withSpan('api.post.resume'),
       Effect.catchTag('NotFoundError', (err) =>
         HttpServerResponse.json(
           {

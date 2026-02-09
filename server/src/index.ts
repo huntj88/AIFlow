@@ -4,6 +4,7 @@ import { Effect } from 'effect';
 import { startServer } from '@/lib/HttpServer.js';
 import { MachineLive } from '@/lib/HttpServer.js';
 import { ServerLoggerLive } from '@/lib/Logger.js';
+import { logOtelStatus } from '@/lib/Telemetry.js';
 import { StateMachineRunner } from '@/machines/StateMachineRunner.js';
 
 /**
@@ -45,6 +46,7 @@ const main = Effect.gen(function* () {
 
 startServer.pipe(
   Effect.provide(ServerLoggerLive),
+  Effect.tap(() => logOtelStatus),
   Effect.tap(() => main.pipe(Effect.provide(MachineLive))),
   NodeRuntime.runMain,
 );

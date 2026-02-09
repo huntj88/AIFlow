@@ -1,0 +1,21 @@
+# Local OpenTelemetry observability stack (Task 31)
+#
+# Start:  docker compose -f docker-compose.otel.yml up -d
+# Stop:   docker compose -f docker-compose.otel.yml down
+#
+# Jaeger UI:  http://localhost:16686
+# OTLP HTTP:  http://localhost:4318
+#
+# Then run the server with:
+#   OTEL_ENABLED=true pnpm --filter @aiflow/server run dev
+
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - '16686:16686' # Jaeger UI
+      - '4317:4317' # OTLP gRPC
+      - '4318:4318' # OTLP HTTP
+    environment:
+      COLLECTOR_OTLP_ENABLED: 'true'
+    restart: unless-stopped

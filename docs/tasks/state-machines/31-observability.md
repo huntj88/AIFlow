@@ -220,14 +220,14 @@ Document how to run: `docker compose -f docker-compose.otel.yml up -d`
 
 ## Validation Checklist
 
-- [ ] OTel SDK initializes when `OTEL_ENABLED=true`
-- [ ] OTel SDK does NOT initialize when `OTEL_ENABLED` is unset/false
-- [ ] TelemetryMiddleware creates spans per state transition
-- [ ] Spans include correct attributes (definition_id, instance_id, state, type)
-- [ ] Error states are recorded with `SpanStatusCode.ERROR`
-- [ ] Custom metrics are recorded (counters, histograms)
-- [ ] Log entries include trace_id/span_id when OTel is active
-- [ ] Effect.withSpan calls appear as OTel spans via @effect/opentelemetry bridge
-- [ ] Server starts normally when OTel is disabled (no errors)
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
-- [ ] `pnpm --filter @aiflow/server run test` passes
+- [x] OTel SDK initializes when `OTEL_ENABLED=true`
+- [x] OTel SDK does NOT initialize when `OTEL_ENABLED` is unset/false
+- [x] TelemetryMiddleware creates spans per state transition
+- [x] Spans include correct attributes (definition_id, instance_id, state, type)
+- [x] Error states are recorded with `SpanStatusCode.ERROR`
+- [x] Custom metrics are recorded (counters, histograms)
+- [x] Log entries include trace_id/span_id when OTel is active
+- [x] Effect.withSpan calls appear as OTel spans via @effect/opentelemetry bridge
+- [x] Server starts normally when OTel is disabled (no errors)
+- [x] `pnpm --filter @aiflow/server run build` succeeds
+- [x] `pnpm --filter @aiflow/server run test` passes

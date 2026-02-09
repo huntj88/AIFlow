@@ -36,6 +36,7 @@ import AjvModule from 'ajv';
 import { Cause, Context, Duration, Effect, Either, Exit, Fiber, Layer, PubSub } from 'effect';
 import { JSONPath } from 'jsonpath-plus';
 
+import * as MachineMetrics from '@/lib/MachineMetrics.js';
 import { ActionRegistry } from './ActionRegistry.js';
 import { validateDefinition } from './DefinitionValidator.js';
 import { MachineEventPubSub } from './EventPubSub.js';
@@ -350,7 +351,15 @@ export const StateMachineRunnerLive = Layer.effect(
 
           const durationMs = Date.now() - startTime;
           return { transitionResult, durationMs };
-        });
+        }).pipe(
+          Effect.withSpan(`machine.action.${actionId}`, {
+            attributes: {
+              'machine.instance_id': ls.instanceId,
+              'machine.state': ls.currentState,
+              'machine.action_id': actionId,
+            },
+          }),
+        );
 
     // ──────────────────────────────────────────────────────────────────
     // Shared helper: runPreamble (Task 17.1 — step 3)
@@ -1461,7 +1470,15 @@ export const StateMachineRunnerLive = Layer.effect(
             if (ls.errorResult) return;
           }
         }
-      });
+      }).pipe(
+        Effect.withSpan('machine.state_loop', {
+          attributes: {
+            'machine.instance_id': ls.instanceId,
+            'machine.definition_id': ls.definition.id,
+            'machine.initial_state': ls.currentState,
+          },
+        }),
+      );
 
     // ──────────────────────────────────────────────────────────────────
     // Shared helper: resolveTerminalState (Task 17.1 — step 5)
@@ -1710,6 +1727,12 @@ export const StateMachineRunnerLive = Layer.effect(
 
           const instanceId = savedInstance.id;
 
+          // Record instance started metric
+          MachineMetrics.instancesStarted.add(1, {
+            'machine.definition_id': definition.id,
+            'machine.instance_id': instanceId,
+          });
+
           const parentContext =
             opts?.parentInstanceId && opts.parentStateName
               ? {
@@ -1790,8 +1813,30 @@ export const StateMachineRunnerLive = Layer.effect(
           }).pipe(Effect.onInterrupt(() => makeOnInterruptFinalizer(instanceId)));
 
           // ── 6. Fork, track, await, cleanup ──
-          return yield* forkTrackAwait(instanceId, machineExec);
-        });
+          const result = yield* forkTrackAwait(instanceId, machineExec);
+
+          // ── 7. Record metrics ──
+          const metricsAttrs = {
+            'machine.definition_id': definition.id,
+            'machine.instance_id': instanceId,
+          };
+          if (result.status === 'completed') {
+            MachineMetrics.instancesCompleted.add(1, metricsAttrs);
+          } else if (result.status === 'error') {
+            MachineMetrics.instancesFailed.add(1, metricsAttrs);
+          } else {
+            MachineMetrics.instancesCancelled.add(1, metricsAttrs);
+          }
+          MachineMetrics.statesVisited.record(ls.history.length, metricsAttrs);
+
+          return result;
+        }).pipe(
+          Effect.withSpan('machine.run', {
+            attributes: {
+              'machine.definition_id': definition.id,
+            },
+          }),
+        );
       },
 
       cancel(instanceId) {
@@ -1849,7 +1894,13 @@ export const StateMachineRunnerLive = Layer.effect(
               updatedAt: new Date().toISOString(),
             });
           }
-        });
+
+          MachineMetrics.instancesCancelled.add(1, { 'machine.instance_id': instanceId });
+        }).pipe(
+          Effect.withSpan('machine.cancel', {
+            attributes: { 'machine.instance_id': instanceId },
+          }),
+        );
       },
 
       // ────────────────────────────────────────────────────────────────
@@ -2002,8 +2053,13 @@ export const StateMachineRunnerLive = Layer.effect(
           }).pipe(Effect.onInterrupt(() => makeOnInterruptFinalizer(instanceId)));
 
           // 8. Fork, track, await, cleanup
+          MachineMetrics.instancesResumed.add(1, { 'machine.instance_id': instanceId });
           return yield* forkTrackAwait(instanceId, resumeExec);
-        });
+        }).pipe(
+          Effect.withSpan('machine.resume', {
+            attributes: { 'machine.instance_id': instanceId },
+          }),
+        );
       },
 
       // ────────────────────────────────────────────────────────────────

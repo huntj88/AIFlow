@@ -4,12 +4,13 @@ import { Effect, Layer } from 'effect';
 import type Http from 'node:http';
 import { createServer } from 'node:http';
 
+import { OtelLive } from '@/lib/Telemetry.js';
 import { ActionRegistryLive } from '@/machines/ActionRegistry.js';
 import { FsArtifactStoreLive } from '@/machines/artifacts/FsArtifactStore.js';
 import { MachineEventPubSubLive } from '@/machines/EventPubSub.js';
 import { ExecutionSemaphoreLive } from '@/machines/ExecutionSemaphore.js';
 import { WebSocketManagerLive } from '@/machines/live/WebSocketManager.js';
-import { makeMiddlewareExecutorLayer } from '@/machines/middleware/MiddlewareExecutor.js';
+import { defaultMiddleware, makeMiddlewareExecutorLayer } from '@/machines/middleware/index.js';
 import { StateMachineRunnerLive } from '@/machines/StateMachineRunner.js';
 import { InMemoryMachineStoreLive } from '@/machines/store/index.js';
 import { HelloRouter } from '@/routes/hello.js';
@@ -39,7 +40,7 @@ const AppRouter = HttpRouter.empty.pipe(
 // Base layers (no dependencies)
 const StoreLive = InMemoryMachineStoreLive;
 const RegistryLive = ActionRegistryLive;
-const MiddlewareLive = makeMiddlewareExecutorLayer([]);
+const MiddlewareLive = makeMiddlewareExecutorLayer(defaultMiddleware);
 const SemaphoreLive = ExecutionSemaphoreLive;
 const PubSubLive = MachineEventPubSubLive;
 
@@ -88,7 +89,7 @@ export const HttpLive = Layer.merge(
     Layer.provide(ServerLive),
   ),
   WebSocketManagerLive,
-).pipe(Layer.provide(MachineLive));
+).pipe(Layer.provide(MachineLive), Layer.provide(OtelLive));
 
 export const startServer = Layer.launch(HttpLive).pipe(
   Effect.tap(() => Effect.log(`Server starting on port ${String(PORT)}`)),
