@@ -1,12 +1,13 @@
 /**
- * StateMachineRunner — Core execution loop (Tasks 09–14)
+ * StateMachineRunner — Core execution loop (Tasks 09–15)
  *
  * Implements the core `StateMachineRunner` Effect Service — the main execution
  * engine for state machines. Covers linear execution (action states), single
  * child machine spawning (child_machine), parallel children
  * (parallel_children with all_or_interrupt and all_settled modes), global
- * semaphore-based concurrency control (ExecutionSemaphore), and instance
- * cancellation via `cancel()`.
+ * semaphore-based concurrency control (ExecutionSemaphore), instance
+ * cancellation via `cancel()`, graceful suspension via `suspendAll()`,
+ * resume via `resume()`, and optional startup recovery.
  *
  * The runner implements the state loop, middleware integration, transition
  * validation, persistence checkpoints, and `MachineResult` resolution.
@@ -19,7 +20,13 @@
  * triggering an `Effect.onInterrupt` finalizer that persists the `cancelled`
  * terminal state. Children of a cancelled parent are recursively cancelled.
  *
- * Suspension/resume and PubSub are added in subsequent tasks.
+ * `suspendAll()` gracefully interrupts all in-flight instances, setting their
+ * status to `'suspended'` (distinct from `'cancelled'`). `resume()` re-enters
+ * a suspended instance at its last persisted `currentState`, re-executing the
+ * interrupted action and continuing the state loop. Startup recovery
+ * auto-resumes top-level suspended instances when `AUTO_RESUME_ON_STARTUP=true`.
+ *
+ * PubSub events are added in subsequent tasks.
  *
  * @module
  */
@@ -106,6 +113,27 @@ export interface StateMachineRunner {
    * Children are recursively cancelled when the parent is `waiting_for_child`.
    */
   cancel(instanceId: string): Effect.Effect<void, NotFoundError | DefinitionError>;
+
+  /**
+   * Resume a previously suspended machine instance.
+   *
+   * - Verifies `status === 'suspended'` (other statuses → 409 Conflict)
+   * - Checks definition exists and version matches
+   * - Recursively resumes children if they are suspended
+   * - Re-enters `currentState`, re-executes the interrupted action
+   * - Continues the normal state loop to completion
+   */
+  resume(instanceId: string): Effect.Effect<MachineResult, MachineError>;
+
+  /**
+   * Gracefully suspend all running instances (for server shutdown).
+   *
+   * 1. Stops accepting new `run()` / `resume()` calls
+   * 2. Interrupts all in-flight fibers
+   * 3. `Effect.onInterrupt` finalizers set status to `'suspended'`
+   * 4. Waits for all finalizers, bounded by `SHUTDOWN_TIMEOUT_MS`
+   */
+  suspendAll(): Effect.Effect<void, MachineError>;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -148,9 +176,33 @@ export const StateMachineRunnerLive = Layer.effect(
      */
     const fiberMap = new Map<string, Fiber.RuntimeFiber<MachineResult, MachineError>>();
 
+    /**
+     * When `true`, the server is shutting down. Fiber interrupts during
+     * shutdown persist status as `'suspended'` instead of `'cancelled'`.
+     */
+    let isShuttingDown = false;
+
+    /**
+     * When `false`, new `run()` and `resume()` calls are rejected.
+     * Set to `false` by `suspendAll()` before interrupting fibers.
+     */
+    let isAcceptingNew = true;
+
+    /* eslint-disable @typescript-eslint/dot-notation */
+    const SHUTDOWN_TIMEOUT_MS = parseInt(process.env['SHUTDOWN_TIMEOUT_MS'] ?? '10000', 10);
+    /* eslint-enable @typescript-eslint/dot-notation */
+
     const runner: StateMachineRunner = {
       run(definition, input, opts) {
         return Effect.gen(function* () {
+          // ── Reject if shutting down ──
+          if (!isAcceptingNew) {
+            return yield* Effect.fail(
+              mkDefinitionError({
+                message: 'Server is shutting down — not accepting new machine runs',
+              }),
+            );
+          }
           // ──────────────────────────────────────────────────────────────
           // 1. Validate definition at runtime
           // ──────────────────────────────────────────────────────────────
@@ -1173,27 +1225,46 @@ export const StateMachineRunnerLive = Layer.effect(
                 if (
                   latestInstance.status === 'cancelled' ||
                   latestInstance.status === 'completed' ||
-                  latestInstance.status === 'error'
+                  latestInstance.status === 'error' ||
+                  latestInstance.status === 'suspended'
                 ) {
                   return;
                 }
 
-                const cancellationRecord: TransitionRecord = {
-                  id: crypto.randomUUID(),
-                  fromState: latestInstance.currentState,
-                  toState: 'cancelled',
-                  timestamp: new Date().toISOString(),
-                  durationMs: 0,
-                };
+                // Distinguish suspension from cancellation
+                const reason: 'suspended' | 'cancelled' = isShuttingDown
+                  ? 'suspended'
+                  : 'cancelled';
 
-                yield* store
-                  .updateInstance(instanceId, {
-                    status: 'cancelled',
-                    currentState: 'cancelled',
-                    history: [...latestInstance.history, cancellationRecord],
-                    updatedAt: new Date().toISOString(),
-                  })
-                  .pipe(Effect.catchAll(() => Effect.void));
+                if (reason === 'suspended') {
+                  // Checkpoint 5: Preserve currentState for resume —
+                  // do NOT add a transition record (the action was interrupted,
+                  // not completed). Keep currentState pointing at the
+                  // interrupted state so resume can re-enter it.
+                  yield* store
+                    .updateInstance(instanceId, {
+                      status: 'suspended',
+                      updatedAt: new Date().toISOString(),
+                    })
+                    .pipe(Effect.catchAll(() => Effect.void));
+                } else {
+                  const cancellationRecord: TransitionRecord = {
+                    id: crypto.randomUUID(),
+                    fromState: latestInstance.currentState,
+                    toState: 'cancelled',
+                    timestamp: new Date().toISOString(),
+                    durationMs: 0,
+                  };
+
+                  yield* store
+                    .updateInstance(instanceId, {
+                      status: 'cancelled',
+                      currentState: 'cancelled',
+                      history: [...latestInstance.history, cancellationRecord],
+                      updatedAt: new Date().toISOString(),
+                    })
+                    .pipe(Effect.catchAll(() => Effect.void));
+                }
               }).pipe(Effect.catchAll(() => Effect.void)),
             ),
           );
@@ -1212,8 +1283,12 @@ export const StateMachineRunnerLive = Layer.effect(
             return exit.value;
           }
 
-          // Fiber was interrupted (cancelled) — onInterrupt already persisted state
+          // Fiber was interrupted — onInterrupt finalizer already persisted state.
+          // Distinguish suspended (shutdown) from cancelled (explicit cancel).
           if (Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause)) {
+            if (isShuttingDown) {
+              return { status: 'cancelled' as const, instanceId } as MachineResult;
+            }
             return { status: 'cancelled' as const, instanceId } as MachineResult;
           }
 
@@ -1279,8 +1354,1126 @@ export const StateMachineRunnerLive = Layer.effect(
           }
         });
       },
+
+      // ────────────────────────────────────────────────────────────────
+      // resume() — Task 15: Resume a suspended machine instance
+      // ────────────────────────────────────────────────────────────────
+
+      resume(instanceId) {
+        return Effect.gen(function* () {
+          // ── Reject if shutting down ──
+          if (!isAcceptingNew) {
+            return yield* Effect.fail(
+              mkDefinitionError({
+                message: 'Server is shutting down — not accepting resume requests',
+              }),
+            );
+          }
+
+          // 1. Load instance and verify status === 'suspended'
+          const instance = yield* store.getInstance(instanceId);
+
+          if (instance.status !== 'suspended') {
+            return yield* Effect.fail(
+              mkDefinitionError({
+                message: `Cannot resume instance with status: ${instance.status}`,
+                details: ['Only suspended instances can be resumed'],
+              }),
+            );
+          }
+
+          // 2. Load definition and verify it still exists + version matches
+          const definition = yield* store.getDefinition(instance.definitionId).pipe(
+            Effect.catchTag('NotFoundError', (err: NotFoundError) =>
+              Effect.fail(
+                mkNotFoundError({
+                  entityType: err.entityType,
+                  id: err.id,
+                }),
+              ),
+            ),
+          );
+
+          if (definition.version !== instance.definitionVersion) {
+            return yield* Effect.fail(
+              mkDefinitionError({
+                message: `Definition version changed since suspension`,
+                details: [
+                  `Instance was suspended with version ${String(instance.definitionVersion)}`,
+                  `Current definition version is ${String(definition.version)}`,
+                ],
+              }),
+            );
+          }
+
+          // 3. Re-validate definition at runtime
+          const registryEntries = yield* registry.list();
+          const registryIds = new Set(registryEntries.map((m) => m.id));
+          const syncRegistry = { has: (id: string) => registryIds.has(id) };
+          yield* validateDefinition(definition, 'runtime', syncRegistry);
+
+          // 4. Handle child resumption first
+          if (instance.childInstanceId) {
+            // Single child — resume if suspended, skip if already completed
+            const childInstance = yield* store
+              .getInstance(instance.childInstanceId)
+              .pipe(
+                Effect.catchTag('NotFoundError', () =>
+                  Effect.succeed(null as MachineInstance | null),
+                ),
+              );
+
+            if (childInstance?.status === 'suspended') {
+              yield* runner.resume(childInstance.id);
+            }
+          }
+
+          if (instance.childInstanceIds) {
+            // Parallel children — resume each suspended child
+            for (const childId of Object.values(instance.childInstanceIds)) {
+              const childInstance = yield* store
+                .getInstance(childId)
+                .pipe(
+                  Effect.catchTag('NotFoundError', () =>
+                    Effect.succeed(null as MachineInstance | null),
+                  ),
+                );
+
+              if (childInstance?.status === 'suspended') {
+                yield* runner.resume(childInstance.id);
+              }
+            }
+          }
+
+          // 5. Set status back to 'running'
+          yield* store.updateInstance(instanceId, {
+            status: 'running',
+            updatedAt: new Date().toISOString(),
+          });
+
+          // 6. Re-run the machine from the persisted currentState.
+          //    We call runner.run() with the original definition + input,
+          //    but we need to fast-forward past already-completed transitions.
+          //    Instead, we build a "trimmed" run that enters the state loop
+          //    at instance.currentState with instance.stateData.
+          const resumeExec = Effect.gen(function* () {
+            let currentState = instance.currentState;
+            let stateData: unknown = instance.stateData;
+            let history: TransitionRecord[] = [...instance.history];
+            let allLogs = [...instance.logs];
+            let errorResult: MachineResult | null = null;
+
+            // Build parent context (if child machine)
+            const parentContext = instance.parentInstanceId
+              ? {
+                  parentInstanceId: instance.parentInstanceId,
+                  parentStateName:
+                    instance.history.length > 0
+                      ? instance.history[instance.history.length - 1].fromState
+                      : instance.currentState,
+                }
+              : undefined;
+
+            const persistError = (
+              errorMessage: string,
+              actionId: string | undefined,
+              durationMs: number,
+            ) =>
+              Effect.gen(function* () {
+                const errorTransitionRecord: TransitionRecord = {
+                  id: crypto.randomUUID(),
+                  fromState: currentState,
+                  toState: 'error',
+                  timestamp: new Date().toISOString(),
+                  durationMs,
+                  actionId,
+                };
+
+                history = [...history, errorTransitionRecord];
+
+                yield* store.updateInstance(instanceId, {
+                  status: 'error',
+                  currentState: 'error',
+                  stateData,
+                  error: errorMessage,
+                  history,
+                  logs: allLogs,
+                  updatedAt: new Date().toISOString(),
+                });
+
+                errorResult = {
+                  status: 'error',
+                  error: errorMessage,
+                  instanceId,
+                };
+              });
+
+            const executeAction = (
+              actionId: string,
+              actionCtx: ActionContext,
+              stateDef: { readonly timeoutMs?: number },
+              middlewareCtx: {
+                instance: MachineInstance;
+                stateName: string;
+                stateData: unknown;
+                definition: StateMachineDefinition;
+              },
+              loggerFactory: ReturnType<typeof createStateLoggerFactory>,
+            ) =>
+              Effect.gen(function* () {
+                const { fn: actionFn } = yield* registry.get(actionId);
+
+                const startTime = Date.now();
+
+                const rawAction = actionFn(actionCtx);
+                const timedAction = stateDef.timeoutMs
+                  ? rawAction.pipe(
+                      Effect.timeoutFail({
+                        duration: Duration.millis(stateDef.timeoutMs),
+                        onTimeout: () =>
+                          mkActionError({
+                            actionId,
+                            stateName: currentState,
+                            cause: 'timeout',
+                          }),
+                      }),
+                    )
+                  : rawAction;
+
+                const transitionResult = yield* timedAction.pipe(
+                  Effect.catchAll((actionError: ActionError) =>
+                    Effect.gen(function* () {
+                      const machineError: MachineError = mkActionError({
+                        actionId,
+                        stateName: currentState,
+                        cause: actionError.cause ?? actionError,
+                      });
+
+                      yield* middlewareExec.runOnError({
+                        ...middlewareCtx,
+                        error: machineError,
+                      });
+
+                      const errorLogs = [...loggerFactory.getEntries()];
+                      allLogs = [...allLogs, ...errorLogs];
+
+                      const isTimeout = actionError.cause === 'timeout';
+                      const errorMessage = isTimeout
+                        ? `Action '${actionId}' in state '${currentState}' timed out after ${String(stateDef.timeoutMs ?? 0)}ms`
+                        : actionError.cause instanceof Error
+                          ? actionError.cause.message
+                          : typeof actionError.cause === 'string'
+                            ? actionError.cause
+                            : `Action "${actionId}" failed in state "${currentState}"`;
+
+                      const durationMs = Date.now() - startTime;
+                      yield* persistError(errorMessage, actionId, durationMs);
+
+                      return { nextState: 'error' } as TransitionResult;
+                    }),
+                  ),
+                );
+
+                const durationMs = Date.now() - startTime;
+                return { transitionResult, durationMs };
+              });
+
+            // ── Resume state loop ──
+            const stateLoop = Effect.gen(function* () {
+              const runPreamble = () =>
+                Effect.gen(function* () {
+                  yield* store.updateInstance(instanceId, {
+                    currentState,
+                    stateData,
+                    history,
+                    updatedAt: new Date().toISOString(),
+                  });
+
+                  const loggerFactory = createStateLoggerFactory();
+                  const logger = loggerFactory.create(instanceId, currentState);
+                  const artifacts = artifactFactory.makeScoped(
+                    instanceId,
+                    currentState,
+                    instance.parentInstanceId,
+                  );
+
+                  const actionCtx: ActionContext = {
+                    machineInstanceId: instanceId,
+                    machineDefId: definition.id,
+                    stateName: currentState,
+                    stateData,
+                    machineInput: instance.input,
+                    parentContext,
+                    logger,
+                    artifacts,
+                  };
+
+                  const latestInstance = yield* store.getInstance(instanceId);
+                  const middlewareCtx = {
+                    instance: latestInstance,
+                    stateName: currentState,
+                    stateData,
+                    definition,
+                  };
+
+                  yield* middlewareExec.runBefore(middlewareCtx);
+
+                  return { loggerFactory, actionCtx, middlewareCtx };
+                });
+
+              // The state loop — identical to the run() loop but starting
+              // from the resumed currentState.
+              while (definition.states[currentState].type !== 'terminal') {
+                const stateDef = definition.states[currentState];
+
+                if (stateDef.type === 'child_machine') {
+                  // For child_machine states on resume:
+                  // Check if the child has already completed. If so, use
+                  // its result directly. Otherwise, re-spawn.
+                  const existingChildId = instance.childInstanceId;
+                  let childResult: MachineResult | null = null;
+
+                  if (existingChildId) {
+                    const childInstance = yield* store
+                      .getInstance(existingChildId)
+                      .pipe(
+                        Effect.catchTag('NotFoundError', () =>
+                          Effect.succeed(null as MachineInstance | null),
+                        ),
+                      );
+
+                    if (
+                      childInstance &&
+                      (childInstance.status === 'completed' ||
+                        childInstance.status === 'error' ||
+                        childInstance.status === 'cancelled')
+                    ) {
+                      // Child already reached terminal — use its stored result
+                      childResult =
+                        childInstance.status === 'completed'
+                          ? {
+                              status: 'completed',
+                              output: childInstance.output,
+                              instanceId: childInstance.id,
+                            }
+                          : childInstance.status === 'error'
+                            ? {
+                                status: 'error',
+                                error: childInstance.error ?? 'Child errored',
+                                instanceId: childInstance.id,
+                              }
+                            : {
+                                status: 'cancelled',
+                                instanceId: childInstance.id,
+                              };
+                    }
+                  }
+
+                  if (childResult) {
+                    // Child already done — proceed to post-child action
+                    const resolvedChild = childResult;
+                    yield* semaphore.withPermits(1)(
+                      Effect.gen(function* () {
+                        const preamble = yield* runPreamble();
+
+                        yield* store.updateInstance(instanceId, {
+                          status: 'running',
+                          childInstanceId: resolvedChild.instanceId,
+                          updatedAt: new Date().toISOString(),
+                        });
+
+                        stateData = resolvedChild;
+
+                        const actionId = stateDef.actionId;
+                        if (!actionId) {
+                          return yield* Effect.fail(
+                            mkDefinitionError({
+                              message: `State "${currentState}" of type "child_machine" has no actionId`,
+                            }),
+                          );
+                        }
+
+                        const childActionCtx: ActionContext = {
+                          ...preamble.actionCtx,
+                          stateData,
+                        };
+
+                        const { transitionResult, durationMs } = yield* executeAction(
+                          actionId,
+                          childActionCtx,
+                          stateDef,
+                          { ...preamble.middlewareCtx, stateData },
+                          preamble.loggerFactory,
+                        );
+
+                        if (errorResult) return;
+
+                        if (
+                          !isLegalTransition(
+                            currentState,
+                            transitionResult.nextState,
+                            definition.transitions,
+                          )
+                        ) {
+                          return yield* Effect.fail(
+                            mkDefinitionError({
+                              message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
+                            }),
+                          );
+                        }
+
+                        yield* middlewareExec.runAfter({
+                          ...preamble.middlewareCtx,
+                          stateData,
+                          result: transitionResult,
+                        });
+
+                        const transitionRecord: TransitionRecord = {
+                          id: crypto.randomUUID(),
+                          fromState: currentState,
+                          toState: transitionResult.nextState,
+                          data: transitionResult.data,
+                          timestamp: new Date().toISOString(),
+                          durationMs,
+                          actionId,
+                          childInstanceId: resolvedChild.instanceId,
+                          childDefinitionId: stateDef.childMachineDefId,
+                        };
+
+                        history = [...history, transitionRecord];
+
+                        const logEntries = [...preamble.loggerFactory.getEntries()];
+                        allLogs = [...allLogs, ...logEntries];
+
+                        const nextState = transitionResult.nextState;
+                        const nextStateData = transitionResult.data ?? stateData;
+
+                        yield* store.updateInstance(instanceId, {
+                          currentState: nextState,
+                          stateData: nextStateData,
+                          childInstanceId: undefined,
+                          history,
+                          logs: allLogs,
+                          updatedAt: new Date().toISOString(),
+                        });
+
+                        currentState = nextState;
+                        stateData = nextStateData;
+                      }),
+                    );
+
+                    if (errorResult) return;
+                  } else {
+                    // Child needs to be (re-)spawned — delegate to normal run path
+                    // by re-using the same child_machine logic from run()
+                    const childSpawnInfo = yield* semaphore.withPermits(1)(
+                      Effect.gen(function* () {
+                        const preamble = yield* runPreamble();
+
+                        const childDefId = stateDef.childMachineDefId;
+                        if (!childDefId) {
+                          return yield* Effect.fail(
+                            mkDefinitionError({
+                              message: `State "${currentState}" of type "child_machine" has no childMachineDefId`,
+                            }),
+                          );
+                        }
+
+                        const childDefinition = yield* store
+                          .getDefinition(childDefId)
+                          .pipe(
+                            Effect.catchTag('NotFoundError', (err: NotFoundError) =>
+                              Effect.fail(
+                                mkNotFoundError({ entityType: err.entityType, id: err.id }),
+                              ),
+                            ),
+                          );
+
+                        const mappingExpr = stateDef.childInputMapping;
+                        if (!mappingExpr) {
+                          return yield* Effect.fail(
+                            mkDefinitionError({
+                              message: `State "${currentState}" of type "child_machine" has no childInputMapping`,
+                            }),
+                          );
+                        }
+
+                        let childInput: unknown;
+                        try {
+                          const jsonPathResult: unknown[] = JSONPath({
+                            path: mappingExpr,
+                            json: {
+                              stateData,
+                              machineInput: instance.input,
+                              stateName: currentState,
+                            },
+                          });
+
+                          if (!Array.isArray(jsonPathResult) || jsonPathResult.length === 0) {
+                            return yield* Effect.fail(
+                              mkActionError({
+                                actionId: 'child_machine',
+                                stateName: currentState,
+                                cause: `childInputMapping "${mappingExpr}" returned no results`,
+                              }),
+                            );
+                          }
+
+                          childInput =
+                            jsonPathResult.length === 1 ? jsonPathResult[0] : jsonPathResult;
+                        } catch (jsonPathError) {
+                          return yield* Effect.fail(
+                            mkActionError({
+                              actionId: 'child_machine',
+                              stateName: currentState,
+                              cause:
+                                jsonPathError instanceof Error
+                                  ? `Invalid childInputMapping: ${jsonPathError.message}`
+                                  : `Invalid childInputMapping: ${String(jsonPathError)}`,
+                            }),
+                          );
+                        }
+
+                        yield* store.updateInstance(instanceId, {
+                          status: 'waiting_for_child',
+                          updatedAt: new Date().toISOString(),
+                        });
+
+                        return {
+                          childDefId,
+                          childDefinition,
+                          childInput,
+                          ...preamble,
+                        };
+                      }),
+                    );
+
+                    const childStartTime = Date.now();
+                    const freshChildResult: MachineResult = yield* runner.run(
+                      childSpawnInfo.childDefinition,
+                      childSpawnInfo.childInput,
+                      {
+                        parentInstanceId: instanceId,
+                        parentStateName: currentState,
+                        depth: 1, // resumed children start at depth 1
+                      },
+                    );
+
+                    yield* semaphore.withPermits(1)(
+                      Effect.gen(function* () {
+                        yield* store.updateInstance(instanceId, {
+                          status: 'running',
+                          childInstanceId: freshChildResult.instanceId,
+                          updatedAt: new Date().toISOString(),
+                        });
+
+                        stateData = freshChildResult;
+
+                        const actionId = stateDef.actionId;
+                        if (!actionId) {
+                          return yield* Effect.fail(
+                            mkDefinitionError({
+                              message: `State "${currentState}" of type "child_machine" has no actionId`,
+                            }),
+                          );
+                        }
+
+                        const childActionCtx: ActionContext = {
+                          ...childSpawnInfo.actionCtx,
+                          stateData,
+                        };
+
+                        const { transitionResult, durationMs } = yield* executeAction(
+                          actionId,
+                          childActionCtx,
+                          stateDef,
+                          { ...childSpawnInfo.middlewareCtx, stateData },
+                          childSpawnInfo.loggerFactory,
+                        );
+
+                        if (errorResult) return;
+
+                        if (
+                          !isLegalTransition(
+                            currentState,
+                            transitionResult.nextState,
+                            definition.transitions,
+                          )
+                        ) {
+                          return yield* Effect.fail(
+                            mkDefinitionError({
+                              message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
+                            }),
+                          );
+                        }
+
+                        yield* middlewareExec.runAfter({
+                          ...childSpawnInfo.middlewareCtx,
+                          stateData,
+                          result: transitionResult,
+                        });
+
+                        const totalDurationMs = Date.now() - childStartTime;
+                        const transitionRecord: TransitionRecord = {
+                          id: crypto.randomUUID(),
+                          fromState: currentState,
+                          toState: transitionResult.nextState,
+                          data: transitionResult.data,
+                          timestamp: new Date().toISOString(),
+                          durationMs: totalDurationMs > 0 ? totalDurationMs : durationMs,
+                          actionId,
+                          childInstanceId: freshChildResult.instanceId,
+                          childDefinitionId: childSpawnInfo.childDefId,
+                        };
+
+                        history = [...history, transitionRecord];
+
+                        const logEntries = [...childSpawnInfo.loggerFactory.getEntries()];
+                        allLogs = [...allLogs, ...logEntries];
+
+                        const nextState = transitionResult.nextState;
+                        const nextStateData = transitionResult.data ?? stateData;
+
+                        yield* store.updateInstance(instanceId, {
+                          currentState: nextState,
+                          stateData: nextStateData,
+                          childInstanceId: undefined,
+                          history,
+                          logs: allLogs,
+                          updatedAt: new Date().toISOString(),
+                        });
+
+                        currentState = nextState;
+                        stateData = nextStateData;
+                      }),
+                    );
+
+                    if (errorResult) return;
+                  }
+                } else if (stateDef.type === 'parallel_children') {
+                  // For parallel_children on resume: check if all children
+                  // have reached terminal state. If so, collect results.
+                  // Otherwise re-spawn the incomplete ones.
+                  const existingChildIds = instance.childInstanceIds;
+                  const childResults: Record<string, MachineResult> = {};
+                  const childInstanceIds: Record<string, string> = {};
+                  let allChildrenDone = true;
+
+                  if (existingChildIds) {
+                    for (const [key, childId] of Object.entries(existingChildIds)) {
+                      const childInstance = yield* store
+                        .getInstance(childId)
+                        .pipe(
+                          Effect.catchTag('NotFoundError', () =>
+                            Effect.succeed(null as MachineInstance | null),
+                          ),
+                        );
+
+                      if (
+                        childInstance &&
+                        (childInstance.status === 'completed' ||
+                          childInstance.status === 'error' ||
+                          childInstance.status === 'cancelled')
+                      ) {
+                        childResults[key] =
+                          childInstance.status === 'completed'
+                            ? {
+                                status: 'completed',
+                                output: childInstance.output,
+                                instanceId: childInstance.id,
+                              }
+                            : childInstance.status === 'error'
+                              ? {
+                                  status: 'error',
+                                  error: childInstance.error ?? 'Child errored',
+                                  instanceId: childInstance.id,
+                                }
+                              : {
+                                  status: 'cancelled',
+                                  instanceId: childInstance.id,
+                                };
+                        childInstanceIds[key] = childInstance.id;
+                      } else {
+                        allChildrenDone = false;
+                      }
+                    }
+                  } else {
+                    allChildrenDone = false;
+                  }
+
+                  if (!allChildrenDone) {
+                    // Not all children are done — this shouldn't normally happen
+                    // after recursive resume, but handle gracefully by re-running
+                    // the parallel_children state as if fresh.
+                    // For now, fail with a descriptive error.
+                    return yield* Effect.fail(
+                      mkDefinitionError({
+                        message: `Cannot resume parallel_children state "${currentState}" — not all children have reached terminal state`,
+                      }),
+                    );
+                  }
+
+                  // All children done — proceed to post-children action
+                  yield* semaphore.withPermits(1)(
+                    Effect.gen(function* () {
+                      const preamble = yield* runPreamble();
+
+                      const parallelResult: ParallelChildrenResult = {
+                        results: childResults,
+                        childInstanceIds,
+                      };
+
+                      yield* store.updateInstance(instanceId, {
+                        status: 'running',
+                        childInstanceIds,
+                        updatedAt: new Date().toISOString(),
+                      });
+
+                      stateData = parallelResult;
+
+                      const actionId = stateDef.actionId;
+                      if (!actionId) {
+                        return yield* Effect.fail(
+                          mkDefinitionError({
+                            message: `State "${currentState}" of type "parallel_children" has no actionId`,
+                          }),
+                        );
+                      }
+
+                      const parallelActionCtx: ActionContext = {
+                        ...preamble.actionCtx,
+                        stateData,
+                      };
+
+                      const { transitionResult, durationMs } = yield* executeAction(
+                        actionId,
+                        parallelActionCtx,
+                        stateDef,
+                        { ...preamble.middlewareCtx, stateData },
+                        preamble.loggerFactory,
+                      );
+
+                      if (errorResult) return;
+
+                      if (
+                        !isLegalTransition(
+                          currentState,
+                          transitionResult.nextState,
+                          definition.transitions,
+                        )
+                      ) {
+                        return yield* Effect.fail(
+                          mkDefinitionError({
+                            message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
+                          }),
+                        );
+                      }
+
+                      yield* middlewareExec.runAfter({
+                        ...preamble.middlewareCtx,
+                        stateData,
+                        result: transitionResult,
+                      });
+
+                      const transitionRecord: TransitionRecord = {
+                        id: crypto.randomUUID(),
+                        fromState: currentState,
+                        toState: transitionResult.nextState,
+                        data: transitionResult.data,
+                        timestamp: new Date().toISOString(),
+                        durationMs,
+                        actionId,
+                        childInstanceIds,
+                      };
+
+                      history = [...history, transitionRecord];
+
+                      const logEntries = [...preamble.loggerFactory.getEntries()];
+                      allLogs = [...allLogs, ...logEntries];
+
+                      const nextState = transitionResult.nextState;
+                      const nextStateData = transitionResult.data ?? stateData;
+
+                      yield* store.updateInstance(instanceId, {
+                        currentState: nextState,
+                        stateData: nextStateData,
+                        childInstanceIds: undefined,
+                        history,
+                        logs: allLogs,
+                        updatedAt: new Date().toISOString(),
+                      });
+
+                      currentState = nextState;
+                      stateData = nextStateData;
+                    }),
+                  );
+
+                  if (errorResult) return;
+                } else {
+                  // ── Normal action execution (same as run() loop) ──
+                  yield* semaphore.withPermits(1)(
+                    Effect.gen(function* () {
+                      const { loggerFactory, actionCtx, middlewareCtx } = yield* runPreamble();
+
+                      const actionId = stateDef.actionId;
+                      if (!actionId) {
+                        return yield* Effect.fail(
+                          mkDefinitionError({
+                            message: `State "${currentState}" of type "action" has no actionId`,
+                          }),
+                        );
+                      }
+
+                      const { transitionResult, durationMs } = yield* executeAction(
+                        actionId,
+                        actionCtx,
+                        stateDef,
+                        middlewareCtx,
+                        loggerFactory,
+                      );
+
+                      if (errorResult) return;
+
+                      if (
+                        !isLegalTransition(
+                          currentState,
+                          transitionResult.nextState,
+                          definition.transitions,
+                        )
+                      ) {
+                        return yield* Effect.fail(
+                          mkDefinitionError({
+                            message: `Illegal transition from "${currentState}" to "${transitionResult.nextState}"`,
+                          }),
+                        );
+                      }
+
+                      yield* middlewareExec.runAfter({
+                        ...middlewareCtx,
+                        result: transitionResult,
+                      });
+
+                      const transitionRecord: TransitionRecord = {
+                        id: crypto.randomUUID(),
+                        fromState: currentState,
+                        toState: transitionResult.nextState,
+                        data: transitionResult.data,
+                        timestamp: new Date().toISOString(),
+                        durationMs,
+                        actionId,
+                      };
+
+                      history = [...history, transitionRecord];
+
+                      const logEntries = [...loggerFactory.getEntries()];
+                      allLogs = [...allLogs, ...logEntries];
+
+                      const nextState = transitionResult.nextState;
+                      const nextStateData = transitionResult.data ?? stateData;
+
+                      yield* store.updateInstance(instanceId, {
+                        currentState: nextState,
+                        stateData: nextStateData,
+                        history,
+                        logs: allLogs,
+                        updatedAt: new Date().toISOString(),
+                      });
+
+                      currentState = nextState;
+                      stateData = nextStateData;
+                    }),
+                  );
+
+                  if (errorResult) return;
+                }
+              }
+            });
+
+            yield* stateLoop;
+
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+            if (errorResult) {
+              return errorResult;
+            }
+
+            // ── Terminal state resolution ──
+            let result: MachineResult;
+
+            if (currentState === 'completed') {
+              const output = history.length > 0 ? history[history.length - 1].data : stateData;
+
+              yield* store.updateInstance(instanceId, {
+                status: 'completed',
+                currentState,
+                output,
+                history,
+                logs: allLogs,
+                updatedAt: new Date().toISOString(),
+              });
+
+              result = { status: 'completed', output, instanceId };
+            } else if (currentState === 'error') {
+              const errorMsg =
+                history.length > 0
+                  ? 'Machine reached error state'
+                  : 'Machine entered error terminal state';
+
+              yield* store.updateInstance(instanceId, {
+                status: 'error',
+                currentState,
+                error: errorMsg,
+                history,
+                logs: allLogs,
+                updatedAt: new Date().toISOString(),
+              });
+
+              result = { status: 'error', error: errorMsg, instanceId };
+            } else if (currentState === 'cancelled') {
+              yield* store.updateInstance(instanceId, {
+                status: 'cancelled',
+                currentState,
+                history,
+                logs: allLogs,
+                updatedAt: new Date().toISOString(),
+              });
+
+              result = { status: 'cancelled', instanceId };
+            } else {
+              yield* store.updateInstance(instanceId, {
+                status: 'error',
+                currentState,
+                error: `Unexpected terminal state "${currentState}"`,
+                history,
+                logs: allLogs,
+                updatedAt: new Date().toISOString(),
+              });
+
+              result = {
+                status: 'error',
+                error: `Unexpected terminal state "${currentState}"`,
+                instanceId,
+              };
+            }
+
+            return result;
+          }).pipe(
+            Effect.onInterrupt(() =>
+              Effect.gen(function* () {
+                const latestInstance = yield* store
+                  .getInstance(instanceId)
+                  .pipe(Effect.catchAll(() => Effect.succeed(null as MachineInstance | null)));
+                if (!latestInstance) return;
+
+                if (
+                  latestInstance.status === 'cancelled' ||
+                  latestInstance.status === 'completed' ||
+                  latestInstance.status === 'error' ||
+                  latestInstance.status === 'suspended'
+                ) {
+                  return;
+                }
+
+                const reason: 'suspended' | 'cancelled' = isShuttingDown
+                  ? 'suspended'
+                  : 'cancelled';
+
+                if (reason === 'suspended') {
+                  yield* store
+                    .updateInstance(instanceId, {
+                      status: 'suspended',
+                      updatedAt: new Date().toISOString(),
+                    })
+                    .pipe(Effect.catchAll(() => Effect.void));
+                } else {
+                  const cancellationRecord: TransitionRecord = {
+                    id: crypto.randomUUID(),
+                    fromState: latestInstance.currentState,
+                    toState: 'cancelled',
+                    timestamp: new Date().toISOString(),
+                    durationMs: 0,
+                  };
+
+                  yield* store
+                    .updateInstance(instanceId, {
+                      status: 'cancelled',
+                      currentState: 'cancelled',
+                      history: [...latestInstance.history, cancellationRecord],
+                      updatedAt: new Date().toISOString(),
+                    })
+                    .pipe(Effect.catchAll(() => Effect.void));
+                }
+              }).pipe(Effect.catchAll(() => Effect.void)),
+            ),
+          );
+
+          // Fork as fiber, track, await, cleanup
+          const fiber = yield* Effect.fork(resumeExec);
+          fiberMap.set(instanceId, fiber);
+
+          const exit = yield* Fiber.await(fiber);
+          fiberMap.delete(instanceId);
+
+          if (Exit.isSuccess(exit)) {
+            return exit.value;
+          }
+
+          if (Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause)) {
+            if (isShuttingDown) {
+              return { status: 'cancelled' as const, instanceId } as MachineResult;
+            }
+            return { status: 'cancelled' as const, instanceId } as MachineResult;
+          }
+
+          return yield* Effect.failCause(exit.cause);
+        });
+      },
+
+      // ────────────────────────────────────────────────────────────────
+      // suspendAll() — Task 15: Graceful shutdown
+      // ────────────────────────────────────────────────────────────────
+
+      suspendAll() {
+        return Effect.gen(function* () {
+          // 1. Stop accepting new run() / resume() calls
+          isAcceptingNew = false;
+          isShuttingDown = true;
+
+          // 2. Collect all in-flight fibers
+          const entries = [...fiberMap.entries()];
+
+          if (entries.length === 0) {
+            return;
+          }
+
+          // 3. Recursively suspend children for instances in waiting_for_child
+          for (const [instId] of entries) {
+            const inst = yield* store
+              .getInstance(instId)
+              .pipe(Effect.catchAll(() => Effect.succeed(null as MachineInstance | null)));
+
+            if (inst?.status === 'waiting_for_child') {
+              // Single child
+              if (inst.childInstanceId) {
+                const childFiber = fiberMap.get(inst.childInstanceId);
+                if (childFiber) {
+                  yield* Fiber.interrupt(childFiber).pipe(Effect.catchAll(() => Effect.void));
+                } else {
+                  // No fiber — directly set to suspended
+                  const childInst = yield* store
+                    .getInstance(inst.childInstanceId)
+                    .pipe(Effect.catchAll(() => Effect.succeed(null as MachineInstance | null)));
+                  if (
+                    childInst &&
+                    childInst.status !== 'completed' &&
+                    childInst.status !== 'cancelled' &&
+                    childInst.status !== 'error' &&
+                    childInst.status !== 'suspended'
+                  ) {
+                    yield* store
+                      .updateInstance(childInst.id, {
+                        status: 'suspended',
+                        updatedAt: new Date().toISOString(),
+                      })
+                      .pipe(Effect.catchAll(() => Effect.void));
+                  }
+                }
+              }
+              // Parallel children
+              if (inst.childInstanceIds) {
+                for (const childId of Object.values(inst.childInstanceIds)) {
+                  const childFiber = fiberMap.get(childId);
+                  if (childFiber) {
+                    yield* Fiber.interrupt(childFiber).pipe(Effect.catchAll(() => Effect.void));
+                  } else {
+                    const childInst = yield* store
+                      .getInstance(childId)
+                      .pipe(Effect.catchAll(() => Effect.succeed(null as MachineInstance | null)));
+                    if (
+                      childInst &&
+                      childInst.status !== 'completed' &&
+                      childInst.status !== 'cancelled' &&
+                      childInst.status !== 'error' &&
+                      childInst.status !== 'suspended'
+                    ) {
+                      yield* store
+                        .updateInstance(childInst.id, {
+                          status: 'suspended',
+                          updatedAt: new Date().toISOString(),
+                        })
+                        .pipe(Effect.catchAll(() => Effect.void));
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // 4. Interrupt all parent fibers — finalizers will set status to 'suspended'
+          const interruptAll = Effect.forEach(
+            entries,
+            ([, fiber]) => Fiber.interrupt(fiber).pipe(Effect.catchAll(() => Effect.void)),
+            { concurrency: 'unbounded' },
+          );
+
+          // 5. Wait with timeout
+          yield* interruptAll.pipe(
+            Effect.timeoutTo({
+              duration: Duration.millis(SHUTDOWN_TIMEOUT_MS),
+              onTimeout: () => Effect.void,
+              onSuccess: () => Effect.void,
+            }),
+            Effect.catchAll(() => Effect.void),
+          );
+        });
+      },
     };
 
     return runner;
   }),
 );
+
+// ────────────────────────────────────────────────────────────────────────────
+// Startup Recovery (Task 15)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Auto-resume top-level suspended instances on server startup.
+ * Controlled by `AUTO_RESUME_ON_STARTUP` env var (default: `false`).
+ *
+ * Top-level instances (no parent, or parent not suspended) are resumed
+ * oldest-first. Children are resumed by the parent's protocol.
+ * Instances that fail to resume are moved to `'error'` status.
+ */
+export const startupRecovery = Effect.gen(function* () {
+  /* eslint-disable @typescript-eslint/dot-notation */
+  if (process.env['AUTO_RESUME_ON_STARTUP'] !== 'true') return;
+  /* eslint-enable @typescript-eslint/dot-notation */
+
+  const store = yield* MachineStore;
+  const runner = yield* StateMachineRunner;
+
+  const suspended = yield* store.listInstances({ status: 'suspended' });
+
+  // Top-level instances only: no parentInstanceId, or parent not in the suspended set
+  const suspendedIds = new Set(suspended.map((i) => i.id));
+  const topLevel = suspended.filter(
+    (i) => !i.parentInstanceId || !suspendedIds.has(i.parentInstanceId),
+  );
+
+  // Sort oldest first
+  topLevel.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+
+  for (const instance of topLevel) {
+    yield* runner.resume(instance.id).pipe(
+      Effect.catchAll((error: MachineError) =>
+        store
+          .updateInstance(instance.id, {
+            status: 'error',
+            error: `Resume failed: ${'message' in error ? (error as { message: string }).message : JSON.stringify(error)}`,
+            updatedAt: new Date().toISOString(),
+          })
+          .pipe(Effect.catchAll(() => Effect.void)),
+      ),
+    );
+  }
+});

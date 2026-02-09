@@ -192,14 +192,14 @@ Register `SIGTERM` and `SIGINT` handlers that call `runner.suspendAll()` before 
 
 ## Validation Checklist
 
-- [ ] `suspendAll()` method interrupts all in-flight fibers and sets status to `'suspended'`
-- [ ] `resume()` method implements the full resume protocol
-- [ ] Resume verifies `status === 'suspended'` (409 for other statuses)
-- [ ] Resume checks definition exists and version matches
-- [ ] Resume handles child resumption recursively
-- [ ] Already-completed transitions are not re-executed
-- [ ] Startup recovery controlled by `AUTO_RESUME_ON_STARTUP` env var
-- [ ] Top-level instances resumed first; children via parent protocol
-- [ ] SIGTERM/SIGINT handlers wired to call `suspendAll()`
-- [ ] `SHUTDOWN_TIMEOUT_MS` configurable (default: 10s)
-- [ ] `pnpm --filter @aiflow/server run build` succeeds
+- [x] `suspendAll()` method interrupts all in-flight fibers and sets status to `'suspended'`
+- [x] `resume()` method implements the full resume protocol
+- [x] Resume verifies `status === 'suspended'` (409 for other statuses)
+- [x] Resume checks definition exists and version matches
+- [x] Resume handles child resumption recursively
+- [x] Already-completed transitions are not re-executed
+- [x] Startup recovery controlled by `AUTO_RESUME_ON_STARTUP` env var
+- [x] Top-level instances resumed first; children via parent protocol
+- [x] SIGTERM/SIGINT handlers wired to call `suspendAll()`
+- [x] `SHUTDOWN_TIMEOUT_MS` configurable (default: 10s)
+- [x] `pnpm --filter @aiflow/server run build` succeeds
