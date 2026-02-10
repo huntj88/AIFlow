@@ -38,3 +38,7 @@ flow after planning to create questions to ask user for further plan refinement
 "why are there remaining items in the task checklist?"
 
 ## "update plan to remove the the items from the checklist that aren't achievable because the plan changed. Update unfished task plans with new behavior if relevant"
+
+"can you make a plan to validate as many of the behaviors as you can by making network requests to server? e2e tests for server only."
+
+AGENTS markdown file could contain: "For tests that expect the server to be running, prompt the user to start if not already running."
