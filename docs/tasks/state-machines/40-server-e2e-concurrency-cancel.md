@@ -214,12 +214,12 @@ const LONG_DELAY_INPUT = { delayMs: 30_000, nextState: 'completed' };
 
 ## Validation Checklist
 
-- [ ] All 3 §10.1 bounded concurrency behaviors verified
-- [ ] All 4 §10.2 no-deadlock behaviors verified
-- [ ] All 4 §11.1 cancel-running behaviors verified (event deferred)
-- [ ] All 3 §11.2 cancel-with-child behaviors verified (event deferred)
-- [ ] All 3 §11.3 cancel-parallel behaviors verified (event deferred)
-- [ ] Both §11.4 cancel-suspended behaviors verified
-- [ ] All 3 §11.5 conflict behaviors verified
-- [ ] §11.6 history behavior verified
-- [ ] Test file: `server/src/__e2e__/06-concurrency-cancel.e2e.test.ts`
+- [x] All 3 §10.1 bounded concurrency behaviors verified
+- [x] All 4 §10.2 no-deadlock behaviors verified
+- [x] All 4 §11.1 cancel-running behaviors verified (event deferred)
+- [x] All 3 §11.2 cancel-with-child behaviors verified (event deferred)
+- [x] All 3 §11.3 cancel-parallel behaviors verified (event deferred)
+- [x] Both §11.4 cancel-suspended behaviors verified
+- [x] All 3 §11.5 conflict behaviors verified
+- [x] §11.6 history behavior verified
+- [x] Test file: `server/src/__e2e__/06-concurrency-cancel.e2e.test.ts`
