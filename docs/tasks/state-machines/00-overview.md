@@ -7,14 +7,15 @@
 
 ## Phase Summary
 
-| Phase | Tasks     | Description                                            |
-| ----- | --------- | ------------------------------------------------------ |
-| 1     | 01 – 17   | Core Engine (Server) — types, store, registry, runner  |
-| 2     | 18 – 22.1 | REST API — CRUD, instance management, artifacts        |
-| 3     | 23        | WebSocket — live event streaming                       |
-| 4     | 24 – 29   | Client Viewer — API client, dashboard, instance viewer |
-| 5     | 30        | Client Editor — visual definition editor               |
-| 6     | 31 – 33   | Polish — observability, integration, E2E tests         |
+| Phase | Tasks     | Description                                             |
+| ----- | --------- | ------------------------------------------------------- |
+| 1     | 01 – 17   | Core Engine (Server) — types, store, registry, runner   |
+| 2     | 18 – 22.1 | REST API — CRUD, instance management, artifacts         |
+| 3     | 23        | WebSocket — live event streaming                        |
+| 4     | 24 – 29   | Client Viewer — API client, dashboard, instance viewer  |
+| 5     | 30        | Client Editor — visual definition editor                |
+| 6     | 31 – 33   | Polish — observability, integration, E2E tests          |
+| 7     | 34 – 45   | Server E2E — HTTP/WS validation of all server behaviors |
 
 ---
 
@@ -64,36 +65,50 @@
 
  30 ──→ 31 Observability
     ──→ 32 Integration & Polish
-    ──→ 33 E2E Tests
+    ──→ 33 E2E Tests (Playwright / Client)
+
+ 22.1 + 23
+  └──→ 34 Server E2E Infrastructure
+        ├──→ 35 Server E2E — Definitions & Validation (§1, §2)
+        ├──→ 36 Server E2E — Actions (§3)
+        ├──→ 37 Server E2E — Linear Execution & Branching (§4, §5)
+        ├──→ 38 Server E2E — Errors & Timeouts (§6, §7)
+        ├──→ 39 Server E2E — Child & Parallel Machines (§8, §9)
+        ├──→ 40 Server E2E — Concurrency & Cancellation (§10, §11)
+        ├──→ 41 Server E2E — Suspend & Resume (§12, §13)
+        ├──→ 42 Server E2E — Middleware (§14)
+        ├──→ 43 Server E2E — Artifacts (§15)
+        ├──→ 44 Server E2E — WebSocket (§16)
+        └──→ 45 Server E2E — Edge Cases (§21)
 ```
 
 ---
 
 ## Behavior Spec Traceability
 
-| Behavior Spec Section                | Implementing Task(s)        |
-| ------------------------------------ | --------------------------- |
-| §1 Definition CRUD                   | 04, 18, 22                  |
-| §2 Definition Validation             | 03, 17, 18                  |
-| §3 Action Registry                   | 05, 19                      |
-| §4 Linear Flow                       | 09, 17                      |
-| §5 Branching                         | 05 (conditional-branch), 09 |
-| §6 Error Handling                    | 10, 17                      |
-| §7 Timeouts & Safety Limits          | 10, 17                      |
-| §8 Single Child Machine              | 11, 17                      |
-| §9 Parallel Children                 | 12, 17                      |
-| §10 Concurrency & Semaphore          | 13, 17                      |
-| §11 Cancellation                     | 14, 17, 20, 22.1            |
-| §12 Resumability & Graceful Shutdown | 15, 17, 20                  |
-| §13 Persistence Checkpoints          | 09, 15, 17                  |
-| §14 Middleware                       | 07, 17                      |
-| §15 Artifacts                        | 08, 17, 20, 22.1            |
-| §16 WebSocket — Live Updates         | 23, 25                      |
-| §17 Dashboard                        | 27                          |
-| §18 Instance Viewer                  | 28                          |
-| §19 Definition Editor                | 30                          |
-| §20 E2E Workflows                    | 33                          |
-| §21 Negative / Edge Cases            | 17, 22, 33                  |
+| Behavior Spec Section                | Implementing Task(s)        | Server E2E Task |
+| ------------------------------------ | --------------------------- | --------------- |
+| §1 Definition CRUD                   | 04, 18, 22                  | 35              |
+| §2 Definition Validation             | 03, 17, 18                  | 35              |
+| §3 Action Registry                   | 05, 19                      | 36              |
+| §4 Linear Flow                       | 09, 17                      | 37              |
+| §5 Branching                         | 05 (conditional-branch), 09 | 37              |
+| §6 Error Handling                    | 10, 17                      | 38              |
+| §7 Timeouts & Safety Limits          | 10, 17                      | 38              |
+| §8 Single Child Machine              | 11, 17                      | 39              |
+| §9 Parallel Children                 | 12, 17                      | 39              |
+| §10 Concurrency & Semaphore          | 13, 17                      | 40              |
+| §11 Cancellation                     | 14, 17, 20, 22.1            | 40              |
+| §12 Resumability & Graceful Shutdown | 15, 17, 20                  | 41              |
+| §13 Persistence Checkpoints          | 09, 15, 17                  | 41              |
+| §14 Middleware                       | 07, 17                      | 42              |
+| §15 Artifacts                        | 08, 17, 20, 22.1            | 43              |
+| §16 WebSocket — Live Updates         | 23, 25                      | 44              |
+| §17 Dashboard                        | 27                          | — (UI only)     |
+| §18 Instance Viewer                  | 28                          | — (UI only)     |
+| §19 Definition Editor                | 30                          | — (UI only)     |
+| §20 E2E Workflows                    | 33                          | — (UI only)     |
+| §21 Negative / Edge Cases            | 17, 22, 33                  | 45              |
 
 ---
 
