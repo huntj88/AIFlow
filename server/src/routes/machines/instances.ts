@@ -16,6 +16,7 @@
  */
 
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from '@effect/platform';
+import AjvModule from 'ajv';
 import { Effect, Either, Option } from 'effect';
 
 import { ArtifactStoreFactory } from '@/machines/artifacts/index.js';
@@ -25,6 +26,15 @@ import { MachineStore } from '@/machines/store/index.js';
 import { StateMachineRunner } from '@/machines/StateMachineRunner.js';
 import type { InstanceFilter } from '@/machines/types.js';
 import { mkDefinitionError, mkNotFoundError, mkValidationError } from '@/machines/types.js';
+
+// ── Ajv setup (same pattern as StateMachineRunner) ──────────────────────────
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
+const Ajv: typeof AjvModule.default =
+  typeof (AjvModule as any).default === 'function'
+    ? (AjvModule as any).default
+    : (AjvModule as any);
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
+const ajv = new Ajv({ allErrors: true });
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -78,6 +88,20 @@ export const InstancesRouter = HttpRouter.empty.pipe(
       // Load definition — 404 if not found
       const store = yield* MachineStore;
       const definition = yield* store.getDefinition(body.definitionId);
+
+      // Validate input against definition.inputSchema (§4.3)
+      if (Object.keys(definition.inputSchema).length > 0) {
+        const validate = ajv.compile(definition.inputSchema as Record<string, unknown>);
+        if (!validate(body.input)) {
+          const details =
+            validate.errors?.map((e) => `${e.instancePath || '/'}: ${e.message ?? 'unknown'}`) ??
+            [];
+          return yield* HttpServerResponse.json(
+            { message: `Input validation failed: ${details.join('; ')}`, details },
+            { status: 400 },
+          );
+        }
+      }
 
       // Fork the run so the HTTP response returns immediately
       const runner = yield* StateMachineRunner;

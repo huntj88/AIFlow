@@ -205,10 +205,10 @@ const STRICT_SCHEMA_DEF = {
 
 ## Validation Checklist
 
-- [ ] All 5 §4.1 behaviors verified
-- [ ] All 4 §4.2 data flow behaviors verified
-- [ ] All 3 §4.3 input validation behaviors verified
-- [ ] All 4 §4.4 transition history behaviors verified
-- [ ] All 5 §4.5 log behaviors verified
-- [ ] All 4 §5 branching behaviors verified
-- [ ] Test file: `server/src/__e2e__/03-linear-execution.e2e.test.ts`
+- [x] All 5 §4.1 behaviors verified
+- [x] All 4 §4.2 data flow behaviors verified
+- [x] All 3 §4.3 input validation behaviors verified
+- [x] All 4 §4.4 transition history behaviors verified
+- [x] All 5 §4.5 log behaviors verified
+- [x] All 4 §5 branching behaviors verified
+- [x] Test file: `server/src/__e2e__/03-linear-execution.e2e.test.ts`
