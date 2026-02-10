@@ -98,8 +98,8 @@ describe('§3 — Action Registry', () => {
 
 ## Validation Checklist
 
-- [ ] All 4 §3 behaviors have passing tests
-- [ ] Built-in action count matches expected (5)
-- [ ] Each built-in action retrievable by ID
-- [ ] 404 for non-existent action verified
-- [ ] Test file: `server/src/__e2e__/02-actions.e2e.test.ts`
+- [x] All 4 §3 behaviors have passing tests
+- [x] Built-in action count matches expected (5)
+- [x] Each built-in action retrievable by ID
+- [x] 404 for non-existent action verified
+- [x] Test file: `server/src/__e2e__/02-actions.e2e.test.ts`
