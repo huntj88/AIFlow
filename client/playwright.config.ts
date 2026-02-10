@@ -17,6 +17,12 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    {
+      name: 'machines',
+      testDir: './e2e/machines',
+      use: { ...devices['Desktop Chrome'] },
+      timeout: 60_000,
+    },
   ],
   webServer: [
     {

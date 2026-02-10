@@ -344,15 +344,15 @@ test('concurrent instances on dashboard', async ({ page }) => {
 
 ## Validation Checklist
 
-- [ ] Playwright test infrastructure set up (webServer config, helpers, fixtures)
-- [ ] Suite 1: Create → Run → Complete passes
-- [ ] Suite 2: Cancel flow passes
-- [ ] Suite 3: Parent-child navigation passes
-- [ ] Suite 4: Parallel children passes
-- [ ] Suite 5: Suspend → Resume passes
-- [ ] Suite 6: Artifacts passes
-- [ ] Suite 7: Definition editor round-trip passes
-- [ ] Suite 8: Edge cases pass
+- [x] Playwright test infrastructure set up (webServer config, helpers, fixtures)
+- [x] Suite 1: Create → Run → Complete passes (4 tests)
+- [x] Suite 2: Cancel flow passes (3 tests)
+- [x] Suite 3: Parent-child navigation passes (3 tests)
+- [x] Suite 4: Parallel children passes (2 tests)
+- [x] Suite 5: Suspend → Resume passes (3 tests)
+- [x] Suite 6: Artifacts passes (3 tests)
+- [x] Suite 7: Definition editor round-trip passes (5 tests)
+- [x] Suite 8: Edge cases pass (10 tests)
 - [ ] All tests pass in CI: `pnpm --filter @aiflow/client run test:e2e`
 - [ ] Tests are not flaky (run 3x in CI without failure)
-- [ ] Test execution time is reasonable (< 5 minutes total)
+- [x] Test execution time is reasonable (< 5 minutes total) — 35 tests in ~11s
