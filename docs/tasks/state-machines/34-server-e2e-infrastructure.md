@@ -296,9 +296,9 @@ This task provides shared infrastructure for all server E2E validation tasks (35
 
 ## Validation Checklist
 
-- [ ] `server/src/__e2e__/helpers/test-handler.ts` creates handler with full middleware stack
-- [ ] `server/src/__e2e__/helpers/api-helpers.ts` provides typed HTTP helpers for all endpoints
-- [ ] `server/src/__e2e__/helpers/fixtures.ts` provides all definition/input fixtures
-- [ ] `server/vitest.e2e.config.ts` runs only `__e2e__` files with extended timeouts
-- [ ] `pnpm --filter @aiflow/server run test:e2e` executes successfully
-- [ ] Tests are isolated — each describe block gets a fresh handler (no shared mutable state)
+- [x] `server/src/__e2e__/helpers/test-handler.ts` creates handler with full middleware stack
+- [x] `server/src/__e2e__/helpers/api-helpers.ts` provides typed HTTP helpers for all endpoints
+- [x] `server/src/__e2e__/helpers/fixtures.ts` provides all definition/input fixtures
+- [x] `server/vitest.e2e.config.ts` runs only `__e2e__` files with extended timeouts
+- [x] `pnpm --filter @aiflow/server run test:e2e` executes successfully
+- [x] Tests are isolated — each describe block gets a fresh handler (no shared mutable state)

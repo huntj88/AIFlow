@@ -246,8 +246,8 @@ const MULTI_INVALID = {
 
 ## Validation Checklist
 
-- [ ] All 14 §1 CRUD behaviors have passing tests
-- [ ] All 14 §2 validation rules have dedicated tests
-- [ ] §2.4 error response format is verified
-- [ ] Each test is independent (fresh handler per suite)
-- [ ] Test file: `server/src/__e2e__/01-definitions.e2e.test.ts`
+- [x] All 14 §1 CRUD behaviors have passing tests
+- [x] All 14 §2 validation rules have dedicated tests
+- [x] §2.4 error response format is verified
+- [x] Each test is independent (fresh handler per suite)
+- [x] Test file: `server/src/__e2e__/01-definitions.e2e.test.ts`
