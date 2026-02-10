@@ -255,11 +255,11 @@ registry.register(
 
 ## Validation Checklist
 
-- [ ] All 4 §6.1 action failure behaviors verified (event deferred)
-- [ ] Both §6.2 illegal transition behaviors verified
-- [ ] Both §6.3 data validation behaviors verified
-- [ ] Both §6.4 middleware error behaviors verified
-- [ ] Both §7.1 action timeout behaviors verified
-- [ ] §7.2 machine-level timeout verified (or documented as unit-only)
-- [ ] All 3 §7.3 max depth behaviors verified
-- [ ] Test file: `server/src/__e2e__/04-errors-timeouts.e2e.test.ts`
+- [x] All 4 §6.1 action failure behaviors verified (event deferred)
+- [x] Both §6.2 illegal transition behaviors verified
+- [x] Both §6.3 data validation behaviors verified
+- [x] Both §6.4 middleware error behaviors verified
+- [x] Both §7.1 action timeout behaviors verified
+- [x] §7.2 machine-level timeout verified (or documented as unit-only)
+- [x] All 3 §7.3 max depth behaviors verified
+- [x] Test file: `server/src/__e2e__/04-errors-timeouts.e2e.test.ts`

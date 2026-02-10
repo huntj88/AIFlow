@@ -1780,7 +1780,8 @@ export const StateMachineRunnerLive = Layer.effect(
                 )
               : stateLoop;
 
-            // Execute the state loop, handling machine-level timeout
+            // Execute the state loop, handling machine-level timeout and
+            // other unhandled errors (DefinitionError, ValidationError, etc.)
             yield* timedStateLoop.pipe(
               Effect.catchAll((err: MachineError) =>
                 Effect.gen(function* () {
@@ -1799,7 +1800,37 @@ export const StateMachineRunnerLive = Layer.effect(
                     yield* persistError(errorMessage, undefined, timeoutVal);
                     return;
                   }
-                  return yield* Effect.fail(err);
+
+                  // Catch all other MachineErrors (DefinitionError from illegal
+                  // transitions / depth limits, ValidationError from middleware
+                  // dataSchema checks, etc.) and persist as error terminal state.
+                  const errorMessage =
+                    'message' in err
+                      ? (err as { message: string }).message
+                      : 'cause' in err
+                        ? String((err as { cause: unknown }).cause)
+                        : `Machine failed: ${err._tag}`;
+
+                  yield* middlewareExec
+                    .runOnError({
+                      instance: yield* store.getInstance(instanceId).pipe(
+                        Effect.catchAll(() =>
+                          Effect.succeed({
+                            id: instanceId,
+                            currentState: ls.currentState,
+                            stateData: ls.stateData,
+                          } as MachineInstance),
+                        ),
+                      ),
+                      stateName: ls.currentState,
+                      stateData: ls.stateData,
+                      definition,
+                      error: err,
+                    })
+                    .pipe(Effect.catchAll(() => Effect.void));
+
+                  yield* persistError(errorMessage, undefined, 0);
+                  return;
                 }),
               ),
             );

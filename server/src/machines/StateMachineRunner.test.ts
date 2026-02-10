@@ -692,14 +692,22 @@ describe('StateMachineRunner — Error Handling (§6)', () => {
     await Effect.gen(function* () {
       const runner = yield* StateMachineRunner;
       const registry = yield* ActionRegistry;
+      const store = yield* MachineStore;
 
       // Action returns a state that is not allowed by transitions
       yield* registerAction(registry, 'test-action', 'nonexistent-state');
 
       const def = makeSimpleDef();
-      const exit = yield* runner.run(def, {}).pipe(Effect.exit);
+      const result = yield* runner.run(def, {});
 
-      expect(exit._tag).toBe('Failure');
+      // Illegal transitions are now caught and persisted as error state
+      expect(result.status).toBe('error');
+      if (result.status === 'error') {
+        expect(result.error).toContain('Illegal transition');
+      }
+      const instance = yield* store.getInstance(result.instanceId);
+      expect(instance.status).toBe('error');
+      expect(instance.currentState).toBe('error');
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
 
@@ -1028,11 +1036,12 @@ describe('StateMachineRunner — Input Validation (§4.3)', () => {
         },
       };
 
-      const exit = yield* runner.run(parentDef, {}).pipe(Effect.either);
+      const result = yield* runner.run(parentDef, {});
 
-      expect(exit._tag).toBe('Left');
-      if (exit._tag === 'Left') {
-        expect(exit.left._tag).toBe('NotFoundError');
+      // NotFoundError from child spawn is now caught and persisted as error state
+      expect(result.status).toBe('error');
+      if (result.status === 'error') {
+        expect(result.error).toBeDefined();
       }
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
