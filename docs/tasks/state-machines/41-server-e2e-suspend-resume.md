@@ -226,12 +226,12 @@ This is documented as a manual verification or CI script, not a vitest test.
 
 ## Validation Checklist
 
-- [ ] All 6 §12.2 resume happy path behaviors verified (event deferred)
-- [ ] All 3 §12.3 resume-with-child behaviors verified
-- [ ] All 3 §12.4 resume-with-parallel behaviors verified
-- [ ] All 3 §12.5 resume rejection behaviors verified
-- [ ] §12.1 graceful shutdown documented (process-level test)
-- [ ] §12.6 startup recovery documented (process-level test)
-- [ ] §13 checkpoints 1, 3, 4, 5 verified via API polling
-- [ ] §13 checkpoint 2 documented as verified by suspend/resume correctness
-- [ ] Test file: `server/src/__e2e__/07-suspend-resume.e2e.test.ts`
+- [x] All 6 §12.2 resume happy path behaviors verified (event deferred)
+- [x] All 3 §12.3 resume-with-child behaviors verified
+- [x] All 3 §12.4 resume-with-parallel behaviors verified
+- [x] All 3 §12.5 resume rejection behaviors verified
+- [x] §12.1 graceful shutdown documented (process-level test)
+- [x] §12.6 startup recovery documented (process-level test)
+- [x] §13 checkpoints 1, 3, 4, 5 verified via API polling
+- [x] §13 checkpoint 2 documented as verified by suspend/resume correctness
+- [x] Test file: `server/src/__e2e__/07-suspend-resume.e2e.test.ts`
