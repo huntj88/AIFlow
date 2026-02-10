@@ -184,7 +184,7 @@ middleware doesn't crash when OTel is disabled.
 
 ## Validation Checklist
 
-- [ ] All 4 §14.1 execution order behaviors verified
-- [ ] All 4 §14.2 cross-cutting concern behaviors verified (OTel = smoke test)
-- [ ] All 3 §14.3 child middleware behaviors verified
-- [ ] Test file: `server/src/__e2e__/08-middleware.e2e.test.ts`
+- [x] All 4 §14.1 execution order behaviors verified
+- [x] All 4 §14.2 cross-cutting concern behaviors verified (OTel = smoke test)
+- [x] All 3 §14.3 child middleware behaviors verified
+- [x] Test file: `server/src/__e2e__/08-middleware.e2e.test.ts`
