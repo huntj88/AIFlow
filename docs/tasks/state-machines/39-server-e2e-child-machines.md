@@ -290,13 +290,13 @@ registry.register(
 
 ## Validation Checklist
 
-- [ ] All 7 §8.1 spawning behaviors verified
-- [ ] All 3 §8.2 input mapping behaviors verified
-- [ ] Both §8.3 child failure behaviors verified
-- [ ] All 3 §8.4 context behaviors verified
-- [ ] All 6 §9.1 all-succeed behaviors verified
-- [ ] All 4 §9.2 all_or_interrupt behaviors verified
-- [ ] All 3 §9.3 all_settled behaviors verified
-- [ ] Both §9.4 input mapping behaviors verified
-- [ ] Both §9.5 key uniqueness behaviors verified
-- [ ] Test file: `server/src/__e2e__/05-child-machines.e2e.test.ts`
+- [x] All 7 §8.1 spawning behaviors verified
+- [x] All 3 §8.2 input mapping behaviors verified
+- [x] Both §8.3 child failure behaviors verified
+- [x] All 3 §8.4 context behaviors verified
+- [x] All 6 §9.1 all-succeed behaviors verified
+- [x] All 4 §9.2 all_or_interrupt behaviors verified
+- [x] All 3 §9.3 all_settled behaviors verified
+- [x] Both §9.4 input mapping behaviors verified
+- [x] Both §9.5 key uniqueness behaviors verified
+- [x] Test file: `server/src/__e2e__/05-child-machines.e2e.test.ts`
