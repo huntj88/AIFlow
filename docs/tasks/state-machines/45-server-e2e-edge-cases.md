@@ -256,9 +256,9 @@ ws.send(JSON.stringify({ type: 'subscribe', instanceId: 'test' }));
 
 ## Validation Checklist
 
-- [ ] All 5 §21.1 API error response behaviors verified
-- [ ] All 3 §21.2 concurrent operation behaviors verified
-- [ ] All 3 §21.3 definition mutation behaviors verified
-- [ ] All 3 §21.4 large-scale behaviors verified
-- [ ] All 4 §21.5 WebSocket edge case behaviors verified (requires real server)
-- [ ] Test file: `server/src/__e2e__/11-edge-cases.e2e.test.ts`
+- [x] All 5 §21.1 API error response behaviors verified
+- [x] All 3 §21.2 concurrent operation behaviors verified
+- [x] All 3 §21.3 definition mutation behaviors verified
+- [x] All 3 §21.4 large-scale behaviors verified
+- [x] All 4 §21.5 WebSocket edge case behaviors verified (requires real server)
+- [x] Test file: `server/src/__e2e__/11-edge-cases.e2e.test.ts`
