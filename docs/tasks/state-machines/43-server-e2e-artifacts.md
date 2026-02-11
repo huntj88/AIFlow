@@ -228,9 +228,9 @@ const makeArtifactParentDef = (childDefId: string) => ({
 
 ## Validation Checklist
 
-- [ ] All 4 §15.1 write/read behaviors verified
-- [ ] All 3 §15.2 sandbox behaviors verified
-- [ ] All 3 §15.3 parent-child access behaviors verified
-- [ ] All 4 §15.4 REST API behaviors verified
-- [ ] All 3 §15.5 directory structure behaviors verified
-- [ ] Test file: `server/src/__e2e__/09-artifacts.e2e.test.ts`
+- [x] All 4 §15.1 write/read behaviors verified
+- [x] All 3 §15.2 sandbox behaviors verified
+- [x] All 3 §15.3 parent-child access behaviors verified
+- [x] All 4 §15.4 REST API behaviors verified
+- [x] All 3 §15.5 directory structure behaviors verified
+- [x] Test file: `server/src/__e2e__/09-artifacts.e2e.test.ts`

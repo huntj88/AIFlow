@@ -219,9 +219,9 @@ For unsubscribe tests:
 
 ## Validation Checklist
 
-- [ ] All 5 §16.1 connection/subscription behaviors verified
-- [ ] All 10 §16.2 event types verified
-- [ ] Both §16.3 event ordering behaviors verified
-- [ ] WS test server starts/stops cleanly in beforeAll/afterAll
-- [ ] No event leaks (unsubscribe prevents delivery)
-- [ ] Test file: `server/src/__e2e__/10-websocket.e2e.test.ts`
+- [x] All 5 §16.1 connection/subscription behaviors verified
+- [x] All 10 §16.2 event types verified
+- [x] Both §16.3 event ordering behaviors verified
+- [x] WS test server starts/stops cleanly in beforeAll/afterAll
+- [x] No event leaks (unsubscribe prevents delivery)
+- [x] Test file: `server/src/__e2e__/10-websocket.e2e.test.ts`

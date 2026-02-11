@@ -20,6 +20,7 @@ import { MachineEventPubSubLive } from '@/machines/EventPubSub.js';
 import { ExecutionSemaphoreLive } from '@/machines/ExecutionSemaphore.js';
 import { makeMiddlewareExecutorLayer } from '@/machines/middleware/MiddlewareExecutor.js';
 import { defaultMiddleware } from '@/machines/middleware/index.js';
+import type { TransitionMiddleware } from '@/machines/types.js';
 import { StateMachineRunnerLive } from '@/machines/StateMachineRunner.js';
 import { InMemoryMachineStoreLive } from '@/machines/store/index.js';
 import { MachineRouter } from '@/routes/machines/index.js';
@@ -30,11 +31,12 @@ import { MachineRouter } from '@/routes/machines/index.js';
 
 /**
  * Build the full E2E test layer with all middleware enabled.
+ * Optionally accepts a custom middleware stack to override the default.
  */
-export function makeE2ETestLayer() {
+export function makeE2ETestLayer(middleware?: readonly TransitionMiddleware[]) {
   const StoreLive = InMemoryMachineStoreLive;
   const RegistryLive = ActionRegistryLive;
-  const MiddlewareLive = makeMiddlewareExecutorLayer(defaultMiddleware);
+  const MiddlewareLive = makeMiddlewareExecutorLayer(middleware ?? defaultMiddleware);
   const SemaphoreLive = ExecutionSemaphoreLive;
   const PubSubLive = MachineEventPubSubLive;
   const ArtifactLive = FsArtifactStoreLive.pipe(Layer.provide(StoreLive));
@@ -73,8 +75,9 @@ export function makeE2ETestLayer() {
  */
 export async function makeTestHandler(opts?: {
   registerActions?: (registry: ActionRegistry) => Effect.Effect<void>;
+  middleware?: readonly TransitionMiddleware[];
 }) {
-  const TestLayer = makeE2ETestLayer();
+  const TestLayer = makeE2ETestLayer(opts?.middleware);
   const managedRuntime = ManagedRuntime.make(TestLayer);
   const runtime = await managedRuntime.runtime();
 
