@@ -592,17 +592,15 @@
 - [ ] Parallel children are grouped under their parent state
 - [ ] The tree updates live when children are spawned or complete
 
-### 19.5 Artifacts Browser
+### 19.5 Artifacts Path Display
 
-> The artifacts panel uses the `artifactsPath` from the instance payload to provide a
-> filesystem-based view of artifacts. There is no artifacts API — the client accesses
-> the artifacts workspace directory.
+> The artifacts panel displays the `artifactsPath` from the instance payload as a
+> read-only filesystem path. There is no artifacts API or file browser — the user
+> accesses the artifacts workspace directory on their own filesystem.
 
-- [ ] An artifacts panel shows a file-explorer-style tree of files in the artifacts workspace
-- [ ] The tree displays files from the family artifacts root directory (`artifactsPath`)
-- [ ] Clicking an artifact triggers a download (or preview for text/image)
-- [ ] The tree can be expanded/collapsed per subdirectory level
-- [ ] The `children/<childInstanceId>/` convention is rendered as a hierarchical tree when present
+- [ ] The instance viewer displays the `artifactsPath` as a read-only text string
+- [ ] The path is selectable / copyable by the user
+- [ ] The `workspaceRoot` is also displayed alongside the artifacts path
 
 ---
 
@@ -705,7 +703,7 @@
 
 - [ ] User launches a machine whose action runs a CLI command via `ctx.cli.exec()`
 - [ ] The action writes output to the artifacts workspace via `ctx.artifactsWorkspace.resolve('output.json')`
-- [ ] The artifacts browser in the instance viewer shows the file
+- [ ] The instance viewer displays the `artifactsPath` where the file was written
 - [ ] For a parent–child machine, the child can read files written by the parent via the shared artifacts workspace
 - [ ] The parent can read files written by the child after the child completes
 

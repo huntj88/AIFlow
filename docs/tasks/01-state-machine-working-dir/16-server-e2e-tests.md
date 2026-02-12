@@ -167,9 +167,13 @@ describe('Child Workspace Inheritance (§8.5)', () => {
 });
 ```
 
-### 6. Replace artifact E2E tests
+### 6. Delete artifact E2E tests entirely
 
-Delete `server/src/__e2e__/artifacts.e2e.test.ts` and replace with workspace tests:
+> **Decision 9:** Delete `server/src/__e2e__/artifacts.e2e.test.ts` entirely.
+> Do NOT port or adapt the old tests. Write fresh `workspace.e2e.test.ts` tests
+> from scratch (steps 3–5 above already cover the new workspace behavior).
+
+Delete the file and add tests to verify the old endpoints are gone:
 
 ```typescript
 describe('Removed Artifact Endpoints (§15.6)', () => {

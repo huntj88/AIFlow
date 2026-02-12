@@ -87,21 +87,10 @@ export {
 
 ### 3. Artifacts directory creation
 
-Add a utility to ensure the artifacts workspace directory exists on disk:
+Add an Effect-based utility to ensure the artifacts workspace directory exists on disk:
 
-```typescript
-import * as fs from 'node:fs/promises';
-
-/**
- * Ensure the artifacts workspace directory exists.
- * Called once when a root instance is created.
- */
-export async function ensureArtifactsDir(artifactsPath: string): Promise<void> {
-  await fs.mkdir(artifactsPath, { recursive: true });
-}
-```
-
-Or as an Effect:
+> **Decision 2:** Use an Effect wrapper so it composes naturally into the runner's
+> Effect pipeline without manual wrapping at the call site.
 
 ```typescript
 import { Effect } from 'effect';

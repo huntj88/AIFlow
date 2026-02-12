@@ -10,7 +10,8 @@
 
 Update `MachineInstancePage.tsx` and related components to use the new data model.
 Replace the old artifact viewer integration, remove artifact store references,
-display the new workspace fields, and integrate the new `ArtifactsBrowser` component.
+display the new workspace fields, and integrate the `ArtifactsPathDisplay` component
+(simple read-only path display — see Decision 5).
 
 ---
 
@@ -42,7 +43,7 @@ case 'artifact_created':
   break;
 ```
 
-### 3. Replace `ArtifactViewer` with `ArtifactsBrowser`
+### 3. Replace `ArtifactViewer` with `ArtifactsPathDisplay`
 
 ```typescript
 // BEFORE:
@@ -56,11 +57,10 @@ import { ArtifactViewer } from '@/components/machines/ArtifactViewer';
 />
 
 // AFTER:
-import { ArtifactsBrowser } from '@/components/machines/ArtifactsBrowser';
+import { ArtifactsPathDisplay } from '@/components/machines/ArtifactsPathDisplay';
 
 // In the artifacts tab:
-<ArtifactsBrowser
-  instanceId={instanceId}
+<ArtifactsPathDisplay
   artifactsPath={instance.artifactsPath}
 />
 ```
@@ -117,10 +117,11 @@ it to the `startInstance` call. Add proper form validation:
 
 ### 8. Delete `ArtifactViewer.tsx`
 
-After the new `ArtifactsBrowser` is integrated, delete the old component:
+Already handled by Task 13. Verify the old component is gone:
 
 ```
-rm client/src/components/machines/ArtifactViewer.tsx
+# Should already be deleted by Task 13
+rm -f client/src/components/machines/ArtifactViewer.tsx
 ```
 
 ### 9. Update translations
@@ -139,7 +140,7 @@ Update `client/src/locales/en/` translation files:
 - **§19.1** — Instance page renders correctly with new data model
 - **§19.2** — Transition history unaffected (no artifact references)
 - **§19.4** — Child machine tree unaffected (no artifact references)
-- **§19.5** — Artifacts browser integrated into instance page
+- **§19.5** — Artifacts path displayed in instance page
 
 ---
 
@@ -147,7 +148,7 @@ Update `client/src/locales/en/` translation files:
 
 - [ ] `MachineInstancePage` compiles without artifact-related imports
 - [ ] `ArtifactViewer.tsx` deleted
-- [ ] `ArtifactsBrowser` integrated in artifacts tab
+- [ ] `ArtifactsPathDisplay` integrated in artifacts tab (shows path string)
 - [ ] Instance page displays `workspaceRoot`, `artifactsPath`, `familyRootInstanceId`
 - [ ] No references to `instance.artifacts` anywhere in client code
 - [ ] No references to `ArtifactRecord` or `ArtifactTree` in client code

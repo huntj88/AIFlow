@@ -90,8 +90,11 @@ handle this automatically, but verify no runtime code checks for it.
 
 ### 7. Update dashboard launch form
 
-If the dashboard has a "Quick Start" or "Launch" form that calls `startInstance`,
-add a `workspaceRoot` input field:
+Add a `workspaceRoot` free-text input field to the dashboard's "Quick Start"
+or "Launch" form. Keep it simple — no recent history or pre-filled defaults.
+
+> **Decision 8:** Plain free-text input with client-side validation (must
+> start with `/`). Keep client changes minimal.
 
 ```tsx
 // In the launch form component:

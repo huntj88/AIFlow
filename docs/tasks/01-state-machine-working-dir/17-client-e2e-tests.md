@@ -82,18 +82,44 @@ export async function createInstanceViaApi(
 }
 ```
 
-### 3. Create test workspace directory
+### 3. Create test workspace directory — global setup/teardown
 
-Add a global setup that ensures the test workspace directory exists:
+> **Decision 10:** Use Playwright global setup/teardown to manage the test
+> workspace directory lifecycle.
+
+Add a global setup file that creates the directory and a global teardown that
+cleans it up:
 
 ```typescript
-// In playwright.config.ts or a global setup file:
+// client/e2e/global-setup.ts
 import * as fs from 'node:fs';
 
 const TEST_WORKSPACE = '/tmp/aiflow-e2e-test';
-if (!fs.existsSync(TEST_WORKSPACE)) {
+
+export default function globalSetup() {
   fs.mkdirSync(TEST_WORKSPACE, { recursive: true });
 }
+```
+
+```typescript
+// client/e2e/global-teardown.ts
+import * as fs from 'node:fs';
+
+const TEST_WORKSPACE = '/tmp/aiflow-e2e-test';
+
+export default function globalTeardown() {
+  fs.rmSync(TEST_WORKSPACE, { recursive: true, force: true });
+}
+```
+
+Register in `playwright.config.ts`:
+
+```typescript
+export default defineConfig({
+  globalSetup: './e2e/global-setup.ts',
+  globalTeardown: './e2e/global-teardown.ts',
+  // ...
+});
 ```
 
 ### 4. Update `create-run-complete.spec.ts`
@@ -125,31 +151,23 @@ await expect(page.locator('[data-testid="artifacts-path"]')).toContainText('arti
 
 ### 7. Replace `artifacts.spec.ts`
 
-Delete or rewrite `artifacts.spec.ts` to test the new artifacts browser:
+Delete `client/e2e/machines/artifacts.spec.ts` and create a new test file that
+verifies the artifacts path display (not a file browser — see Decision 5):
 
 ```typescript
-// NEW: artifacts-browser.spec.ts
+// NEW: client/e2e/machines/artifacts-path.spec.ts
 
-describe('Artifacts Browser', () => {
-  it('shows empty state when no artifacts exist', async () => {
-    // Launch instance, navigate to artifacts tab
-    // Verify empty state message
+describe('Artifacts Path Display', () => {
+  it('displays artifactsPath in the instance viewer', async () => {
+    // Launch instance, navigate to instance page
+    // Verify the artifacts path is displayed as text
+    await expect(page.locator('[data-testid="artifacts-path"]')).toBeVisible();
+    await expect(page.locator('[data-testid="artifacts-path"]')).toContainText('/tmp/');
   });
 
-  it('shows file tree when artifacts exist', async () => {
-    // Launch instance with an action that writes to artifacts workspace
-    // Navigate to artifacts tab
-    // Verify file tree shows the artifact files
-  });
-
-  it('allows expanding directories', async () => {
-    // Click on a directory in the tree
-    // Verify it expands and shows contents
-  });
-
-  it('allows downloading files', async () => {
-    // Click on a file
-    // Verify download is triggered
+  it('shows workspace root in the instance viewer', async () => {
+    // Verify workspaceRoot is displayed
+    await expect(page.locator('[data-testid="workspace-root"]')).toBeVisible();
   });
 });
 ```
@@ -195,15 +213,15 @@ Remove or replace them.
 - **§8.5** — E2E: Child inherits workspace fields
 - **§9.6** — E2E: Parallel children inherit workspace fields
 - **§18** — E2E: Dashboard launch form includes workspace root
-- **§19.5** — E2E: Artifacts browser in instance viewer
+- **§19.5** — E2E: Artifacts path displayed in instance viewer
 
 ---
 
 ## Validation Checklist
 
 - [ ] All E2E tests provide `workspaceRoot` when launching instances
-- [ ] Test workspace directory created in setup
-- [ ] `artifacts.spec.ts` replaced with new artifacts browser tests
+- [ ] Test workspace directory created via global setup/teardown
+- [ ] `artifacts.spec.ts` replaced with `artifacts-path.spec.ts`
 - [ ] No artifact-related assertions remain (old model)
 - [ ] Workspace fields verified in instance viewer
 - [ ] Child inheritance verified in parent-child and parallel tests

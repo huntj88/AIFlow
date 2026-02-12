@@ -40,44 +40,20 @@ const { definitionId, input, workspaceRoot } = decodedBody;
 
 ### 2. Validate `workspaceRoot`
 
-Before calling the runner, validate:
+Before calling the runner, validate using a composable Effect function. This is
+consistent with how schema decoding and runner invocation use Effect in the
+route pipeline.
+
+> **Decision 3:** Use an Effect function, not Express-style early returns.
 
 1. **Presence**: `workspaceRoot` is required (handled by schema).
 2. **Absolute path**: Must start with `/` (on Linux/macOS).
-3. **Exists on disk**: Use `fs.stat()` or `fs.access()` to verify the directory exists.
+3. **Exists on disk**: Use `fs.stat()` to verify the directory exists.
 
 ```typescript
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-// Validate absolute path
-if (!path.isAbsolute(workspaceRoot)) {
-  return res.status(400).json({
-    message: 'workspaceRoot must be an absolute path',
-    details: [`Received: ${workspaceRoot}`],
-  });
-}
-
-// Validate exists on disk
-try {
-  const stat = await fs.stat(workspaceRoot);
-  if (!stat.isDirectory()) {
-    return res.status(400).json({
-      message: 'workspaceRoot must be a directory',
-      details: [`Path is not a directory: ${workspaceRoot}`],
-    });
-  }
-} catch {
-  return res.status(400).json({
-    message: 'workspaceRoot does not exist',
-    details: [`Path not found: ${workspaceRoot}`],
-  });
-}
-```
-
-Or using Effect:
-
-```typescript
 const validateWorkspaceRoot = (workspaceRoot: string) =>
   Effect.gen(function* () {
     if (!path.isAbsolute(workspaceRoot)) {

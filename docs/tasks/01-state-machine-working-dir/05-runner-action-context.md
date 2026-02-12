@@ -186,13 +186,23 @@ const loopState: LoopState = {
 };
 ```
 
-### 10. Get `ARTIFACT_ROOT` from environment
+### 10. Get `ARTIFACT_ROOT` via Effect Config
 
-Use the existing `ARTIFACT_ROOT` environment variable (or default `./data/artifacts`)
-that was used by the old `FsArtifactStore`:
+Use Effect's `Config` API to read the artifacts root directory, with a default
+fallback. This is type-safe, composable in the Effect layer, and easy to
+override in tests.
+
+> **Decision 7:** Use Effect Config instead of a raw `process.env` read.
 
 ```typescript
-const ARTIFACT_ROOT = process.env.ARTIFACT_ROOT ?? './data/artifacts';
+import { Config } from 'effect';
+
+const ArtifactRootConfig = Config.string('ARTIFACT_ROOT').pipe(
+  Config.withDefault('./data/artifacts'),
+);
+
+// In the runner's Effect pipeline:
+const ARTIFACT_ROOT = yield * ArtifactRootConfig;
 ```
 
 ---

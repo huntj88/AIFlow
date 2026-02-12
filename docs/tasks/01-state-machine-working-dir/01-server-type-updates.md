@@ -179,20 +179,16 @@ export type MachineEvent =
 
 ### 6. Remove artifact types
 
-Remove these types from `types.ts`:
+Delete these types from `types.ts` immediately:
 
 - `ArtifactStore` interface
 - `ArtifactRecord` interface
 - `ArtifactMetadata` interface
 - `ArtifactTree` interface
 
-> **Note:** Do not delete the types file or the types themselves yet if other files
-> still import them. Instead, mark them with `@deprecated` comments. Full deletion
-> happens in Task 07 after all usages are removed.
->
-> If you can remove them without breaking compilation (i.e., no other files import
-> them yet because the runner/API haven't been updated), prefer immediate removal.
-> Otherwise add `/** @deprecated — removed in Task 07 */` annotations.
+> **Decision 1:** Immediate deletion. Downstream compile errors in the runner,
+> routes, and other consumers are expected and will be fixed in their respective
+> tasks. Do not use `@deprecated` annotations.
 
 ### 7. Update `StartInstanceInput` (if exists) or add it
 
@@ -223,5 +219,5 @@ This task provides the type foundation for:
 - [ ] `ActionContext` has `cli`, `workspace`, `artifactsWorkspace` — no `artifacts`
 - [ ] `MachineInstance` has `workspaceRoot`, `familyRootInstanceId`, `artifactsPath` — no `artifacts`
 - [ ] `MachineEvent` has 9 variants — no `artifact_created`
-- [ ] `ArtifactStore`, `ArtifactRecord`, `ArtifactMetadata`, `ArtifactTree` removed or deprecated
+- [ ] `ArtifactStore`, `ArtifactRecord`, `ArtifactMetadata`, `ArtifactTree` deleted (not deprecated)
 - [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes (may have errors in downstream files — that's expected; they will be fixed in subsequent tasks)

@@ -1,4 +1,4 @@
-# Task 13 — Client Artifacts Browser Rework
+# Task 13 — Client Artifacts Path Display
 
 > **Phase**: 7 (Client UI)
 > **Depends on**: Task 12 (client API hooks migration)
@@ -8,202 +8,86 @@
 
 ## Objective
 
-Replace the `ArtifactViewer` component (which relied on `ArtifactRecord` metadata
-and the artifact API) with a new filesystem-based artifacts browser. The new browser
-uses the instance's `artifactsPath` to show the artifacts workspace directory
-contents.
+Remove the `ArtifactViewer` component (which relied on `ArtifactRecord` metadata
+and the artifact API). Replace it with a simple read-only display of the instance's
+`artifactsPath` string. No file browser, directory listing endpoint, or download
+functionality — the user accesses the artifacts workspace directory on their own
+filesystem.
 
----
-
-## Design Decision
-
-Since the artifact API has been removed, the client can no longer fetch artifact
-metadata from the server via REST. Two approaches are available:
-
-### Option A — Server-side directory listing endpoint (recommended)
-
-Add a new lightweight endpoint that reads the filesystem:
-
-```
-GET /api/machines/instances/:id/files?path=<relativePath>
-```
-
-Returns a directory listing:
-
-```json
-[
-  { "name": "report.json", "type": "file", "size": 1234 },
-  { "name": "children", "type": "directory" }
-]
-```
-
-And a file download endpoint:
-
-```
-GET /api/machines/instances/:id/files/download?path=<relativePath>
-```
-
-### Option B — Display `artifactsPath` only
-
-Show the `artifactsPath` string and let the user browse it via their filesystem.
-Simplest to implement but less useful.
-
-**This task implements Option A** since the behavior spec (§19.5) requires a
-file-explorer-style tree browser.
+> **Decision 5:** Display `artifactsPath` only. No server-side directory listing
+> endpoint and no file browser component. Keep client changes minimal and focus
+> on the server.
 
 ---
 
 ## Steps
 
-### 1. Add file listing API endpoint (server)
+### 1. Delete `ArtifactViewer` component
 
-Add to `server/src/routes/machines/instances.ts`:
-
-```typescript
-// GET /api/machines/instances/:id/files
-// Query: ?path=<relative path within artifactsPath> (default: "")
-// Returns: DirectoryEntry[]
-
-interface DirectoryEntry {
-  name: string;
-  type: 'file' | 'directory';
-  size?: number; // only for files
-}
+```bash
+rm client/src/components/machines/ArtifactViewer.tsx
 ```
 
-Implementation:
+Remove any barrel exports that reference `ArtifactViewer`.
+
+### 2. Create `ArtifactsPathDisplay` component
+
+Create a simple component that shows the artifacts path as read-only text:
 
 ```typescript
-app.get('/api/machines/instances/:id/files', async (req, res) => {
-  const instance = /* load instance */;
-  const relativePath = (req.query.path as string) || '';
-  const fullPath = path.resolve(instance.artifactsPath, relativePath);
+// client/src/components/machines/ArtifactsPathDisplay.tsx
 
-  // Verify fullPath is within artifactsPath (basic safety)
-  if (!fullPath.startsWith(instance.artifactsPath)) {
-    return res.status(400).json({ message: 'Invalid path' });
-  }
-
-  const entries = await fs.readdir(fullPath, { withFileTypes: true });
-  const result = await Promise.all(
-    entries.map(async (entry) => ({
-      name: entry.name,
-      type: entry.isDirectory() ? 'directory' : 'file',
-      size: entry.isFile()
-        ? (await fs.stat(path.join(fullPath, entry.name))).size
-        : undefined,
-    })),
-  );
-
-  return res.json(result);
-});
-```
-
-### 2. Add file download endpoint (server)
-
-```typescript
-// GET /api/machines/instances/:id/files/download
-// Query: ?path=<relative path to file>
-
-app.get('/api/machines/instances/:id/files/download', async (req, res) => {
-  const instance = /* load instance */;
-  const relativePath = req.query.path as string;
-  const fullPath = path.resolve(instance.artifactsPath, relativePath);
-
-  if (!fullPath.startsWith(instance.artifactsPath)) {
-    return res.status(400).json({ message: 'Invalid path' });
-  }
-
-  // Send file
-  res.sendFile(fullPath);
-});
-```
-
-### 3. Add client API calls
-
-Add to `client/src/utils/apiClient.ts`:
-
-```typescript
-export interface DirectoryEntry {
-  name: string;
-  type: 'file' | 'directory';
-  size?: number;
-}
-
-// In apiClient:
-listArtifactFiles: (instanceId: string, relativePath?: string) =>
-  makeRequest(`/api/machines/instances/${instanceId}/files${relativePath ? `?path=${encodeURIComponent(relativePath)}` : ''}`),
-
-downloadArtifactFile: (instanceId: string, relativePath: string) =>
-  makeBinaryRequest(`/api/machines/instances/${instanceId}/files/download?path=${encodeURIComponent(relativePath)}`),
-```
-
-### 4. Create new `ArtifactsBrowser` component
-
-Replace `ArtifactViewer` with a new component:
-
-```typescript
-// client/src/components/machines/ArtifactsBrowser.tsx
-
-interface ArtifactsBrowserProps {
-  readonly instanceId: string;
+interface ArtifactsPathDisplayProps {
   readonly artifactsPath: string;
 }
-```
 
-Features:
-
-- **Directory tree**: Fetch the top-level directory listing on mount
-- **Expand/collapse**: Clicking a directory fetches its contents lazily
-- **File download**: Clicking a file triggers a download
-- **File size display**: Show human-readable file sizes
-- **Empty state**: Show a message when no files exist
-- **Loading state**: Show a spinner while fetching directory contents
-- **Error state**: Handle cases where `artifactsPath` doesn't exist yet
-
-### 5. Update component exports
-
-Replace the `ArtifactViewer` export with `ArtifactsBrowser`:
-
-```typescript
-// Delete or rename:
-// client/src/components/machines/ArtifactViewer.tsx
-
-// Create:
-// client/src/components/machines/ArtifactsBrowser.tsx
-```
-
-### 6. Add `DirectoryEntry` type to client types
-
-Add to `client/src/types/machines.ts`:
-
-```typescript
-export interface DirectoryEntry {
-  readonly name: string;
-  readonly type: 'file' | 'directory';
-  readonly size?: number;
+export function ArtifactsPathDisplay({ artifactsPath }: ArtifactsPathDisplayProps) {
+  return (
+    <div className="text-sm text-[var(--color-text-muted)]">
+      <span className="font-medium">Artifacts Directory:</span>{' '}
+      <code className="text-xs select-all">{artifactsPath}</code>
+    </div>
+  );
 }
 ```
+
+### 3. Remove artifact API calls from client
+
+Remove from `client/src/utils/apiClient.ts`:
+
+- `fetchArtifacts`
+- `fetchArtifactTree`
+- Any other artifact-related API functions
+
+### 4. Remove `useMachineArtifacts` hook
+
+Delete the hook entirely:
+
+```bash
+rm client/src/hooks/useMachineArtifacts.ts
+```
+
+### 5. Remove artifact-related types from client
+
+Remove from `client/src/types/machines.ts`:
+
+- `ArtifactRecord`
+- `ArtifactTree`
+- Any other artifact metadata types
 
 ---
 
 ## Behavior Spec Coverage
 
-- **§19.5** — Artifacts panel shows a file-explorer-style tree
-- **§19.5** — Tree displays files from the family artifacts root directory
-- **§19.5** — Clicking an artifact triggers a download
-- **§19.5** — Tree can be expanded/collapsed per subdirectory level
-- **§19.5** — `children/<childInstanceId>/` convention rendered as hierarchical tree
+- **§19.5** — Artifacts panel displays `artifactsPath` as a filesystem path
 
 ---
 
 ## Validation Checklist
 
-- [ ] `GET /instances/:id/files` endpoint returns directory listings
-- [ ] `GET /instances/:id/files/download` endpoint serves files
-- [ ] `ArtifactsBrowser` component renders directory tree
-- [ ] Directories can be expanded/collapsed
-- [ ] Files can be downloaded
-- [ ] Empty state handled
-- [ ] Old `ArtifactViewer` removed or replaced
+- [ ] `ArtifactViewer.tsx` deleted
+- [ ] `ArtifactsPathDisplay` component created and renders `artifactsPath`
+- [ ] No artifact API calls remain in client code
+- [ ] `useMachineArtifacts` hook deleted
+- [ ] Artifact metadata types removed from client
 - [ ] `pnpm --filter @aiflow/client exec tsc --noEmit` passes

@@ -40,22 +40,10 @@ export interface MachineInstance {
 
 ## Steps
 
-### 1. Add `CliExecResult` type (for reference, if needed by client)
+### 1. ~~Add `CliExecResult` type~~ — SKIPPED
 
-The client may not need `CliExecResult` directly (it's server-side only), but
-if any client code references it or if state data contains CLI results, add it:
-
-```typescript
-export interface CliExecResult {
-  readonly exitCode: number;
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly durationMs: number;
-}
-```
-
-> **Note:** This is optional. Only add if the client needs to parse state data
-> that contains CLI results. If not needed, skip.
+> **Decision 4:** Skip. `CliExecResult` is server-side only. State data is
+> `unknown` on the client — no compile-time benefit. Can be added later if needed.
 
 ### 2. Update `MachineInstance`
 
@@ -116,7 +104,12 @@ export type MachineEvent =
   // REMOVED: artifact_created
 ```
 
-### 5. Add `StartInstanceInput` type (if not exists)
+### 5. Add `StartInstanceInput` type
+
+Add to `client/src/types/machines.ts` (alongside all other machine types):
+
+> **Decision 12:** Define in `client/src/types/machines.ts` as the single
+> source of truth for all machine-related types.
 
 ```typescript
 export interface StartInstanceInput {
