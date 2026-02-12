@@ -74,9 +74,10 @@ hooks, and client UI components.
 
 ## Key Decisions & Constraints
 
-1. **No circular dependencies.** Artifact removal (07–08) does not depend on
-   workspace helpers (03–04); they can proceed in parallel as long as types (01)
-   are done first.
+1. **Sequential execution (Decision 11).** Tasks are executed in numeric order
+   (01 → 02 → 03 → …). Although artifact removal (07–08) has no data dependency
+   on workspace helpers (03–04), they are not interleaved. Each task builds
+   cleanly on the last.
 
 2. **Types first.** Task 01 updates types on both server and client simultaneously
    to keep the type definitions in sync. Client type updates (Task 11) can also

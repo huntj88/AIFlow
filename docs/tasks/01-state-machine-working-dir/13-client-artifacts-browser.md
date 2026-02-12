@@ -51,29 +51,9 @@ export function ArtifactsPathDisplay({ artifactsPath }: ArtifactsPathDisplayProp
 }
 ```
 
-### 3. Remove artifact API calls from client
-
-Remove from `client/src/utils/apiClient.ts`:
-
-- `fetchArtifacts`
-- `fetchArtifactTree`
-- Any other artifact-related API functions
-
-### 4. Remove `useMachineArtifacts` hook
-
-Delete the hook entirely:
-
-```bash
-rm client/src/hooks/useMachineArtifacts.ts
-```
-
-### 5. Remove artifact-related types from client
-
-Remove from `client/src/types/machines.ts`:
-
-- `ArtifactRecord`
-- `ArtifactTree`
-- Any other artifact metadata types
+> **Note:** Artifact API calls are removed in Task 12 (Step 2),
+> `useMachineArtifacts` is deleted in Task 12 (Step 3), and artifact types
+> are removed in Task 11 (Steps 3–4). Those deletions are not repeated here.
 
 ---
 
@@ -87,7 +67,4 @@ Remove from `client/src/types/machines.ts`:
 
 - [ ] `ArtifactViewer.tsx` deleted
 - [ ] `ArtifactsPathDisplay` component created and renders `artifactsPath`
-- [ ] No artifact API calls remain in client code
-- [ ] `useMachineArtifacts` hook deleted
-- [ ] Artifact metadata types removed from client
 - [ ] `pnpm --filter @aiflow/client exec tsc --noEmit` passes

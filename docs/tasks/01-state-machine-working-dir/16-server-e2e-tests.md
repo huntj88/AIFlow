@@ -23,17 +23,18 @@ All E2E tests that create instances must be updated to include `workspaceRoot`:
 
 ```
 server/src/__e2e__/
-  definitions.e2e.test.ts     — No instance creation (unchanged)
-  actions.e2e.test.ts         — No instance creation (unchanged)
-  linear-execution.e2e.test.ts — Creates instances → add workspaceRoot
-  errors-timeouts.e2e.test.ts  — Creates instances → add workspaceRoot
-  child-machines.e2e.test.ts   — Creates instances → add workspaceRoot
-  concurrency-cancel.e2e.test.ts — Creates instances → add workspaceRoot
-  suspend-resume.e2e.test.ts   — Creates instances → add workspaceRoot
-  middleware.e2e.test.ts       — Creates instances → add workspaceRoot
-  artifacts.e2e.test.ts        — DELETE or replace entirely
-  websocket.e2e.test.ts        — Creates instances → add workspaceRoot
-  edge-cases.e2e.test.ts       — Creates instances → add workspaceRoot
+  00-smoke.e2e.test.ts            — No instance creation (unchanged)
+  01-definitions.e2e.test.ts      — No instance creation (unchanged)
+  02-actions.e2e.test.ts           — No instance creation (unchanged)
+  03-linear-execution.e2e.test.ts  — Creates instances → add workspaceRoot
+  04-errors-timeouts.e2e.test.ts   — Creates instances → add workspaceRoot
+  05-child-machines.e2e.test.ts    — Creates instances → add workspaceRoot
+  06-concurrency-cancel.e2e.test.ts — Creates instances → add workspaceRoot
+  07-suspend-resume.e2e.test.ts    — Creates instances → add workspaceRoot
+  08-middleware.e2e.test.ts        — Creates instances → add workspaceRoot
+  09-artifacts.e2e.test.ts         — DELETE or replace entirely
+  10-websocket.e2e.test.ts         — Creates instances → add workspaceRoot
+  11-edge-cases.e2e.test.ts        — Creates instances → add workspaceRoot
 ```
 
 ---
@@ -169,7 +170,7 @@ describe('Child Workspace Inheritance (§8.5)', () => {
 
 ### 6. Delete artifact E2E tests entirely
 
-> **Decision 9:** Delete `server/src/__e2e__/artifacts.e2e.test.ts` entirely.
+> **Decision 9:** Delete `server/src/__e2e__/09-artifacts.e2e.test.ts` entirely.
 > Do NOT port or adapt the old tests. Write fresh `workspace.e2e.test.ts` tests
 > from scratch (steps 3–5 above already cover the new workspace behavior).
 
