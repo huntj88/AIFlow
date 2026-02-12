@@ -42,3 +42,5 @@ flow after planning to create questions to ask user for further plan refinement
 "can you make a plan to validate as many of the behaviors as you can by making network requests to server? e2e tests for server only."
 
 AGENTS markdown file could contain: "For tests that expect the server to be running, prompt the user to start if not already running."
+
+"Create a plan to refactor and update to match the requirements specified by 01 feature spec. This is going to be abig refactor. Break the tasks up into separate markdown files in `tasks/01-state-machine-working-dir`. Follow the same pattern as the other task markdown files. Ensure task don't have circular dependencies. Ensure every aspect of the feature spec and behavior spec is taken into account. ultrathink."
