@@ -142,9 +142,9 @@ and will be fixed in subsequent tasks.
 
 ## Validation Checklist
 
-- [ ] `MachineInstance` has `workspaceRoot`, `familyRootInstanceId`, `artifactsPath`
-- [ ] `MachineInstance` does NOT have `artifacts: ArtifactRecord[]`
-- [ ] `ArtifactRecord`, `ArtifactMetadata`, `ArtifactTree` removed from client types
-- [ ] `MachineEvent` has 9 variants — no `artifact_created`
-- [ ] `StartInstanceInput` includes `workspaceRoot`
-- [ ] Types file compiles (downstream errors in hooks/components expected)
+- [x] `MachineInstance` has `workspaceRoot`, `familyRootInstanceId`, `artifactsPath`
+- [x] `MachineInstance` does NOT have `artifacts: ArtifactRecord[]`
+- [x] `ArtifactRecord`, `ArtifactMetadata`, `ArtifactTree` removed from client types
+- [x] `MachineEvent` has 9 variants — no `artifact_created`
+- [x] `StartInstanceInput` includes `workspaceRoot`
+- [x] Types file compiles (downstream errors in hooks/components expected)

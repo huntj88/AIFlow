@@ -127,6 +127,13 @@ export interface ActionMetadata {
 // Instance Filter
 // ────────────────────────────────────────────────────────────────────────────
 
+/** Payload for POST /instances — starts a new machine run. */
+export interface StartInstanceInput {
+  readonly definitionId: string;
+  readonly input: unknown;
+  readonly workspaceRoot: string;
+}
+
 /** Filters for querying machine instances. */
 export interface InstanceFilter {
   readonly status?: MachineInstance['status'];
