@@ -209,12 +209,12 @@ Test cases:
 
 ## Validation Checklist
 
-- [ ] `server/src/machines/cli/CliHelper.ts` implements `makeCliHelper()`
-- [ ] `exec()` returns `Effect.Effect<CliExecResult>` — never fails in error channel
-- [ ] Spawn failures return `exitCode: -1` with error message in `stderr`
-- [ ] `WORKSPACE_ROOT` and `ARTIFACTS_ROOT` injected in every `exec()` call
-- [ ] Default `cwd` is workspace root
-- [ ] Action-provided `env` merges with defaults
-- [ ] stdout/stderr capped at 1 MiB with truncation suffix
-- [ ] Fiber interruption kills child process
-- [ ] All unit tests pass: `pnpm --filter @aiflow/server run test`
+- [x] `server/src/machines/cli/CliHelper.ts` implements `makeCliHelper()`
+- [x] `exec()` returns `Effect.Effect<CliExecResult>` — never fails in error channel
+- [x] Spawn failures return `exitCode: -1` with error message in `stderr`
+- [x] `WORKSPACE_ROOT` and `ARTIFACTS_ROOT` injected in every `exec()` call
+- [x] Default `cwd` is workspace root
+- [x] Action-provided `env` merges with defaults
+- [x] stdout/stderr capped at 1 MiB with truncation suffix
+- [x] Fiber interruption kills child process
+- [x] All unit tests pass: `pnpm --filter @aiflow/server run test`

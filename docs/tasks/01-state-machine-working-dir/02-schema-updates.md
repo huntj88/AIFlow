@@ -117,9 +117,9 @@ update them to match the new `MachineInstanceSchema`.
 
 ## Validation Checklist
 
-- [ ] `StartInstanceRequestSchema` includes `workspaceRoot: Schema.String`
-- [ ] `MachineInstanceSchema` includes `workspaceRoot`, `familyRootInstanceId`, `artifactsPath`
-- [ ] `MachineInstanceSchema` does NOT include `artifacts`
-- [ ] `ArtifactRecordSchema` is removed
-- [ ] `decodeStartInstance` decodes `workspaceRoot` from request body
-- [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes (or expected errors in downstream consumers only)
+- [x] `StartInstanceRequestSchema` includes `workspaceRoot: Schema.String`
+- [x] `MachineInstanceSchema` includes `workspaceRoot`, `familyRootInstanceId`, `artifactsPath`
+- [x] `MachineInstanceSchema` does NOT include `artifacts`
+- [x] `ArtifactRecordSchema` is removed
+- [x] `decodeStartInstance` decodes `workspaceRoot` from request body
+- [x] `pnpm --filter @aiflow/server exec tsc --noEmit` passes (or expected errors in downstream consumers only)

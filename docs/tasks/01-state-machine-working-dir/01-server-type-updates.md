@@ -213,11 +213,11 @@ This task provides the type foundation for:
 
 ## Validation Checklist
 
-- [ ] `CliExecResult` interface with `exitCode`, `stdout`, `stderr`, `durationMs`
-- [ ] `CliHelper` interface with `exec()` method returning `Effect.Effect<CliExecResult>`
-- [ ] `WorkspaceContext` interface with `root` and `resolve()`
-- [ ] `ActionContext` has `cli`, `workspace`, `artifactsWorkspace` — no `artifacts`
-- [ ] `MachineInstance` has `workspaceRoot`, `familyRootInstanceId`, `artifactsPath` — no `artifacts`
-- [ ] `MachineEvent` has 9 variants — no `artifact_created`
-- [ ] `ArtifactStore`, `ArtifactRecord`, `ArtifactMetadata`, `ArtifactTree` deleted (not deprecated)
-- [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes (may have errors in downstream files — that's expected; they will be fixed in subsequent tasks)
+- [x] `CliExecResult` interface with `exitCode`, `stdout`, `stderr`, `durationMs`
+- [x] `CliHelper` interface with `exec()` method returning `Effect.Effect<CliExecResult>`
+- [x] `WorkspaceContext` interface with `root` and `resolve()`
+- [x] `ActionContext` has `cli`, `workspace`, `artifactsWorkspace` — no `artifacts`
+- [x] `MachineInstance` has `workspaceRoot`, `familyRootInstanceId`, `artifactsPath` — no `artifacts`
+- [x] `MachineEvent` has 9 variants — no `artifact_created`
+- [x] `ArtifactStore`, `ArtifactRecord`, `ArtifactMetadata`, `ArtifactTree` deleted (not deprecated)
+- [x] `pnpm --filter @aiflow/server exec tsc --noEmit` passes (may have errors in downstream files — that's expected; they will be fixed in subsequent tasks)

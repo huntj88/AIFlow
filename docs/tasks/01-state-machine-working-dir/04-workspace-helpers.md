@@ -132,9 +132,9 @@ Test cases:
 
 ## Validation Checklist
 
-- [ ] `makeWorkspaceContext()` returns correct `root` and `resolve()`
-- [ ] `makeArtifactsWorkspaceContext()` returns correct `root` and `resolve()`
-- [ ] `computeArtifactsPath()` returns `<ARTIFACT_ROOT>/<familyRootInstanceId>`
-- [ ] `ensureArtifactsDir()` creates directory recursively
-- [ ] No path traversal enforcement — `resolve('../x')` returns a valid path
-- [ ] Unit tests pass: `pnpm --filter @aiflow/server run test`
+- [x] `makeWorkspaceContext()` returns correct `root` and `resolve()`
+- [x] `makeArtifactsWorkspaceContext()` returns correct `root` and `resolve()`
+- [x] `computeArtifactsPath()` returns `<ARTIFACT_ROOT>/<familyRootInstanceId>`
+- [x] `ensureArtifactsDir()` creates directory recursively
+- [x] No path traversal enforcement — `resolve('../x')` returns a valid path
+- [x] Unit tests pass: `pnpm --filter @aiflow/server run test`

@@ -219,12 +219,12 @@ const ARTIFACT_ROOT = yield * ArtifactRootConfig;
 
 ## Validation Checklist
 
-- [ ] `ActionContext` constructed with `cli`, `workspace`, `artifactsWorkspace` — no `artifacts`
-- [ ] `ArtifactStoreFactory` no longer injected into the runner
-- [ ] No `artifact_created` events published
-- [ ] `LoopState` tracks `workspaceRoot`, `familyRootInstanceId`, `artifactsPath`
-- [ ] `RunOptions` includes `workspaceRoot` (required) and `familyRootInstanceId` (optional)
-- [ ] Root instance creation sets `familyRootInstanceId = id`
-- [ ] Artifacts directory created on disk for root instances
-- [ ] Resume loads workspace fields from persisted instance
-- [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes
+- [x] `ActionContext` constructed with `cli`, `workspace`, `artifactsWorkspace` — no `artifacts`
+- [x] `ArtifactStoreFactory` no longer injected into the runner
+- [x] No `artifact_created` events published
+- [x] `LoopState` tracks `workspaceRoot`, `familyRootInstanceId`, `artifactsPath`
+- [x] `RunOptions` includes `workspaceRoot` (required) and `familyRootInstanceId` (optional)
+- [x] Root instance creation sets `familyRootInstanceId = id`
+- [x] Artifacts directory created on disk for root instances
+- [x] Resume loads workspace fields from persisted instance
+- [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes <!-- Blocked: downstream route consumers (instances.ts, artifacts.ts) not yet updated — fixed in Tasks 07-10 -->
