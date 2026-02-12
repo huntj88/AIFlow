@@ -230,12 +230,12 @@ runner.run(definition, input, { workspaceRoot: '/tmp/test-workspace' });
 
 ## Validation Checklist
 
-- [ ] CLI helper tests pass
-- [ ] Workspace helper tests pass
-- [ ] Runner ActionContext tests cover `cli`, `workspace`, `artifactsWorkspace`
-- [ ] Family root inheritance tests pass for single child, grandchild, parallel
-- [ ] Workspace root validation tests cover all error cases
-- [ ] CLI branching tests verify exit code routing
-- [ ] All existing tests updated to include `workspaceRoot`
-- [ ] No test references to artifact infrastructure remain
-- [ ] `pnpm --filter @aiflow/server run test` passes with full suite
+- [x] CLI helper tests pass
+- [x] Workspace helper tests pass
+- [x] Runner ActionContext tests cover `cli`, `workspace`, `artifactsWorkspace`
+- [x] Family root inheritance tests pass for single child, grandchild, parallel
+- [x] Workspace root validation tests cover all error cases
+- [x] CLI branching tests verify exit code routing
+- [x] All existing tests updated to include `workspaceRoot`
+- [x] No test references to artifact infrastructure remain
+- [x] `pnpm --filter @aiflow/server run test` passes with full suite

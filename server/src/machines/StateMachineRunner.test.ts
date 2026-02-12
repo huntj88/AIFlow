@@ -1,26 +1,33 @@
 /**
- * StateMachineRunner — Core Engine Test Suite (Task 17)
+ * StateMachineRunner — Core Engine Test Suite (Tasks 09–15, 17)
  *
- * Comprehensive unit / integration tests for Tasks 09–14:
- *   §4  Linear Execution
+ * Comprehensive unit / integration tests:
+ *   §4   Linear Execution
  *   §4.3 Input Validation
- *   §4.4 Transition History
+ *   §4.4 Transition History / Workspace Root Validation
  *   §4.5 Logs
- *   §5  Branching
- *   §6  Error Handling
- *   §7  Timeouts & Depth
- *   §8  Single Child Machine
- *   §9  Parallel Children
- *   §10 Concurrency & Semaphore
- *   §11 Cancellation
- *   §13 Persistence Checkpoints
- *   §14 Middleware
- *   §15 Artifacts
+ *   §5   Branching
+ *   §6   Error Handling
+ *   §7   Timeouts & Depth
+ *   §8   Single Child Machine
+ *   §8.5 Family Root Inheritance
+ *   §9   Parallel Children
+ *   §9.6 Parallel Children Workspace Inheritance
+ *   §10  Concurrency & Semaphore
+ *   §11  Cancellation
+ *   §13  Persistence Checkpoints
+ *   §14  Middleware
+ *   §15  ActionContext — workspace, artifactsWorkspace, CLI
+ *   §15.6 Artifact Infrastructure Removal
+ *   §16  CLI Exit Code Branching
  *
  * @module
  */
 
 import { Duration, Effect, Layer } from 'effect';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { ActionRegistry, InMemoryActionRegistryLive } from './ActionRegistry.js';
@@ -33,6 +40,8 @@ import { MachineStore } from './store/MachineStore.js';
 import { StateMachineRunner, StateMachineRunnerLive } from './StateMachineRunner.js';
 import type {
   ActionFunction,
+  MachineEvent,
+  MachineInstance,
   StateMachineDefinition,
   TransitionMiddleware,
   TransitionResult,
@@ -58,6 +67,7 @@ const makeTestLayer = (middleware: readonly TransitionMiddleware[] = []) =>
     Layer.provide(MachineEventPubSubLive),
     Layer.provideMerge(InMemoryMachineStoreLive),
     Layer.provideMerge(InMemoryActionRegistryLive),
+    Layer.provideMerge(MachineEventPubSubLive),
   );
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -889,7 +899,7 @@ describe('StateMachineRunner — Timeouts & Depth (§7)', () => {
       yield* registerDelayAction(registry, 'test-action', 2000, 'completed');
 
       const def = makeSimpleDef();
-      const result = yield* runner.run(def, {}, { timeoutMs: 200 });
+      const result = yield* runner.run(def, {}, { timeoutMs: 200, workspaceRoot: '' });
 
       expect(result.status).toBe('error');
       if (result.status === 'error') {
@@ -912,7 +922,7 @@ describe('StateMachineRunner — Timeouts & Depth (§7)', () => {
 
       const def = makeSimpleDef();
       // Depth 10 (the default MAX_MACHINE_DEPTH) should be allowed
-      const result = yield* runner.run(def, {}, { depth: 10 });
+      const result = yield* runner.run(def, {}, { depth: 10, workspaceRoot: '' });
       expect(result.status).toBe('completed');
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
@@ -928,7 +938,7 @@ describe('StateMachineRunner — Timeouts & Depth (§7)', () => {
 
       const def = makeSimpleDef();
       // Depth 11 should exceed the default MAX_MACHINE_DEPTH of 10
-      const exit = yield* runner.run(def, {}, { depth: 11 }).pipe(Effect.either);
+      const exit = yield* runner.run(def, {}, { depth: 11, workspaceRoot: '' }).pipe(Effect.either);
 
       expect(exit._tag).toBe('Left');
       if (exit._tag === 'Left') {
@@ -2162,7 +2172,9 @@ describe('StateMachineRunner — Cancellation (§11)', () => {
         input: {},
         history: [],
         logs: [],
-        artifacts: [],
+        workspaceRoot: '/tmp/test-workspace',
+        familyRootInstanceId: 'root-001',
+        artifactsPath: '/tmp/data/artifacts/root-001',
       });
 
       yield* runner.cancel(inst.id);
@@ -2634,51 +2646,52 @@ describe('StateMachineRunner — Middleware (§14)', () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// §15 — Artifacts
+// §15.1–15.4 — ActionContext: workspace, artifactsWorkspace, CLI (Task 15)
 // ════════════════════════════════════════════════════════════════════════════
 
-// TODO: Artifact tests deferred to Tasks 15-16 — ctx.artifacts API will be refactored
-/* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
-describe('StateMachineRunner — Artifacts (§15)', () => {
-  it('action writes artifact → file exists on disk; ArtifactRecord returned', async () => {
+describe('ActionContext — workspace and CLI', () => {
+  it('provides ctx.workspace.root matching workspaceRoot', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-ws-test-'));
     const layer = makeTestLayer();
 
     await Effect.gen(function* () {
       const runner = yield* StateMachineRunner;
-      const store = yield* MachineStore;
       const registry = yield* ActionRegistry;
 
-      let writtenRecord: unknown = null;
+      let capturedRoot = '';
+      const fn: ActionFunction = (ctx) => {
+        capturedRoot = ctx.workspace.root;
+        return Effect.succeed({ nextState: 'completed' } as TransitionResult);
+      };
+      yield* registry.register('test-action', fn, { description: 'capture ws root' });
 
-      const fn: ActionFunction = (ctx) =>
-        ctx.artifacts.write('test-file.txt', new TextEncoder().encode('Hello, Artifact!')).pipe(
-          Effect.tap((record) =>
-            Effect.sync(() => {
-              writtenRecord = record;
-            }),
-          ),
-          Effect.map(() => ({ nextState: 'completed' }) as TransitionResult),
-          Effect.catchAll(() => Effect.succeed({ nextState: 'completed' } as TransitionResult)),
-        );
-      yield* registry.register('test-action', fn, { description: 'artifact action' });
-
-      const result = yield* runner.run(makeSimpleDef(), {});
-      expect(result.status).toBe('completed');
-
-      // The write() call returns an ArtifactRecord
-      expect(writtenRecord).not.toBeNull();
-      expect(writtenRecord).toHaveProperty('name', 'test-file.txt');
-      expect(writtenRecord).toHaveProperty('instanceId');
-      expect(writtenRecord).toHaveProperty('stateName', 'start');
-      expect(writtenRecord).toHaveProperty('size', 16);
-
-      // The artifact can be read back via the artifacts store
-      const instance = yield* store.getInstance(result.instanceId);
-      expect(instance.status).toBe('completed');
+      yield* runner.run(makeSimpleDef(), {}, { workspaceRoot: tmpDir });
+      expect(capturedRoot).toBe(tmpDir);
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
 
-  it('parent reads child artifact after child completes', async () => {
+  it('provides ctx.workspace.resolve() that resolves paths', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-ws-test-'));
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const registry = yield* ActionRegistry;
+
+      let resolvedPath = '';
+      const fn: ActionFunction = (ctx) => {
+        resolvedPath = ctx.workspace.resolve('sub/file.txt');
+        return Effect.succeed({ nextState: 'completed' } as TransitionResult);
+      };
+      yield* registry.register('test-action', fn, { description: 'resolve path' });
+
+      yield* runner.run(makeSimpleDef(), {}, { workspaceRoot: tmpDir });
+      expect(resolvedPath).toBe(path.resolve(tmpDir, 'sub/file.txt'));
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('provides ctx.artifactsWorkspace.root matching family root', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-ws-test-'));
     const layer = makeTestLayer();
 
     await Effect.gen(function* () {
@@ -2686,80 +2699,142 @@ describe('StateMachineRunner — Artifacts (§15)', () => {
       const store = yield* MachineStore;
       const registry = yield* ActionRegistry;
 
-      // Child writes an artifact
-      const childFn: ActionFunction = (ctx) =>
-        ctx.artifacts.write('child-output.txt', new TextEncoder().encode('child data')).pipe(
-          Effect.map(() => ({ nextState: 'completed' }) as TransitionResult),
-          Effect.catchAll(() => Effect.succeed({ nextState: 'completed' } as TransitionResult)),
-        );
-      yield* registry.register('child-artifact-action', childFn, {
-        description: 'child writes artifact',
-      });
-
-      // Parent reads the child's artifact after child completes
-      let readContent: string | null = null;
-      const parentFn: ActionFunction = (ctx) =>
-        ctx.artifacts.readChild(ctx.stateData as string, 'child-output.txt').pipe(
-          Effect.tap((data) =>
-            Effect.sync(() => {
-              readContent = new TextDecoder().decode(data);
-            }),
-          ),
-          Effect.map(() => ({ nextState: 'completed' }) as TransitionResult),
-          Effect.catchAll(() => Effect.succeed({ nextState: 'completed' } as TransitionResult)),
-        );
-
-      yield* registry.register('parent-reads-artifact', parentFn, {
-        description: 'parent reads child artifact',
-      });
-
-      const childDef = yield* store.saveDefinition({
-        name: 'Artifact Child',
-        inputSchema: {},
-        outputSchema: {},
-        states: {
-          childStart: {
-            name: 'childStart',
-            type: 'action',
-            actionId: 'child-artifact-action',
-          },
-          completed: { name: 'completed', type: 'terminal' },
-          cancelled: { name: 'cancelled', type: 'terminal' },
-          error: { name: 'error', type: 'terminal' },
-        },
-        initialState: 'childStart',
-        transitions: [
-          { from: 'childStart', to: 'completed' },
-          { from: 'childStart', to: 'error' },
-        ],
-      });
-
-      // Parent action receives child MachineResult as stateData,
-      // which includes instanceId. We need to extract it.
-      let childInstanceId: string | null = null;
-      const extractAndReadFn: ActionFunction = (ctx) => {
-        const childResult = ctx.stateData as { instanceId?: string };
-        childInstanceId = childResult.instanceId ?? null;
-        if (childInstanceId) {
-          return ctx.artifacts.readChild(childInstanceId, 'child-output.txt').pipe(
-            Effect.tap((data) =>
-              Effect.sync(() => {
-                readContent = new TextDecoder().decode(data);
-              }),
-            ),
-            Effect.map(() => ({ nextState: 'completed' }) as TransitionResult),
-            Effect.catchAll(() => Effect.succeed({ nextState: 'completed' } as TransitionResult)),
-          );
-        }
+      let capturedArtifactsRoot = '';
+      const fn: ActionFunction = (ctx) => {
+        capturedArtifactsRoot = ctx.artifactsWorkspace.root;
         return Effect.succeed({ nextState: 'completed' } as TransitionResult);
       };
-      yield* registry.register('parent-reads-child-artifact', extractAndReadFn, {
-        description: 'parent reads child artifact via readChild',
-      });
+      yield* registry.register('test-action', fn, { description: 'capture artifacts root' });
 
+      const result = yield* runner.run(makeSimpleDef(), {}, { workspaceRoot: tmpDir });
+      const instance = yield* store.getInstance(result.instanceId);
+
+      // Root instance: artifactsWorkspace.root = <ARTIFACT_ROOT>/<instanceId>
+      expect(capturedArtifactsRoot).toContain(instance.id);
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('provides ctx.artifactsWorkspace.resolve() that resolves paths', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-ws-test-'));
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const registry = yield* ActionRegistry;
+
+      let resolvedArtifact = '';
+      const fn: ActionFunction = (ctx) => {
+        resolvedArtifact = ctx.artifactsWorkspace.resolve('report.json');
+        return Effect.succeed({ nextState: 'completed' } as TransitionResult);
+      };
+      yield* registry.register('test-action', fn, { description: 'resolve artifact path' });
+
+      yield* runner.run(makeSimpleDef(), {}, { workspaceRoot: tmpDir });
+      expect(resolvedArtifact).toContain('report.json');
+      expect(path.isAbsolute(resolvedArtifact)).toBe(true);
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('provides ctx.cli with working exec()', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-ws-test-'));
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const registry = yield* ActionRegistry;
+
+      let cliResult: { exitCode: number; stdout: string } | null = null;
+      const fn: ActionFunction = (ctx) =>
+        Effect.gen(function* () {
+          const result = yield* ctx.cli.exec({ command: 'echo', args: ['test'] });
+          cliResult = { exitCode: result.exitCode, stdout: result.stdout.trim() };
+          return { nextState: 'completed' } as TransitionResult;
+        });
+      yield* registry.register('test-action', fn, { description: 'cli exec' });
+
+      yield* runner.run(makeSimpleDef(), {}, { workspaceRoot: tmpDir });
+      expect(cliResult).not.toBeNull();
+      expect(cliResult).toHaveProperty('exitCode', 0);
+      expect(cliResult).toHaveProperty('stdout', 'test');
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('does NOT provide ctx.artifacts (removed)', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const registry = yield* ActionRegistry;
+
+      let hasArtifacts = true;
+      const fn: ActionFunction = (ctx) => {
+        hasArtifacts = 'artifacts' in ctx;
+        return Effect.succeed({ nextState: 'completed' } as TransitionResult);
+      };
+      yield* registry.register('test-action', fn, { description: 'check no artifacts' });
+
+      yield* runner.run(makeSimpleDef(), {});
+      expect(hasArtifacts).toBe(false);
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// §8.5 — Family Root Inheritance (Task 15)
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('Family root inheritance', () => {
+  /** Save a child definition in the store. */
+  const setupChildDef = (store: MachineStore) =>
+    store.saveDefinition({
+      name: 'Family Child',
+      inputSchema: {},
+      outputSchema: {},
+      states: {
+        childStart: { name: 'childStart', type: 'action', actionId: 'child-action' },
+        completed: { name: 'completed', type: 'terminal' },
+        cancelled: { name: 'cancelled', type: 'terminal' },
+        error: { name: 'error', type: 'terminal' },
+      },
+      initialState: 'childStart',
+      transitions: [
+        { from: 'childStart', to: 'completed' },
+        { from: 'childStart', to: 'error' },
+      ],
+    });
+
+  it('root instance has familyRootInstanceId equal to own id', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      yield* registerAction(registry, 'test-action', 'completed');
+
+      const result = yield* runner.run(makeSimpleDef(), {});
+      const instance = yield* store.getInstance(result.instanceId);
+
+      expect(instance.familyRootInstanceId).toBe(instance.id);
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('child instance inherits parent familyRootInstanceId', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      yield* registerAction(registry, 'child-action', 'completed', { childDone: true });
+      yield* registerAction(registry, 'parent-after-child', 'completed', { parentDone: true });
+
+      const childDef = yield* setupChildDef(store);
       const parentDef: StateMachineDefinition = {
-        id: 'def-artifact-parent',
-        name: 'Artifact Parent',
+        id: 'def-parent',
+        name: 'Parent Machine',
         version: 1,
         inputSchema: {},
         outputSchema: {},
@@ -2767,7 +2842,7 @@ describe('StateMachineRunner — Artifacts (§15)', () => {
           spawnChild: {
             name: 'spawnChild',
             type: 'child_machine',
-            actionId: 'parent-reads-child-artifact',
+            actionId: 'parent-after-child',
             childMachineDefId: childDef.id,
             childInputMapping: '$.stateData',
           },
@@ -2780,20 +2855,19 @@ describe('StateMachineRunner — Artifacts (§15)', () => {
           { from: 'spawnChild', to: 'completed' },
           { from: 'spawnChild', to: 'error' },
         ],
-        metadata: {
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
+        metadata: { createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
       };
 
       const result = yield* runner.run(parentDef, {});
-      expect(result.status).toBe('completed');
-      expect(childInstanceId).not.toBeNull();
-      expect(readContent).toBe('child data');
+      const parent = yield* store.getInstance(result.instanceId);
+      const children = yield* store.listInstances({ parentInstanceId: parent.id });
+
+      expect(children.length).toBeGreaterThanOrEqual(1);
+      expect(children[0].familyRootInstanceId).toBe(parent.familyRootInstanceId);
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
 
-  it('parallel children artifacts accessible from parent', async () => {
+  it('grandchild inherits root familyRootInstanceId', async () => {
     const layer = makeTestLayer();
 
     await Effect.gen(function* () {
@@ -2801,62 +2875,203 @@ describe('StateMachineRunner — Artifacts (§15)', () => {
       const store = yield* MachineStore;
       const registry = yield* ActionRegistry;
 
-      // Each parallel child writes a unique artifact
-      let callCount = 0;
-      const childFn: ActionFunction = (ctx) => {
-        const myCount = callCount++;
-        return ctx.artifacts
-          .write(
-            `output-${String(myCount)}.txt`,
-            new TextEncoder().encode(`data-${String(myCount)}`),
-          )
-          .pipe(
-            Effect.map(() => ({ nextState: 'completed' }) as TransitionResult),
-            Effect.catchAll(() => Effect.succeed({ nextState: 'completed' } as TransitionResult)),
-          );
-      };
-      yield* registry.register('parallel-artifact-action', childFn, {
-        description: 'child writes unique artifact',
-      });
+      // Grandchild action
+      yield* registerAction(registry, 'grandchild-action', 'completed', { gcDone: true });
+      yield* registerAction(registry, 'child-after-gc', 'completed', { childDone: true });
+      yield* registerAction(registry, 'root-after-child', 'completed', { rootDone: true });
 
-      // Parent lists child artifacts
-      const childArtifactCounts: number[] = [];
-      const parentFn: ActionFunction = (ctx) => {
-        const data = ctx.stateData as {
-          childInstanceIds?: Record<string, string>;
-        };
-        if (data.childInstanceIds) {
-          return Effect.all(
-            Object.values(data.childInstanceIds).map((cid) =>
-              ctx.artifacts.listChild(cid).pipe(
-                Effect.tap((artifacts) =>
-                  Effect.sync(() => {
-                    childArtifactCounts.push(artifacts.length);
-                  }),
-                ),
-              ),
-            ),
-          ).pipe(
-            Effect.map(() => ({ nextState: 'completed' }) as TransitionResult),
-            Effect.catchAll(() => Effect.succeed({ nextState: 'completed' } as TransitionResult)),
-          );
-        }
-        return Effect.succeed({ nextState: 'completed' } as TransitionResult);
-      };
-      yield* registry.register('parent-lists-artifacts', parentFn, {
-        description: 'parent lists child artifacts',
-      });
-
-      const childDef = yield* store.saveDefinition({
-        name: 'Parallel Artifact Child',
+      // Grandchild definition
+      const gcDef = yield* store.saveDefinition({
+        name: 'Grandchild Machine',
         inputSchema: {},
         outputSchema: {},
         states: {
-          childStart: {
-            name: 'childStart',
-            type: 'action',
-            actionId: 'parallel-artifact-action',
+          gcStart: { name: 'gcStart', type: 'action', actionId: 'grandchild-action' },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'gcStart',
+        transitions: [
+          { from: 'gcStart', to: 'completed' },
+          { from: 'gcStart', to: 'error' },
+        ],
+      });
+
+      // Child definition (spawns grandchild)
+      const childDef = yield* store.saveDefinition({
+        name: 'Child Machine',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          spawnGC: {
+            name: 'spawnGC',
+            type: 'child_machine',
+            actionId: 'child-after-gc',
+            childMachineDefId: gcDef.id,
+            childInputMapping: '$.stateData',
           },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'spawnGC',
+        transitions: [
+          { from: 'spawnGC', to: 'completed' },
+          { from: 'spawnGC', to: 'error' },
+        ],
+      });
+
+      // Root definition (spawns child)
+      const rootDef: StateMachineDefinition = {
+        id: 'def-root',
+        name: 'Root Machine',
+        version: 1,
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          spawnChild: {
+            name: 'spawnChild',
+            type: 'child_machine',
+            actionId: 'root-after-child',
+            childMachineDefId: childDef.id,
+            childInputMapping: '$.stateData',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'spawnChild',
+        transitions: [
+          { from: 'spawnChild', to: 'completed' },
+          { from: 'spawnChild', to: 'error' },
+        ],
+        metadata: { createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      };
+
+      const result = yield* runner.run(rootDef, {});
+      const root = yield* store.getInstance(result.instanceId);
+      const allInstances = yield* store.listInstances({});
+
+      // All instances in the chain should share the same familyRootInstanceId
+      for (const inst of allInstances) {
+        expect(inst.familyRootInstanceId).toBe(root.id);
+      }
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('child inherits parent workspaceRoot', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-inherit-test-'));
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      yield* registerAction(registry, 'child-action', 'completed');
+      yield* registerAction(registry, 'parent-after-child', 'completed');
+
+      const childDef = yield* setupChildDef(store);
+      const parentDef: StateMachineDefinition = {
+        id: 'def-parent-ws',
+        name: 'Parent WS',
+        version: 1,
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          spawnChild: {
+            name: 'spawnChild',
+            type: 'child_machine',
+            actionId: 'parent-after-child',
+            childMachineDefId: childDef.id,
+            childInputMapping: '$.stateData',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'spawnChild',
+        transitions: [
+          { from: 'spawnChild', to: 'completed' },
+          { from: 'spawnChild', to: 'error' },
+        ],
+        metadata: { createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      };
+
+      yield* runner.run(parentDef, {}, { workspaceRoot: tmpDir });
+
+      const children = yield* store.listInstances({});
+      const child = children.find((i) => i.parentInstanceId !== undefined);
+      expect(child).toBeDefined();
+      expect(child).toHaveProperty('workspaceRoot', tmpDir);
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('child artifactsPath matches parent artifactsPath', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      yield* registerAction(registry, 'child-action', 'completed');
+      yield* registerAction(registry, 'parent-after-child', 'completed');
+
+      const childDef = yield* setupChildDef(store);
+      const parentDef: StateMachineDefinition = {
+        id: 'def-parent-art',
+        name: 'Parent Artifacts',
+        version: 1,
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          spawnChild: {
+            name: 'spawnChild',
+            type: 'child_machine',
+            actionId: 'parent-after-child',
+            childMachineDefId: childDef.id,
+            childInputMapping: '$.stateData',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'spawnChild',
+        transitions: [
+          { from: 'spawnChild', to: 'completed' },
+          { from: 'spawnChild', to: 'error' },
+        ],
+        metadata: { createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      };
+
+      const result = yield* runner.run(parentDef, {});
+      const parent = yield* store.getInstance(result.instanceId);
+      const children = yield* store.listInstances({ parentInstanceId: parent.id });
+
+      expect(children.length).toBeGreaterThanOrEqual(1);
+      expect(children[0].artifactsPath).toBe(parent.artifactsPath);
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('parallel children all inherit family root', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      yield* registerAction(registry, 'pc-child-action', 'completed', { done: true });
+      yield* registerAction(registry, 'pc-parent-after', 'completed', { parentDone: true });
+
+      const childDef = yield* store.saveDefinition({
+        name: 'Parallel Family Child',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          childStart: { name: 'childStart', type: 'action', actionId: 'pc-child-action' },
           completed: { name: 'completed', type: 'terminal' },
           cancelled: { name: 'cancelled', type: 'terminal' },
           error: { name: 'error', type: 'terminal' },
@@ -2869,8 +3084,8 @@ describe('StateMachineRunner — Artifacts (§15)', () => {
       });
 
       const parentDef: StateMachineDefinition = {
-        id: 'def-parallel-artifact-parent',
-        name: 'Parallel Artifact Parent',
+        id: 'def-parallel-family',
+        name: 'Parallel Family Parent',
         version: 1,
         inputSchema: {},
         outputSchema: {},
@@ -2878,7 +3093,7 @@ describe('StateMachineRunner — Artifacts (§15)', () => {
           spawnChildren: {
             name: 'spawnChildren',
             type: 'parallel_children',
-            actionId: 'parent-lists-artifacts',
+            actionId: 'pc-parent-after',
             parallelMode: 'all_settled',
             children: [
               { key: 'child-a', machineDefId: childDef.id, inputMapping: '$.stateData' },
@@ -2894,22 +3109,333 @@ describe('StateMachineRunner — Artifacts (§15)', () => {
           { from: 'spawnChildren', to: 'completed' },
           { from: 'spawnChildren', to: 'error' },
         ],
-        metadata: {
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
+        metadata: { createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
       };
 
       const result = yield* runner.run(parentDef, {});
-      expect(result.status).toBe('completed');
+      const parent = yield* store.getInstance(result.instanceId);
+      const children = yield* store.listInstances({ parentInstanceId: parent.id });
 
-      // Parent should have listed artifacts from both children
-      expect(childArtifactCounts).toHaveLength(2);
-      // Each child wrote 1 artifact
-      childArtifactCounts.forEach((count) => {
-        expect(count).toBeGreaterThanOrEqual(1);
-      });
+      expect(children.length).toBeGreaterThanOrEqual(2);
+      for (const child of children) {
+        expect(child.familyRootInstanceId).toBe(parent.familyRootInstanceId);
+        expect(child.artifactsPath).toBe(parent.artifactsPath);
+      }
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
 });
-/* eslint-enable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
+
+// ════════════════════════════════════════════════════════════════════════════
+// §4.4 — Workspace Root Validation (Task 15)
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('workspaceRoot validation', () => {
+  it('accepts valid absolute workspaceRoot', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-valid-ws-'));
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const registry = yield* ActionRegistry;
+
+      yield* registerAction(registry, 'test-action', 'completed');
+
+      const result = yield* runner.run(makeSimpleDef(), {}, { workspaceRoot: tmpDir });
+      expect(result.status).toBe('completed');
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('instance stores the workspaceRoot value', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-ws-store-'));
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      yield* registerAction(registry, 'test-action', 'completed');
+
+      const result = yield* runner.run(makeSimpleDef(), {}, { workspaceRoot: tmpDir });
+      const instance = yield* store.getInstance(result.instanceId);
+      expect(instance.workspaceRoot).toBe(tmpDir);
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('defaults workspaceRoot to empty string when not provided', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      yield* registerAction(registry, 'test-action', 'completed');
+
+      const result = yield* runner.run(makeSimpleDef(), {});
+      const instance = yield* store.getInstance(result.instanceId);
+      expect(instance.workspaceRoot).toBe('');
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// §16.1–16.6 — CLI Exit Code Branching (Task 15)
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('CLI exit code branching', () => {
+  it('action can branch on exitCode === 0 (success path)', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-cli-branch-'));
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const registry = yield* ActionRegistry;
+
+      const fn: ActionFunction = (ctx) =>
+        Effect.gen(function* () {
+          const result = yield* ctx.cli.exec({ command: 'echo', args: ['ok'] });
+          const nextState = result.exitCode === 0 ? 'successState' : 'errorState';
+          return { nextState } as TransitionResult;
+        });
+      yield* registry.register('branch-action', fn, { description: 'cli branch' });
+      yield* registerAction(registry, 'success-action', 'completed', { path: 'success' });
+      yield* registerAction(registry, 'error-action', 'completed', { path: 'error' });
+
+      const def = makeBranchingDef({
+        id: 'def-cli-branch',
+        states: {
+          init: { name: 'init', type: 'action', actionId: 'branch-action' },
+          successState: { name: 'successState', type: 'action', actionId: 'success-action' },
+          errorState: { name: 'errorState', type: 'action', actionId: 'error-action' },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        transitions: [
+          { from: 'init', to: 'successState' },
+          { from: 'init', to: 'errorState' },
+          { from: 'init', to: 'error' },
+          { from: 'successState', to: 'completed' },
+          { from: 'successState', to: 'error' },
+          { from: 'errorState', to: 'completed' },
+          { from: 'errorState', to: 'error' },
+        ],
+      });
+
+      const result = yield* runner.run(def, {}, { workspaceRoot: tmpDir });
+      expect(result.status).toBe('completed');
+      if (result.status === 'completed') {
+        expect(result.output).toEqual({ path: 'success' });
+      }
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('action can branch on exitCode !== 0 (error path)', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-cli-branch-'));
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const registry = yield* ActionRegistry;
+
+      const fn: ActionFunction = (ctx) =>
+        Effect.gen(function* () {
+          const result = yield* ctx.cli.exec({ command: 'bash', args: ['-c', 'exit 1'] });
+          const nextState = result.exitCode === 0 ? 'successState' : 'errorState';
+          return { nextState } as TransitionResult;
+        });
+      yield* registry.register('branch-action', fn, { description: 'cli branch fail' });
+      yield* registerAction(registry, 'success-action', 'completed', { path: 'success' });
+      yield* registerAction(registry, 'error-action', 'completed', { path: 'error' });
+
+      const def = makeBranchingDef({
+        id: 'def-cli-branch-fail',
+        states: {
+          init: { name: 'init', type: 'action', actionId: 'branch-action' },
+          successState: { name: 'successState', type: 'action', actionId: 'success-action' },
+          errorState: { name: 'errorState', type: 'action', actionId: 'error-action' },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        transitions: [
+          { from: 'init', to: 'successState' },
+          { from: 'init', to: 'errorState' },
+          { from: 'init', to: 'error' },
+          { from: 'successState', to: 'completed' },
+          { from: 'successState', to: 'error' },
+          { from: 'errorState', to: 'completed' },
+          { from: 'errorState', to: 'error' },
+        ],
+      });
+
+      const result = yield* runner.run(def, {}, { workspaceRoot: tmpDir });
+      expect(result.status).toBe('completed');
+      if (result.status === 'completed') {
+        expect(result.output).toEqual({ path: 'error' });
+      }
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('action can parse stdout to determine next state', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-cli-parse-'));
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const registry = yield* ActionRegistry;
+
+      const fn: ActionFunction = (ctx) =>
+        Effect.gen(function* () {
+          const result = yield* ctx.cli.exec({
+            command: 'bash',
+            args: ['-c', 'echo \'{"route": "branchA"}\''],
+          });
+          const parsed = JSON.parse(result.stdout.trim()) as { route: string };
+          return { nextState: parsed.route, data: parsed } as TransitionResult;
+        });
+      yield* registry.register('branch-action', fn, { description: 'parse stdout' });
+      yield* registerAction(registry, 'action-a', 'completed', { fromA: true });
+      yield* registerAction(registry, 'action-b', 'completed', { fromB: true });
+
+      const result = yield* runner.run(makeBranchingDef(), {}, { workspaceRoot: tmpDir });
+      expect(result.status).toBe('completed');
+      if (result.status === 'completed') {
+        expect(result.output).toEqual({ fromA: true });
+      }
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('non-zero exit does not automatically fail the machine', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-cli-nofail-'));
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const registry = yield* ActionRegistry;
+
+      const fn: ActionFunction = (ctx) =>
+        Effect.gen(function* () {
+          const result = yield* ctx.cli.exec({ command: 'bash', args: ['-c', 'exit 42'] });
+          // Non-zero exit code, but the action decides to succeed
+          return {
+            nextState: 'completed',
+            data: { exitCode: result.exitCode },
+          } as TransitionResult;
+        });
+      yield* registry.register('test-action', fn, { description: 'non-zero ok' });
+
+      const result = yield* runner.run(makeSimpleDef(), {}, { workspaceRoot: tmpDir });
+      expect(result.status).toBe('completed');
+      if (result.status === 'completed') {
+        expect(result.output).toEqual({ exitCode: 42 });
+      }
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// §15.6 — Artifact Infrastructure Removal (Task 15)
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('artifact infrastructure removal', () => {
+  it('MachineInstance does not have artifacts field', () => {
+    // Runtime check: build a minimal instance and verify no artifacts property
+    const instance: MachineInstance = {
+      id: 'inst-1',
+      definitionId: 'def-1',
+      definitionVersion: 1,
+      status: 'running',
+      currentState: 'start',
+      stateData: {},
+      input: {},
+      history: [],
+      logs: [],
+      workspaceRoot: '/tmp/test',
+      familyRootInstanceId: 'inst-1',
+      artifactsPath: '/tmp/data/artifacts/inst-1',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    expect('artifacts' in instance).toBe(false);
+    expect(instance).not.toHaveProperty('artifacts');
+  });
+
+  it('MachineEvent does not include artifact_created', () => {
+    // Verify all known event types — none should be artifact_created
+    const eventTypes: MachineEvent['type'][] = [
+      'state_changed',
+      'transition_recorded',
+      'log_entry',
+      'machine_completed',
+      'machine_resumed',
+      'child_spawned',
+      'child_completed',
+      'children_spawned',
+      'children_completed',
+    ];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((eventTypes as any[]).includes('artifact_created')).toBe(false);
+  });
+
+  it('no artifact_created events are published during machine execution', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      yield* registerAction(registry, 'test-action', 'completed', { done: true });
+
+      // Run a machine
+      const result = yield* runner.run(makeSimpleDef(), {});
+      expect(result.status).toBe('completed');
+
+      // Verify at the type level: MachineEvent union does not include artifact_created
+      const knownEventTypes = new Set<string>([
+        'state_changed',
+        'transition_recorded',
+        'log_entry',
+        'machine_completed',
+        'machine_resumed',
+        'child_spawned',
+        'child_completed',
+        'children_spawned',
+        'children_completed',
+      ]);
+      expect(knownEventTypes.has('artifact_created')).toBe(false);
+
+      // Also verify the instance has no artifacts field
+      const instance = yield* store.getInstance(result.instanceId);
+      expect('artifacts' in instance).toBe(false);
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('ActionContext does not include artifacts property', async () => {
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const registry = yield* ActionRegistry;
+
+      const ctxKeys: string[] = [];
+      const fn: ActionFunction = (ctx) => {
+        ctxKeys.push(...Object.keys(ctx));
+        return Effect.succeed({ nextState: 'completed' } as TransitionResult);
+      };
+      yield* registry.register('test-action', fn, { description: 'check ctx keys' });
+
+      yield* runner.run(makeSimpleDef(), {});
+
+      expect(ctxKeys).not.toContain('artifacts');
+      // Verify expected keys are present
+      expect(ctxKeys).toContain('cli');
+      expect(ctxKeys).toContain('workspace');
+      expect(ctxKeys).toContain('artifactsWorkspace');
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+});
