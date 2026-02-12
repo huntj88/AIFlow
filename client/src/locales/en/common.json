@@ -62,7 +62,8 @@
   "machines.instance.logs_autoscroll": "Auto-scroll",
   "machines.instance.children_empty": "No child machines spawned.",
   "machines.instance.children_parent": "Parent Instance",
-  "machines.instance.artifacts_empty": "No artifacts created.",
+  "machines.instance.workspace_root": "Workspace",
+  "machines.instance.family_root": "Family Root",
   "machines.definition_editor.title_new": "New Definition",
   "machines.definition_editor.title_edit": "Edit Definition",
   "machines.definition_editor.placeholder": "Definition editor coming soon.",
@@ -131,7 +132,7 @@
   "machines.empty.noDefinitionsCta": "Create your first state machine",
   "machines.empty.noInstances": "No instances yet. Start an instance from the dashboard.",
   "machines.empty.noLogs": "No log entries",
-  "machines.empty.noArtifacts": "No artifacts produced",
+
   "machines.empty.noChildren": "This instance has no child machines",
   "machines.websocket.connected": "Live updates active",
   "machines.websocket.reconnecting": "Reconnecting…",

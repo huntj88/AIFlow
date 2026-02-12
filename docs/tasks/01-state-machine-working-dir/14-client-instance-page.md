@@ -146,12 +146,12 @@ Update `client/src/locales/en/` translation files:
 
 ## Validation Checklist
 
-- [ ] `MachineInstancePage` compiles without artifact-related imports
-- [ ] `ArtifactViewer.tsx` deleted
-- [ ] `ArtifactsPathDisplay` integrated in artifacts tab (shows path string)
-- [ ] Instance page displays `workspaceRoot`, `artifactsPath`, `familyRootInstanceId`
-- [ ] No references to `instance.artifacts` anywhere in client code
-- [ ] No references to `ArtifactRecord` or `ArtifactTree` in client code
-- [ ] Dashboard launch form includes workspace root field
-- [ ] `pnpm --filter @aiflow/client exec tsc --noEmit` passes
-- [ ] `pnpm --filter @aiflow/client run lint` passes
+- [x] `MachineInstancePage` compiles without artifact-related imports
+- [x] `ArtifactViewer.tsx` deleted
+- [x] `ArtifactsPathDisplay` integrated in artifacts tab (shows path string)
+- [x] Instance page displays `workspaceRoot`, `artifactsPath`, `familyRootInstanceId`
+- [x] No references to `instance.artifacts` anywhere in client code
+- [x] No references to `ArtifactRecord` or `ArtifactTree` in client code
+- [x] Dashboard launch form includes workspace root field
+- [x] `pnpm --filter @aiflow/client exec tsc --noEmit` passes
+- [x] `pnpm --filter @aiflow/client run lint` passes

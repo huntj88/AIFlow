@@ -5,6 +5,7 @@ import { Link, useParams, useSearchParams } from 'react-router';
 
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { SkeletonHeader } from '@/components/common/Skeleton';
+import { ArtifactsPathDisplay } from '@/components/machines/ArtifactsPathDisplay';
 import { ChildMachineTree } from '@/components/machines/ChildMachineTree';
 import { LogViewer } from '@/components/machines/LogViewer';
 import { StateDiagram } from '@/components/machines/StateDiagram';
@@ -21,9 +22,9 @@ import { machineRoutes } from '@/utils/machineRoutes';
 // Tab type
 // ────────────────────────────────────────────────────────────────────────────
 
-type Tab = 'diagram' | 'history' | 'logs' | 'children';
+type Tab = 'diagram' | 'history' | 'logs' | 'children' | 'artifacts';
 
-const TABS: Tab[] = ['diagram', 'history', 'logs', 'children'];
+const TABS: Tab[] = ['diagram', 'history', 'logs', 'children', 'artifacts'];
 
 // ────────────────────────────────────────────────────────────────────────────
 // Component
@@ -286,6 +287,22 @@ export function MachineInstancePage() {
         </div>
       </header>
 
+      {/* ── Workspace info ───────────────────────────────────────────── */}
+      <div className="mt-3 text-sm text-[var(--color-text-muted)]" data-testid="workspace-info">
+        <div>
+          <span className="font-medium">{t('machines.instance.workspace_root')}:</span>{' '}
+          <code className="text-xs">{instance.workspaceRoot}</code>
+        </div>
+        <div>
+          <span className="font-medium">{t('machines.instance.artifacts_directory')}:</span>{' '}
+          <code className="text-xs">{instance.artifactsPath}</code>
+        </div>
+        <div>
+          <span className="font-medium">{t('machines.instance.family_root')}:</span>{' '}
+          <code className="text-xs">{instance.familyRootInstanceId}</code>
+        </div>
+      </div>
+
       {/* ── Tab bar ─────────────────────────────────────────────────────── */}
       <nav
         className="flex gap-1 border-b border-[var(--color-border)] py-2"
@@ -344,6 +361,12 @@ export function MachineInstancePage() {
             definitionNames={childDefNames}
             childStatuses={childStatuses}
           />
+        )}
+
+        {activeTab === 'artifacts' && (
+          <div className="p-4">
+            <ArtifactsPathDisplay artifactsPath={instance.artifactsPath} />
+          </div>
         )}
       </div>
 
