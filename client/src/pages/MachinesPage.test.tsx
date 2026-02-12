@@ -41,7 +41,9 @@ const MOCK_INSTANCE: MachineInstance = {
   input: {},
   history: [],
   logs: [],
-  artifacts: [],
+  workspaceRoot: '/tmp/test',
+  familyRootInstanceId: 'inst-1',
+  artifactsPath: '/tmp/test/.aiflow/artifacts',
   createdAt: '2026-02-01T10:00:00Z',
   updatedAt: '2026-02-01T10:00:00Z',
 };

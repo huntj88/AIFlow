@@ -6,7 +6,7 @@ import type { StateMachineDefinition } from '@/types/machines';
 interface QuickStartPanelProps {
   readonly definitions: StateMachineDefinition[];
   readonly isLoading: boolean;
-  readonly onLaunch: (definitionId: string, input: unknown) => void;
+  readonly onLaunch: (definitionId: string, input: unknown, workspaceRoot: string) => void;
 }
 
 export function QuickStartPanel({ definitions, isLoading, onLaunch }: QuickStartPanelProps) {
@@ -14,6 +14,8 @@ export function QuickStartPanel({ definitions, isLoading, onLaunch }: QuickStart
   const [selectedDefinitionId, setSelectedDefinitionId] = useState('');
   const [inputJson, setInputJson] = useState('{}');
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const [workspaceRoot, setWorkspaceRoot] = useState('');
+  const [workspaceRootError, setWorkspaceRootError] = useState<string | null>(null);
 
   const validateJson = useCallback(
     (value: string) => {
@@ -33,8 +35,14 @@ export function QuickStartPanel({ definitions, isLoading, onLaunch }: QuickStart
     if (!selectedDefinitionId) return;
     if (!validateJson(inputJson)) return;
 
+    if (!workspaceRoot.startsWith('/')) {
+      setWorkspaceRootError(t('machines.quickstart.invalid_workspace_root'));
+      return;
+    }
+    setWorkspaceRootError(null);
+
     const parsed = JSON.parse(inputJson) as unknown;
-    onLaunch(selectedDefinitionId, parsed);
+    onLaunch(selectedDefinitionId, parsed, workspaceRoot);
   };
 
   return (
@@ -86,9 +94,33 @@ export function QuickStartPanel({ definitions, isLoading, onLaunch }: QuickStart
         )}
       </div>
 
+      <div className="mb-3">
+        <label className="mb-1 block text-xs text-[var(--color-text-muted)]">
+          {t('machines.quickstart.workspace_root_label')}
+        </label>
+        <input
+          type="text"
+          value={workspaceRoot}
+          onChange={(e) => {
+            setWorkspaceRoot(e.target.value);
+            if (workspaceRootError && e.target.value.startsWith('/')) {
+              setWorkspaceRootError(null);
+            }
+          }}
+          placeholder={t('machines.quickstart.workspace_root_placeholder')}
+          className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)]"
+          data-testid="workspace-root-input"
+        />
+        {workspaceRootError && (
+          <p className="mt-1 text-xs text-red-500" data-testid="workspace-root-error">
+            {workspaceRootError}
+          </p>
+        )}
+      </div>
+
       <button
         onClick={handleLaunch}
-        disabled={!selectedDefinitionId || isLoading}
+        disabled={!selectedDefinitionId || !workspaceRoot || isLoading}
         className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm text-white disabled:opacity-50"
         data-testid="launch-button"
       >

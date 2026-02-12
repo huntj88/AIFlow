@@ -141,9 +141,9 @@ export function MachinesPage() {
   );
 
   const handleLaunch = useCallback(
-    async (definitionId: string, input: unknown) => {
+    async (definitionId: string, input: unknown, workspaceRoot: string) => {
       try {
-        const instance = await instancesStore.startInstance(definitionId, input);
+        const instance = await instancesStore.startInstance(definitionId, input, workspaceRoot);
         toast.success(t('machines.toast.instanceStarted'));
         void navigate(machineRoutes.viewInstance(instance.id));
       } catch (err) {
@@ -316,8 +316,8 @@ export function MachinesPage() {
           <QuickStartPanel
             definitions={definitions}
             isLoading={instancesLoading}
-            onLaunch={(defId, input) => {
-              void handleLaunch(defId, input);
+            onLaunch={(defId, input, wsRoot) => {
+              void handleLaunch(defId, input, wsRoot);
             }}
           />
         </div>

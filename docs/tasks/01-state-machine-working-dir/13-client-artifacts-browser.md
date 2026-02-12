@@ -65,6 +65,6 @@ export function ArtifactsPathDisplay({ artifactsPath }: ArtifactsPathDisplayProp
 
 ## Validation Checklist
 
-- [ ] `ArtifactViewer.tsx` deleted
-- [ ] `ArtifactsPathDisplay` component created and renders `artifactsPath`
-- [ ] `pnpm --filter @aiflow/client exec tsc --noEmit` passes
+- [x] `ArtifactViewer.tsx` deleted
+- [x] `ArtifactsPathDisplay` component created and renders `artifactsPath`
+- [x] `pnpm --filter @aiflow/client exec tsc --noEmit` passes

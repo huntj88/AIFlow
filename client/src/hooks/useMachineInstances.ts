@@ -17,7 +17,11 @@ interface MachineInstancesStore {
 
   fetchInstances(filter?: InstanceFilter): Promise<void>;
   fetchInstance(id: string): Promise<void>;
-  startInstance(definitionId: string, input: unknown): Promise<MachineInstance>;
+  startInstance(
+    definitionId: string,
+    input: unknown,
+    workspaceRoot: string,
+  ): Promise<MachineInstance>;
   cancelInstance(id: string): Promise<void>;
   resumeInstance(id: string): Promise<void>;
 
@@ -73,10 +77,12 @@ export const useMachineInstances = create<MachineInstancesStore>()((set, get) =>
     }
   },
 
-  async startInstance(definitionId, input) {
+  async startInstance(definitionId, input, workspaceRoot) {
     set({ isLoading: true, error: null });
     try {
-      const instance = await runWithLogging(apiClient.startInstance(definitionId, input));
+      const instance = await runWithLogging(
+        apiClient.startInstance(definitionId, input, workspaceRoot),
+      );
       // Optimistically add the returned instance to the list
       set((state) => ({
         instances: [...state.instances, instance],
@@ -218,18 +224,6 @@ export const useMachineInstances = create<MachineInstancesStore>()((set, get) =>
 
       case 'children_completed': {
         applyPatch({ childInstanceIds: undefined });
-        break;
-      }
-
-      case 'artifact_created': {
-        const { currentInstance, instances } = get();
-        const target =
-          currentInstance?.id === instanceId
-            ? currentInstance
-            : instances.find((i) => i.id === instanceId);
-        if (target) {
-          applyPatch({ artifacts: [...target.artifacts, event.data] });
-        }
         break;
       }
     }

@@ -130,12 +130,12 @@ Search the client codebase for all calls to `apiClient.startInstance` or
 
 ## Validation Checklist
 
-- [ ] `apiClient.startInstance()` includes `workspaceRoot` parameter
-- [ ] `apiClient.getInstanceArtifacts()` removed
-- [ ] `apiClient.getInstanceArtifactTree()` removed
-- [ ] `apiClient.downloadArtifact()` removed
-- [ ] `useMachineArtifacts.ts` hook deleted
-- [ ] `artifact_created` event handling removed from all components
-- [ ] Dashboard launch form includes workspace root input
-- [ ] `pnpm --filter @aiflow/client exec tsc --noEmit` passes (with expected errors
+- [x] `apiClient.startInstance()` includes `workspaceRoot` parameter
+- [x] `apiClient.getInstanceArtifacts()` removed
+- [x] `apiClient.getInstanceArtifactTree()` removed
+- [x] `apiClient.downloadArtifact()` removed
+- [x] `useMachineArtifacts.ts` hook deleted
+- [x] `artifact_created` event handling removed from all components
+- [x] Dashboard launch form includes workspace root input
+- [x] `pnpm --filter @aiflow/client exec tsc --noEmit` passes (with expected errors
       in ArtifactViewer — fixed in Task 13)

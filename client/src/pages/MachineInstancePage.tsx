@@ -5,13 +5,11 @@ import { Link, useParams, useSearchParams } from 'react-router';
 
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { SkeletonHeader } from '@/components/common/Skeleton';
-import { ArtifactViewer } from '@/components/machines/ArtifactViewer';
 import { ChildMachineTree } from '@/components/machines/ChildMachineTree';
 import { LogViewer } from '@/components/machines/LogViewer';
 import { StateDiagram } from '@/components/machines/StateDiagram';
 import { StatusBadge } from '@/components/machines/StatusBadge';
 import { TransitionHistory } from '@/components/machines/TransitionHistory';
-import { useMachineArtifacts } from '@/hooks/useMachineArtifacts';
 import { useMachineDefinitions } from '@/hooks/useMachineDefinitions';
 import { useMachineInstances } from '@/hooks/useMachineInstances';
 import { useMachineLogs } from '@/hooks/useMachineLogs';
@@ -23,9 +21,9 @@ import { machineRoutes } from '@/utils/machineRoutes';
 // Tab type
 // ────────────────────────────────────────────────────────────────────────────
 
-type Tab = 'diagram' | 'history' | 'logs' | 'children' | 'artifacts';
+type Tab = 'diagram' | 'history' | 'logs' | 'children';
 
-const TABS: Tab[] = ['diagram', 'history', 'logs', 'children', 'artifacts'];
+const TABS: Tab[] = ['diagram', 'history', 'logs', 'children'];
 
 // ────────────────────────────────────────────────────────────────────────────
 // Component
@@ -42,7 +40,6 @@ export function MachineInstancePage() {
   const instancesStore = useMachineInstances();
   const defsStore = useMachineDefinitions();
   const logsStore = useMachineLogs();
-  const artifactsStore = useMachineArtifacts();
 
   const instance = instancesStore.currentInstance;
   const isLoading = instancesStore.isLoading;
@@ -63,8 +60,6 @@ export function MachineInstancePage() {
 
     void instancesStore.fetchInstance(instanceId);
     void logsStore.fetchLogs(instanceId);
-    void artifactsStore.fetchArtifacts(instanceId);
-    void artifactsStore.fetchArtifactTree(instanceId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId]);
 
@@ -117,14 +112,6 @@ export function MachineInstancePage() {
       switch (event.type) {
         case 'log_entry':
           logsStore.addLogEntry(event.data);
-          break;
-
-        case 'artifact_created':
-          artifactsStore.addArtifact(event.data);
-          // Re-fetch tree to include new artifact
-          if (instanceId) {
-            void artifactsStore.fetchArtifactTree(instanceId);
-          }
           break;
 
         case 'child_spawned':
@@ -356,14 +343,6 @@ export function MachineInstancePage() {
             childInstanceIds={instance.childInstanceIds}
             definitionNames={childDefNames}
             childStatuses={childStatuses}
-          />
-        )}
-
-        {activeTab === 'artifacts' && (
-          <ArtifactViewer
-            instanceId={instance.id}
-            artifactTree={artifactsStore.artifactTree}
-            artifacts={artifactsStore.artifacts}
           />
         )}
       </div>

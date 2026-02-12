@@ -3,8 +3,6 @@ import { Effect } from 'effect';
 
 import type {
   ActionMetadata,
-  ArtifactRecord,
-  ArtifactTree,
   InstanceFilter,
   LogEntry,
   MachineInstance,
@@ -63,18 +61,6 @@ const makeDelete = (path: string) =>
     Effect.provide(FetchHttpClient.layer),
     Effect.tap(() => Effect.log('API delete succeeded', { path })),
     Effect.withLogSpan(`api.DELETE ${path}`),
-  );
-
-const makeGetBinary = (path: string) =>
-  Effect.gen(function* () {
-    const client = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk);
-    const response = yield* client.get(path);
-    return yield* response.arrayBuffer;
-  }).pipe(
-    Effect.scoped,
-    Effect.provide(FetchHttpClient.layer),
-    Effect.tap(() => Effect.log('API binary response received', { path })),
-    Effect.withLogSpan(`api.GET ${path}`),
   );
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -145,8 +131,8 @@ export const apiClient = {
   // ── Instances ────────────────────────────────────────────────────────────
 
   /** Start a new machine instance (returns immediately — instance runs in background). */
-  startInstance: (definitionId: string, input: unknown) =>
-    makePost('/api/machines/instances', { definitionId, input }) as Effect.Effect<
+  startInstance: (definitionId: string, input: unknown, workspaceRoot: string) =>
+    makePost('/api/machines/instances', { definitionId, input, workspaceRoot }) as Effect.Effect<
       MachineInstance,
       Error
     >,
@@ -191,25 +177,4 @@ export const apiClient = {
       { message: string },
       Error
     >,
-
-  // ── Artifacts ────────────────────────────────────────────────────────────
-
-  /** Get flat list of artifacts for an instance. */
-  getInstanceArtifacts: (id: string) =>
-    makeGet(`/api/machines/instances/${encodeURIComponent(id)}/artifacts`) as Effect.Effect<
-      ArtifactRecord[],
-      Error
-    >,
-
-  /** Get recursive artifact tree for an instance and its children. */
-  getInstanceArtifactTree: (id: string) =>
-    makeGet(
-      `/api/machines/instances/${encodeURIComponent(id)}/artifacts?tree=true`,
-    ) as Effect.Effect<ArtifactTree, Error>,
-
-  /** Download a specific artifact as binary content. */
-  downloadArtifact: (instanceId: string, name: string) =>
-    makeGetBinary(
-      `/api/machines/instances/${encodeURIComponent(instanceId)}/artifacts/${encodeURIComponent(name)}`,
-    ) as Effect.Effect<ArrayBuffer, Error>,
 };
