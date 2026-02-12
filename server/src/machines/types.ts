@@ -89,7 +89,9 @@ export interface MachineInstance {
   readonly childInstanceIds?: Record<string, string>;
   readonly history: TransitionRecord[];
   readonly logs: LogEntry[];
-  readonly artifacts: ArtifactRecord[];
+  readonly workspaceRoot: string;
+  readonly familyRootInstanceId: string;
+  readonly artifactsPath: string;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -142,6 +144,39 @@ export interface InstanceFilter {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// CLI Types
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Result of executing a CLI command. */
+export interface CliExecResult {
+  readonly exitCode: number; // -1 = spawn failure
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly durationMs: number;
+}
+
+/** Helper for executing CLI commands within an action. */
+export interface CliHelper {
+  exec(input: {
+    command: string;
+    args?: string[];
+    cwd?: string;
+    env?: Record<string, string>;
+  }): Effect.Effect<CliExecResult>;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Workspace Types
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Context for accessing a workspace directory. */
+export interface WorkspaceContext {
+  readonly root: string;
+  /** Resolve a path within the workspace root. */
+  resolve(relativePath: string): string;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Action Types
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -160,7 +195,9 @@ export interface ActionContext {
     readonly parentStateName: string;
   };
   readonly logger: StateLogger;
-  readonly artifacts: ArtifactStore;
+  readonly cli: CliHelper;
+  readonly workspace: WorkspaceContext;
+  readonly artifactsWorkspace: WorkspaceContext;
 }
 
 /** What an action returns to declare the next state. */
@@ -207,53 +244,6 @@ export interface MiddlewareContext {
   readonly stateName: string;
   readonly stateData: unknown;
   readonly definition: StateMachineDefinition;
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Artifact Types
-// ────────────────────────────────────────────────────────────────────────────
-
-/** Store for reading and writing artifact files scoped to a machine instance. */
-export interface ArtifactStore {
-  write(
-    name: string,
-    content: Uint8Array,
-    metadata?: ArtifactMetadata,
-  ): Effect.Effect<ArtifactRecord, StoreError>;
-  read(name: string): Effect.Effect<Uint8Array, StoreError | NotFoundError>;
-  list(): Effect.Effect<ArtifactRecord[], StoreError>;
-  readChild(
-    childInstanceId: string,
-    name: string,
-  ): Effect.Effect<Uint8Array, StoreError | NotFoundError>;
-  listChild(childInstanceId: string): Effect.Effect<ArtifactRecord[], StoreError>;
-  resolvePath(name: string): Effect.Effect<string, StoreError>;
-}
-
-/** Metadata for a single artifact file. */
-export interface ArtifactRecord {
-  readonly name: string;
-  readonly instanceId: string;
-  readonly stateName: string;
-  readonly size: number;
-  readonly mimeType?: string;
-  readonly metadata?: ArtifactMetadata;
-  readonly createdAt: string;
-}
-
-/** Optional metadata attached to an artifact. */
-export interface ArtifactMetadata {
-  readonly description?: string;
-  readonly tags?: string[];
-  readonly [key: string]: unknown;
-}
-
-/** Recursive artifact tree for an instance hierarchy. */
-export interface ArtifactTree {
-  readonly instanceId: string;
-  readonly definitionName: string;
-  readonly artifacts: ArtifactRecord[];
-  readonly children: ArtifactTree[];
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -311,11 +301,6 @@ export type MachineEvent =
       readonly type: 'children_completed';
       readonly instanceId: string;
       readonly data: { readonly results: Record<string, MachineResult> };
-    }
-  | {
-      readonly type: 'artifact_created';
-      readonly instanceId: string;
-      readonly data: ArtifactRecord;
     };
 
 // ────────────────────────────────────────────────────────────────────────────

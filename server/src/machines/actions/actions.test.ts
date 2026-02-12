@@ -49,13 +49,16 @@ function makeCtx(stateData: unknown, overrides?: Partial<ActionContext>): Action
     stateData,
     machineInput: {},
     logger: mockLogger(),
-    artifacts: {
-      write: () => Effect.die('not implemented'),
-      read: () => Effect.die('not implemented'),
-      list: () => Effect.succeed([]),
-      readChild: () => Effect.die('not implemented'),
-      listChild: () => Effect.succeed([]),
-      resolvePath: () => Effect.die('not implemented'),
+    cli: {
+      exec: () => Effect.succeed({ exitCode: 0, stdout: '', stderr: '', durationMs: 0 }),
+    },
+    workspace: {
+      root: '/tmp/test-workspace',
+      resolve: (p: string) => `/tmp/test-workspace/${p}`,
+    },
+    artifactsWorkspace: {
+      root: '/tmp/data/artifacts/root-001',
+      resolve: (p: string) => `/tmp/data/artifacts/root-001/${p}`,
     },
     ...overrides,
   };

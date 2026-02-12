@@ -76,12 +76,6 @@ export function makeApiHelpers(handler: Handler) {
     postResume: (id: string) =>
       handler(new Request(`${BASE}/instances/${id}/resume`, { method: 'POST' })),
 
-    getArtifacts: (id: string, query?: string) =>
-      handler(new Request(`${BASE}/instances/${id}/artifacts${query ?? ''}`)),
-
-    getArtifact: (id: string, name: string) =>
-      handler(new Request(`${BASE}/instances/${id}/artifacts/${name}`)),
-
     // ── Composite helpers ────────────────────────────────────────────────
 
     /**

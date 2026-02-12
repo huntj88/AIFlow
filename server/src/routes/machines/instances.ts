@@ -9,8 +9,6 @@
  *   GET    /api/machines/instances/:id/logs     — Get logs (optional ?state= filter)
  *   POST   /api/machines/instances/:id/cancel   — Cancel an instance
  *   POST   /api/machines/instances/:id/resume   — Resume a suspended instance
- *   GET    /api/machines/instances/:id/artifacts       — List artifacts (or ?tree=true)
- *   GET    /api/machines/instances/:id/artifacts/:name — Download artifact
  *
  * @module
  */
@@ -18,9 +16,9 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import AjvModule from 'ajv';
 import { Effect, Either, Option } from 'effect';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 
-import { ArtifactStoreFactory } from '@/machines/artifacts/index.js';
-import { buildArtifactTree } from '@/machines/artifacts/ArtifactTreeBuilder.js';
 import { decodeStartInstance } from '@/machines/schemas.js';
 import { MachineStore } from '@/machines/store/index.js';
 import { StateMachineRunner } from '@/machines/StateMachineRunner.js';
@@ -50,6 +48,35 @@ const readJsonBody = Effect.gen(function* () {
     Effect.catchAll(() => Effect.fail(mkValidationError({ message: 'Invalid request body' }))),
   );
 });
+
+/**
+ * Validate that `workspaceRoot` is an absolute path pointing to an existing directory.
+ * Returns void on success, fails with `ValidationError` on any issue.
+ */
+const validateWorkspaceRoot = (workspaceRoot: string) =>
+  Effect.gen(function* () {
+    if (!path.isAbsolute(workspaceRoot)) {
+      return yield* Effect.fail(
+        mkValidationError({
+          message: 'workspaceRoot must be an absolute path',
+        }),
+      );
+    }
+    const stat = yield* Effect.tryPromise({
+      try: () => fs.stat(workspaceRoot),
+      catch: () =>
+        mkValidationError({
+          message: `workspaceRoot does not exist: ${workspaceRoot}`,
+        }),
+    });
+    if (!stat.isDirectory()) {
+      return yield* Effect.fail(
+        mkValidationError({
+          message: `workspaceRoot is not a directory: ${workspaceRoot}`,
+        }),
+      );
+    }
+  });
 
 /**
  * Extract query parameters from the current request URL.
@@ -85,6 +112,9 @@ export const InstancesRouter = HttpRouter.empty.pipe(
       }
       const body = decoded.right;
 
+      // Validate workspaceRoot (§4.4)
+      yield* validateWorkspaceRoot(body.workspaceRoot);
+
       // Load definition — 404 if not found
       const store = yield* MachineStore;
       const definition = yield* store.getDefinition(body.definitionId);
@@ -105,7 +135,9 @@ export const InstancesRouter = HttpRouter.empty.pipe(
 
       // Fork the run so the HTTP response returns immediately
       const runner = yield* StateMachineRunner;
-      yield* Effect.forkDaemon(runner.run(definition, body.input));
+      yield* Effect.forkDaemon(
+        runner.run(definition, body.input, { workspaceRoot: body.workspaceRoot }),
+      );
 
       // Yield to the scheduler so the forked fiber can save the instance
       yield* Effect.yieldNow();
@@ -341,80 +373,6 @@ export const InstancesRouter = HttpRouter.empty.pipe(
           { message: err.message, details: err.details ?? [] },
           { status: 409 },
         ),
-      ),
-      Effect.catchAll(() =>
-        HttpServerResponse.json({ message: 'Internal server error' }, { status: 500 }),
-      ),
-    ),
-  ),
-
-  // ── GET /api/machines/instances/:id/artifacts ─────────────────────────
-  HttpRouter.get(
-    '/api/machines/instances/:id/artifacts',
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const id = params.id ?? '';
-      const store = yield* MachineStore;
-
-      const searchParams = yield* getSearchParams;
-      const treeMode = searchParams.get('tree') === 'true';
-
-      if (treeMode) {
-        const tree = yield* buildArtifactTree(id, store);
-        return yield* HttpServerResponse.json(tree);
-      }
-
-      const instance = yield* store.getInstance(id);
-      return yield* HttpServerResponse.json(instance.artifacts);
-    }).pipe(
-      Effect.catchTag('NotFoundError', (err) =>
-        HttpServerResponse.json({ message: 'Instance not found', id: err.id }, { status: 404 }),
-      ),
-      Effect.catchTag('StoreError', (err) =>
-        HttpServerResponse.json({ message: String(err.cause) }, { status: 500 }),
-      ),
-      Effect.catchAll(() =>
-        HttpServerResponse.json({ message: 'Internal server error' }, { status: 500 }),
-      ),
-    ),
-  ),
-
-  // ── GET /api/machines/instances/:id/artifacts/:name ───────────────────
-  HttpRouter.get(
-    '/api/machines/instances/:id/artifacts/:name',
-    Effect.gen(function* () {
-      const params = yield* HttpRouter.params;
-      const id = params.id ?? '';
-      const name = params.name ?? '';
-
-      const store = yield* MachineStore;
-      const instance = yield* store.getInstance(id);
-
-      // Check that the artifact exists in the instance record
-      const artifact = instance.artifacts.find((a) => a.name === name);
-      if (!artifact) {
-        return yield* Effect.fail(mkNotFoundError({ entityType: 'instance', id: name }));
-      }
-
-      // Read the artifact content via ArtifactStoreFactory
-      const factory = yield* ArtifactStoreFactory;
-      const artifactStore = factory.makeScoped(id, '', instance.parentInstanceId);
-      const content = yield* artifactStore.read(name);
-
-      const contentType = artifact.mimeType ?? 'application/octet-stream';
-      return HttpServerResponse.uint8Array(content, { contentType });
-    }).pipe(
-      Effect.catchTag('NotFoundError', (err) =>
-        HttpServerResponse.json(
-          {
-            message: `${err.entityType.charAt(0).toUpperCase() + err.entityType.slice(1)} not found`,
-            id: err.id,
-          },
-          { status: 404 },
-        ),
-      ),
-      Effect.catchTag('StoreError', (err) =>
-        HttpServerResponse.json({ message: String(err.cause) }, { status: 500 }),
       ),
       Effect.catchAll(() =>
         HttpServerResponse.json({ message: 'Internal server error' }, { status: 500 }),

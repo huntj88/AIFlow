@@ -15,7 +15,6 @@ import { HttpApp, HttpRouter } from '@effect/platform';
 import { Effect, Layer, ManagedRuntime } from 'effect';
 
 import { ActionRegistry, ActionRegistryLive } from '@/machines/ActionRegistry.js';
-import { FsArtifactStoreLive } from '@/machines/artifacts/FsArtifactStore.js';
 import { MachineEventPubSubLive } from '@/machines/EventPubSub.js';
 import { ExecutionSemaphoreLive } from '@/machines/ExecutionSemaphore.js';
 import { makeMiddlewareExecutorLayer } from '@/machines/middleware/MiddlewareExecutor.js';
@@ -39,27 +38,12 @@ export function makeE2ETestLayer(middleware?: readonly TransitionMiddleware[]) {
   const MiddlewareLive = makeMiddlewareExecutorLayer(middleware ?? defaultMiddleware);
   const SemaphoreLive = ExecutionSemaphoreLive;
   const PubSubLive = MachineEventPubSubLive;
-  const ArtifactLive = FsArtifactStoreLive.pipe(Layer.provide(StoreLive));
   const RunnerLive = StateMachineRunnerLive.pipe(
     Layer.provide(
-      Layer.mergeAll(
-        StoreLive,
-        RegistryLive,
-        ArtifactLive,
-        MiddlewareLive,
-        SemaphoreLive,
-        PubSubLive,
-      ),
+      Layer.mergeAll(StoreLive, RegistryLive, MiddlewareLive, SemaphoreLive, PubSubLive),
     ),
   );
-  return Layer.mergeAll(
-    StoreLive,
-    RegistryLive,
-    ArtifactLive,
-    RunnerLive,
-    SemaphoreLive,
-    PubSubLive,
-  );
+  return Layer.mergeAll(StoreLive, RegistryLive, RunnerLive, SemaphoreLive, PubSubLive);
 }
 
 // ────────────────────────────────────────────────────────────────────────────

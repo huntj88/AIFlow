@@ -155,12 +155,12 @@ are identical to the parent's.
 
 ## Validation Checklist
 
-- [ ] Single-child spawning passes `workspaceRoot` and `familyRootInstanceId` in `RunOptions`
-- [ ] Parallel-children spawning passes the same values for each child
-- [ ] Root instance: `familyRootInstanceId = id`
-- [ ] Child instance: `familyRootInstanceId` = parent's `familyRootInstanceId`
-- [ ] `artifactsPath` is identical for parent and all descendants
-- [ ] Child's `ctx.workspace.root` equals parent's workspace root
-- [ ] Child's `ctx.artifactsWorkspace.root` equals parent's artifacts workspace root
-- [ ] Resume uses persisted workspace fields from child's own instance
-- [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes
+- [x] Single-child spawning passes `workspaceRoot` and `familyRootInstanceId` in `RunOptions`
+- [x] Parallel-children spawning passes the same values for each child
+- [x] Root instance: `familyRootInstanceId = id`
+- [x] Child instance: `familyRootInstanceId` = parent's `familyRootInstanceId`
+- [x] `artifactsPath` is identical for parent and all descendants
+- [x] Child's `ctx.workspace.root` equals parent's workspace root
+- [x] Child's `ctx.artifactsWorkspace.root` equals parent's artifacts workspace root
+- [x] Resume uses persisted workspace fields from child's own instance
+- [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes <!-- Blocked: downstream route consumers (instances.ts, artifacts.ts) not yet updated — fixed in Tasks 07-10 -->

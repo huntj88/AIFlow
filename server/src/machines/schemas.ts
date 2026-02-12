@@ -121,6 +121,7 @@ export const UpdateDefinitionRequestSchema = CreateDefinitionRequestSchema;
 export const StartInstanceRequestSchema = Schema.Struct({
   definitionId: Schema.String,
   input: Schema.Unknown,
+  workspaceRoot: Schema.String,
 });
 
 /** The six allowed instance statuses as a Schema union of literals. */
@@ -167,23 +168,6 @@ export const LogEntrySchema = Schema.Struct({
   timestamp: Schema.String,
 });
 
-/** Runtime validator for `ArtifactMetadata`. */
-export const ArtifactMetadataSchema = Schema.Struct({
-  description: Schema.optional(Schema.String),
-  tags: Schema.optional(Schema.Array(Schema.String)),
-}).annotations({ additionalProperties: true });
-
-/** Runtime validator for `ArtifactRecord`. */
-export const ArtifactRecordSchema = Schema.Struct({
-  name: Schema.String,
-  instanceId: Schema.String,
-  stateName: Schema.String,
-  size: Schema.Number,
-  mimeType: Schema.optional(Schema.String),
-  metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-  createdAt: Schema.String,
-});
-
 /** Runtime validator for `MachineInstance`. */
 export const MachineInstanceSchema = Schema.Struct({
   id: Schema.String,
@@ -200,7 +184,9 @@ export const MachineInstanceSchema = Schema.Struct({
   childInstanceIds: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
   history: Schema.Array(TransitionRecordSchema),
   logs: Schema.Array(LogEntrySchema),
-  artifacts: Schema.Array(ArtifactRecordSchema),
+  workspaceRoot: Schema.String,
+  familyRootInstanceId: Schema.String,
+  artifactsPath: Schema.String,
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });

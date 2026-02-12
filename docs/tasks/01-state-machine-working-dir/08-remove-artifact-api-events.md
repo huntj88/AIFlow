@@ -107,10 +107,10 @@ must be deleted and replaced with the new workspace/CLI tests in Task 16.
 
 ## Validation Checklist
 
-- [ ] Artifact routes removed from `instances.ts`
-- [ ] No imports of `ArtifactStoreFactory` or `buildArtifactTree` in route handlers
-- [ ] `artifact_created` not referenced anywhere in server code
-- [ ] No middleware references to artifact events
-- [ ] Artifact-related API tests removed
-- [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes
-- [ ] `pnpm --filter @aiflow/server run test` passes
+- [x] Artifact routes removed from `instances.ts`
+- [x] No imports of `ArtifactStoreFactory` or `buildArtifactTree` in route handlers
+- [x] `artifact_created` not referenced anywhere in server code
+- [x] No middleware references to artifact events
+- [x] Artifact-related API tests removed
+- [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes <!-- Blocked: StateMachineRunner.test.ts still has ctx.artifacts refs — fixed in Tasks 15-16 -->
+- [ ] `pnpm --filter @aiflow/server run test` passes <!-- Blocked: runner.run() calls missing workspaceRoot — fixed in Tasks 09-10, 15-16 -->

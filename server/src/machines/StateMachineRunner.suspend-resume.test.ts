@@ -23,7 +23,6 @@ import { describe, expect, it } from 'vitest';
 import { InMemoryActionRegistryLive, ActionRegistry } from './ActionRegistry.js';
 import { MachineEventPubSubLive } from './EventPubSub.js';
 import { ExecutionSemaphoreLive } from './ExecutionSemaphore.js';
-import { FsArtifactStoreLive } from './artifacts/FsArtifactStore.js';
 import { makeMiddlewareExecutorLayer } from './middleware/MiddlewareExecutor.js';
 import { InMemoryMachineStoreLive } from './store/InMemoryMachineStore.js';
 import { MachineStore } from './store/MachineStore.js';
@@ -48,7 +47,6 @@ const makeTestLayer = () =>
   StateMachineRunnerLive.pipe(
     Layer.provide(InMemoryMachineStoreLive),
     Layer.provide(InMemoryActionRegistryLive),
-    Layer.provide(FsArtifactStoreLive.pipe(Layer.provide(InMemoryMachineStoreLive))),
     Layer.provide(NoMiddleware),
     Layer.provide(ExecutionSemaphoreLive),
     Layer.provide(MachineEventPubSubLive),
@@ -211,7 +209,9 @@ describe('StateMachineRunner — Suspend & Resume (Task 15)', () => {
         input: {},
         history: [],
         logs: [],
-        artifacts: [],
+        workspaceRoot: '/tmp/test-workspace',
+        familyRootInstanceId: 'root-001',
+        artifactsPath: '/tmp/data/artifacts/root-001',
       });
 
       const runner = yield* StateMachineRunner;
@@ -261,7 +261,9 @@ describe('StateMachineRunner — Suspend & Resume (Task 15)', () => {
         input: {},
         history: [],
         logs: [],
-        artifacts: [],
+        workspaceRoot: '/tmp/test-workspace',
+        familyRootInstanceId: 'root-001',
+        artifactsPath: '/tmp/data/artifacts/root-001',
       });
 
       // Bump definition version
@@ -334,7 +336,9 @@ describe('StateMachineRunner — Suspend & Resume (Task 15)', () => {
           },
         ],
         logs: [],
-        artifacts: [],
+        workspaceRoot: '/tmp/test-workspace',
+        familyRootInstanceId: 'root-001',
+        artifactsPath: '/tmp/data/artifacts/root-001',
       });
 
       // Resume it
@@ -442,7 +446,9 @@ describe('StateMachineRunner — Suspend & Resume (Task 15)', () => {
         input: {},
         history: [],
         logs: [],
-        artifacts: [],
+        workspaceRoot: '/tmp/test-workspace',
+        familyRootInstanceId: 'root-001',
+        artifactsPath: '/tmp/data/artifacts/root-001',
       });
 
       // Suspend all
@@ -504,7 +510,9 @@ describe('StateMachineRunner — Suspend & Resume (Task 15)', () => {
           input: {},
           history: [],
           logs: [],
-          artifacts: [],
+          workspaceRoot: '/tmp/test-workspace',
+          familyRootInstanceId: 'root-001',
+          artifactsPath: '/tmp/data/artifacts/root-001',
         });
 
         // Run startup recovery
@@ -677,7 +685,9 @@ describe('StateMachineRunner — Suspend & Resume (Task 15)', () => {
         input: {},
         history: [],
         logs: [],
-        artifacts: [],
+        workspaceRoot: '/tmp/test-workspace',
+        familyRootInstanceId: 'root-001',
+        artifactsPath: '/tmp/data/artifacts/root-001',
       });
 
       // Create a suspended parent that references the child
@@ -690,7 +700,9 @@ describe('StateMachineRunner — Suspend & Resume (Task 15)', () => {
         input: {},
         history: [],
         logs: [],
-        artifacts: [],
+        workspaceRoot: '/tmp/test-workspace',
+        familyRootInstanceId: 'root-001',
+        artifactsPath: '/tmp/data/artifacts/root-001',
         childInstanceId: childInst.id,
       });
 
@@ -780,7 +792,9 @@ describe('StateMachineRunner — Suspend & Resume (Task 15)', () => {
         input: {},
         history: [],
         logs: [],
-        artifacts: [],
+        workspaceRoot: '/tmp/test-workspace',
+        familyRootInstanceId: 'root-001',
+        artifactsPath: '/tmp/data/artifacts/root-001',
         output: { done: true },
       });
 
@@ -793,7 +807,9 @@ describe('StateMachineRunner — Suspend & Resume (Task 15)', () => {
         input: {},
         history: [],
         logs: [],
-        artifacts: [],
+        workspaceRoot: '/tmp/test-workspace',
+        familyRootInstanceId: 'root-001',
+        artifactsPath: '/tmp/data/artifacts/root-001',
       });
 
       // Create suspended parent pointing at both children
@@ -806,7 +822,9 @@ describe('StateMachineRunner — Suspend & Resume (Task 15)', () => {
         input: {},
         history: [],
         logs: [],
-        artifacts: [],
+        workspaceRoot: '/tmp/test-workspace',
+        familyRootInstanceId: 'root-001',
+        artifactsPath: '/tmp/data/artifacts/root-001',
         childInstanceIds: {
           'child-a': completedChild.id,
           'child-b': suspendedChild.id,
@@ -877,7 +895,9 @@ describe('StateMachineRunner — Suspend & Resume (Task 15)', () => {
           input: {},
           history: [],
           logs: [],
-          artifacts: [],
+          workspaceRoot: '/tmp/test-workspace',
+          familyRootInstanceId: 'root-001',
+          artifactsPath: '/tmp/data/artifacts/root-001',
         });
 
         // Run startup recovery — should auto-resume

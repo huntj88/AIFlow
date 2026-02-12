@@ -33,22 +33,32 @@
  */
 
 import AjvModule from 'ajv';
-import { Cause, Context, Duration, Effect, Either, Exit, Fiber, Layer, PubSub } from 'effect';
+import {
+  Cause,
+  Config,
+  Context,
+  Duration,
+  Effect,
+  Either,
+  Exit,
+  Fiber,
+  Layer,
+  PubSub,
+} from 'effect';
 import { JSONPath } from 'jsonpath-plus';
 
 import * as MachineMetrics from '@/lib/MachineMetrics.js';
 import { ActionRegistry } from './ActionRegistry.js';
+import { makeCliHelper } from './cli/index.js';
 import { validateDefinition } from './DefinitionValidator.js';
 import { MachineEventPubSub } from './EventPubSub.js';
 import { ExecutionSemaphore } from './ExecutionSemaphore.js';
 import { createStateLoggerFactory } from './StateLogger.js';
-import { ArtifactStoreFactory } from './artifacts/ArtifactStoreFactory.js';
 import { MiddlewareExecutor } from './middleware/MiddlewareExecutor.js';
 import { MachineStore } from './store/MachineStore.js';
 import type {
   ActionContext,
   ActionError,
-  ArtifactStore,
   ChildSpawnDefinition,
   DefinitionError,
   LogEntry,
@@ -64,6 +74,12 @@ import type {
   TransitionRule,
 } from './types.js';
 import { mkActionError, mkDefinitionError, mkNotFoundError, mkValidationError } from './types.js';
+import {
+  makeWorkspaceContext,
+  makeArtifactsWorkspaceContext,
+  computeArtifactsPath,
+  ensureArtifactsDir,
+} from './workspace/index.js';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Ajv CJS interop
@@ -92,6 +108,10 @@ export interface RunOptions {
   readonly parentStateName?: string;
   /** Current nesting depth (for MAX_MACHINE_DEPTH check). */
   readonly depth?: number;
+  /** Absolute path to the user workspace root. */
+  readonly workspaceRoot: string;
+  /** Family root instance ID (set for child instances; root instances default to own ID). */
+  readonly familyRootInstanceId?: string;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -178,6 +198,9 @@ interface LoopState {
   readonly parentContext?: { parentInstanceId: string; parentStateName: string };
   readonly parentInstanceId?: string;
   readonly depth: number;
+  readonly workspaceRoot: string;
+  readonly familyRootInstanceId: string;
+  readonly artifactsPath: string;
   currentState: string;
   stateData: unknown;
   history: TransitionRecord[];
@@ -194,10 +217,12 @@ export const StateMachineRunnerLive = Layer.effect(
   Effect.gen(function* () {
     const store = yield* MachineStore;
     const registry = yield* ActionRegistry;
-    const artifactFactory = yield* ArtifactStoreFactory;
     const middlewareExec = yield* MiddlewareExecutor;
     const semaphore = yield* ExecutionSemaphore;
     const pubsub = yield* MachineEventPubSub;
+    const ARTIFACT_ROOT = yield* Effect.orDie(
+      Config.string('ARTIFACT_ROOT').pipe(Config.withDefault('./data/artifacts')),
+    );
 
     /** Publish a machine event (fire-and-forget — never fails the caller). */
     const publishEvent = (event: MachineEvent) =>
@@ -375,29 +400,18 @@ export const StateMachineRunnerLive = Layer.effect(
           updatedAt: new Date().toISOString(),
         });
 
-        // b. Create scoped StateLogger and ArtifactStore
+        // b. Create scoped StateLogger, CLI helper, and workspace contexts
         const loggerFactory = createStateLoggerFactory();
         const logger = loggerFactory.create(ls.instanceId, ls.currentState);
-        const rawArtifacts = artifactFactory.makeScoped(
-          ls.instanceId,
-          ls.currentState,
-          ls.parentInstanceId,
+        const cli = makeCliHelper({
+          workspaceRoot: ls.workspaceRoot,
+          artifactsRoot: ls.artifactsPath,
+        });
+        const workspace = makeWorkspaceContext(ls.workspaceRoot);
+        const artifactsWorkspace = makeArtifactsWorkspaceContext(
+          ARTIFACT_ROOT,
+          ls.familyRootInstanceId,
         );
-
-        // Wrap artifact store to publish artifact_created events on write
-        const artifacts: ArtifactStore = {
-          ...rawArtifacts,
-          write: (name, content, meta?) =>
-            rawArtifacts.write(name, content, meta).pipe(
-              Effect.tap((record) =>
-                publishEvent({
-                  type: 'artifact_created',
-                  instanceId: ls.instanceId,
-                  data: record,
-                }),
-              ),
-            ),
-        };
 
         // c. Build ActionContext
         const actionCtx: ActionContext = {
@@ -408,7 +422,9 @@ export const StateMachineRunnerLive = Layer.effect(
           machineInput: ls.machineInput,
           parentContext: ls.parentContext,
           logger,
-          artifacts,
+          cli,
+          workspace,
+          artifactsWorkspace,
         };
 
         // d. Run middleware beforeTransition
@@ -768,6 +784,8 @@ export const StateMachineRunnerLive = Layer.effect(
                 parentInstanceId: ls.instanceId,
                 parentStateName: ls.currentState,
                 depth: childRunDepth,
+                workspaceRoot: ls.workspaceRoot,
+                familyRootInstanceId: ls.familyRootInstanceId,
               },
             );
 
@@ -1103,6 +1121,8 @@ export const StateMachineRunnerLive = Layer.effect(
                       parentInstanceId: ls.instanceId,
                       parentStateName: ls.currentState,
                       depth: (opts?.depth ?? 0) + 1,
+                      workspaceRoot: ls.workspaceRoot,
+                      familyRootInstanceId: ls.familyRootInstanceId,
                     })
                     .pipe(Effect.either),
                 { concurrency: 'unbounded' },
@@ -1148,6 +1168,8 @@ export const StateMachineRunnerLive = Layer.effect(
                     parentInstanceId: ls.instanceId,
                     parentStateName: ls.currentState,
                     depth: (opts?.depth ?? 0) + 1,
+                    workspaceRoot: ls.workspaceRoot,
+                    familyRootInstanceId: ls.familyRootInstanceId,
                   }),
                 );
                 fibers.push({ key: spec.key, fiber: fiber });
@@ -1712,6 +1734,16 @@ export const StateMachineRunnerLive = Layer.effect(
           }
 
           // ── 3. Create MachineInstance — Checkpoint 1 ──
+          // For child instances, inherit familyRootInstanceId from parent.
+          // For root instances, use a placeholder — we'll update it to the
+          // instance's own ID after saveInstance assigns one.
+          const isRootInstance = !opts?.familyRootInstanceId;
+          const provisionalFamilyRootId = opts?.familyRootInstanceId ?? 'pending';
+          const provisionalArtifactsPath = computeArtifactsPath(
+            ARTIFACT_ROOT,
+            provisionalFamilyRootId,
+          );
+
           const savedInstance = yield* store.saveInstance({
             definitionId: definition.id,
             definitionVersion: definition.version,
@@ -1721,11 +1753,29 @@ export const StateMachineRunnerLive = Layer.effect(
             input,
             history: [],
             logs: [],
-            artifacts: [],
+            workspaceRoot: opts?.workspaceRoot ?? '',
+            familyRootInstanceId: provisionalFamilyRootId,
+            artifactsPath: provisionalArtifactsPath,
             ...(opts?.parentInstanceId ? { parentInstanceId: opts.parentInstanceId } : {}),
           });
 
           const instanceId = savedInstance.id;
+
+          // For root instances, set familyRootInstanceId = own id
+          const familyRootInstanceId = isRootInstance ? instanceId : provisionalFamilyRootId;
+          const instanceArtifactsPath = isRootInstance
+            ? computeArtifactsPath(ARTIFACT_ROOT, instanceId)
+            : provisionalArtifactsPath;
+
+          if (isRootInstance) {
+            yield* store.updateInstance(instanceId, {
+              familyRootInstanceId,
+              artifactsPath: instanceArtifactsPath,
+              updatedAt: new Date().toISOString(),
+            });
+            // Create artifacts directory for root instances
+            yield* ensureArtifactsDir(instanceArtifactsPath);
+          }
 
           // Record instance started metric
           MachineMetrics.instancesStarted.add(1, {
@@ -1749,6 +1799,9 @@ export const StateMachineRunnerLive = Layer.effect(
             parentContext,
             parentInstanceId: opts?.parentInstanceId,
             depth,
+            workspaceRoot: opts?.workspaceRoot ?? '',
+            familyRootInstanceId,
+            artifactsPath: instanceArtifactsPath,
             currentState: definition.initialState,
             stateData: input,
             history: [],
@@ -2057,6 +2110,9 @@ export const StateMachineRunnerLive = Layer.effect(
             parentContext,
             parentInstanceId: instance.parentInstanceId,
             depth: 0,
+            workspaceRoot: instance.workspaceRoot,
+            familyRootInstanceId: instance.familyRootInstanceId,
+            artifactsPath: instance.artifactsPath,
             currentState: instance.currentState,
             stateData: instance.stateData,
             history: [...instance.history],

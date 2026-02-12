@@ -55,7 +55,9 @@ function instanceInput(
     input: { foo: 'bar' },
     history: [],
     logs: [],
-    artifacts: [],
+    workspaceRoot: '/tmp/test-workspace',
+    familyRootInstanceId: 'root-001',
+    artifactsPath: '/tmp/data/artifacts/root-001',
     ...overrides,
   };
 }

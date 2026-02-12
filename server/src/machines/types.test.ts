@@ -9,7 +9,6 @@ import {
 } from './types.js';
 
 import type {
-  ArtifactRecord,
   ChildSpawnDefinition,
   LogEntry,
   MachineError,
@@ -177,9 +176,8 @@ describe('Type compile-time checks', () => {
       'child_completed',
       'children_spawned',
       'children_completed',
-      'artifact_created',
     ];
-    expect(eventTypes).toHaveLength(10);
+    expect(eventTypes).toHaveLength(9);
   });
 
   it('all definition types compile', () => {
@@ -233,14 +231,6 @@ describe('Type compile-time checks', () => {
       data: { url: 'http://example.com' },
       timestamp: '2026-01-01',
     };
-    const artifact: ArtifactRecord = {
-      name: 'output.json',
-      instanceId: 'inst-1',
-      stateName: 'generate',
-      size: 1024,
-      mimeType: 'application/json',
-      createdAt: '2026-01-01',
-    };
     const instance: MachineInstance = {
       id: 'inst-1',
       definitionId: 'def-1',
@@ -251,7 +241,9 @@ describe('Type compile-time checks', () => {
       input: { key: 'value' },
       history: [record],
       logs: [log],
-      artifacts: [artifact],
+      workspaceRoot: '/tmp/workspace',
+      familyRootInstanceId: 'inst-1',
+      artifactsPath: '/tmp/data/artifacts/inst-1',
       createdAt: '2026-01-01',
       updatedAt: '2026-01-01',
     };

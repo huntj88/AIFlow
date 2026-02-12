@@ -114,11 +114,12 @@ correct inherited workspace fields.
 
 ## Validation Checklist
 
-- [ ] `POST /instances` response includes `workspaceRoot`, `familyRootInstanceId`, `artifactsPath`
-- [ ] `GET /instances/:id` response includes the three new fields
-- [ ] `GET /instances` response includes the three new fields for each instance
-- [ ] No `artifacts` array in any instance response
-- [ ] Child instances have correct `familyRootInstanceId` (parent's root, not own ID)
-- [ ] Child instances have correct `artifactsPath` (shared family root)
-- [ ] `InMemoryMachineStore` correctly persists and returns new fields
+- [x] `POST /instances` response includes `workspaceRoot`, `familyRootInstanceId`, `artifactsPath`
+- [x] `GET /instances/:id` response includes the three new fields
+- [x] `GET /instances` response includes the three new fields for each instance
+- [x] No `artifacts` array in any instance response
+- [x] Child instances have correct `familyRootInstanceId` (parent's root, not own ID)
+- [x] Child instances have correct `artifactsPath` (shared family root)
+- [x] `InMemoryMachineStore` correctly persists and returns new fields
 - [ ] `pnpm --filter @aiflow/server run test` passes
+      <!-- Blocked: StateMachineRunner.test.ts, suspend-resume.test.ts still have pre-existing artifact/opts errors — fixed in Tasks 15-16 -->

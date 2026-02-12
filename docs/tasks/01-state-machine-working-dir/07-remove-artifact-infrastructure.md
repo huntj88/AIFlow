@@ -127,11 +127,11 @@ store/metadata code.
 
 ## Validation Checklist
 
-- [ ] `server/src/machines/artifacts/` directory is deleted
-- [ ] `FsArtifactStoreLive` removed from server Layer composition
-- [ ] No imports of `ArtifactStoreFactory` remain in server code
-- [ ] No imports of `FsArtifactStore` or `ArtifactTreeBuilder` remain
-- [ ] Artifact types (`ArtifactStore`, `ArtifactRecord`, `ArtifactMetadata`, `ArtifactTree`)
+- [x] `server/src/machines/artifacts/` directory is deleted
+- [x] `FsArtifactStoreLive` removed from server Layer composition
+- [x] No imports of `ArtifactStoreFactory` remain in server code
+- [x] No imports of `FsArtifactStore` or `ArtifactTreeBuilder` remain
+- [x] Artifact types (`ArtifactStore`, `ArtifactRecord`, `ArtifactMetadata`, `ArtifactTree`)
       removed from `types.ts`
 - [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes
-      (route handlers may still error — fixed in Task 08)
+      <!-- Blocked: route handler instances.ts still imports from deleted artifacts — fixed in Task 08 -->

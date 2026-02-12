@@ -52,6 +52,7 @@ const validDefinitionPayload = () => ({
 const validStartPayload = () => ({
   definitionId: 'def-001',
   input: { prompt: 'hello' },
+  workspaceRoot: '/tmp/test-workspace',
 });
 
 /** Minimal valid machine instance payload. */
@@ -65,7 +66,9 @@ const validInstancePayload = () => ({
   input: { prompt: 'hello' },
   history: [],
   logs: [],
-  artifacts: [],
+  workspaceRoot: '/tmp/test-workspace',
+  familyRootInstanceId: 'inst-001',
+  artifactsPath: '/tmp/data/artifacts/inst-001',
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 });
@@ -215,7 +218,11 @@ describe('StartInstanceRequestSchema', () => {
   });
 
   it('accepts null as input value', () => {
-    const result = decodeStartInstance({ definitionId: 'def-1', input: null });
+    const result = decodeStartInstance({
+      definitionId: 'def-1',
+      input: null,
+      workspaceRoot: '/tmp/ws',
+    });
     expect(Either.isRight(result)).toBe(true);
   });
 
@@ -223,6 +230,7 @@ describe('StartInstanceRequestSchema', () => {
     const result = decodeStartInstance({
       definitionId: 'def-1',
       input: { nested: { data: [1, 2, 3] } },
+      workspaceRoot: '/tmp/ws',
     });
     expect(Either.isRight(result)).toBe(true);
   });
@@ -312,24 +320,6 @@ describe('MachineInstanceSchema', () => {
           level: 'info',
           message: 'Starting execution',
           timestamp: '2026-01-01T00:00:00Z',
-        },
-      ],
-    };
-    const result = decodeInstance(payload);
-    expect(Either.isRight(result)).toBe(true);
-  });
-
-  it('accepts instance with artifact records', () => {
-    const payload = {
-      ...validInstancePayload(),
-      artifacts: [
-        {
-          name: 'output.json',
-          instanceId: 'inst-001',
-          stateName: 'start',
-          size: 256,
-          mimeType: 'application/json',
-          createdAt: '2026-01-01T00:00:00Z',
         },
       ],
     };

@@ -6,7 +6,6 @@ import { createServer } from 'node:http';
 
 import { OtelLive } from '@/lib/Telemetry.js';
 import { ActionRegistryLive } from '@/machines/ActionRegistry.js';
-import { FsArtifactStoreLive } from '@/machines/artifacts/FsArtifactStore.js';
 import { MachineEventPubSubLive } from '@/machines/EventPubSub.js';
 import { ExecutionSemaphoreLive } from '@/machines/ExecutionSemaphore.js';
 import { WebSocketManagerLive } from '@/machines/live/WebSocketManager.js';
@@ -44,21 +43,9 @@ const MiddlewareLive = makeMiddlewareExecutorLayer(defaultMiddleware);
 const SemaphoreLive = ExecutionSemaphoreLive;
 const PubSubLive = MachineEventPubSubLive;
 
-// ArtifactStoreFactory depends on MachineStore
-const ArtifactLive = FsArtifactStoreLive.pipe(Layer.provide(StoreLive));
-
-// Runner depends on all six services
+// Runner depends on all five services
 const RunnerLive = StateMachineRunnerLive.pipe(
-  Layer.provide(
-    Layer.mergeAll(
-      StoreLive,
-      RegistryLive,
-      ArtifactLive,
-      MiddlewareLive,
-      SemaphoreLive,
-      PubSubLive,
-    ),
-  ),
+  Layer.provide(Layer.mergeAll(StoreLive, RegistryLive, MiddlewareLive, SemaphoreLive, PubSubLive)),
 );
 
 // All machine service layers merged (excluding WsManager — it's scoped and
@@ -67,7 +54,6 @@ const RunnerLive = StateMachineRunnerLive.pipe(
 export const MachineLive = Layer.mergeAll(
   StoreLive,
   RegistryLive,
-  ArtifactLive,
   RunnerLive,
   SemaphoreLive,
   PubSubLive,

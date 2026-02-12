@@ -82,7 +82,9 @@ export interface MachineInstance {
   readonly childInstanceIds?: Record<string, string>;
   readonly history: TransitionRecord[];
   readonly logs: LogEntry[];
-  readonly artifacts: ArtifactRecord[];
+  readonly workspaceRoot: string;
+  readonly familyRootInstanceId: string;
+  readonly artifactsPath: string;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -119,36 +121,6 @@ export interface ActionMetadata {
   readonly description?: string;
   readonly inputSchema?: JsonSchema;
   readonly outputSchema?: JsonSchema;
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Artifact Types
-// ────────────────────────────────────────────────────────────────────────────
-
-/** Metadata for a single artifact file. */
-export interface ArtifactRecord {
-  readonly name: string;
-  readonly instanceId: string;
-  readonly stateName: string;
-  readonly size: number;
-  readonly mimeType?: string;
-  readonly metadata?: ArtifactMetadata;
-  readonly createdAt: string;
-}
-
-/** Optional metadata attached to an artifact. */
-export interface ArtifactMetadata {
-  readonly description?: string;
-  readonly tags?: string[];
-  readonly [key: string]: unknown;
-}
-
-/** Recursive artifact tree for an instance hierarchy. */
-export interface ArtifactTree {
-  readonly instanceId: string;
-  readonly definitionName: string;
-  readonly artifacts: ArtifactRecord[];
-  readonly children: ArtifactTree[];
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -231,11 +203,6 @@ export type MachineEvent =
       readonly type: 'children_completed';
       readonly instanceId: string;
       readonly data: { readonly results: Record<string, MachineResult> };
-    }
-  | {
-      readonly type: 'artifact_created';
-      readonly instanceId: string;
-      readonly data: ArtifactRecord;
     };
 
 // ────────────────────────────────────────────────────────────────────────────

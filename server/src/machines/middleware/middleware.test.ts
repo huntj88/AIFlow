@@ -107,7 +107,9 @@ function makeInstance(): MachineInstance {
     input: {},
     history: [],
     logs: [],
-    artifacts: [],
+    workspaceRoot: '/tmp/test-workspace',
+    familyRootInstanceId: 'inst-001',
+    artifactsPath: './data/artifacts/inst-001',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };

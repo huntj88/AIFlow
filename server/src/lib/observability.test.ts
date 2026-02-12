@@ -80,7 +80,9 @@ function makeInstance(): MachineInstance {
     input: {},
     history: [],
     logs: [],
-    artifacts: [],
+    workspaceRoot: '/tmp/test-workspace',
+    familyRootInstanceId: 'inst-otel-01',
+    artifactsPath: '/tmp/data/artifacts/inst-otel-01',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };

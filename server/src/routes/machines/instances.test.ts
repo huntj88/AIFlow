@@ -3,23 +3,24 @@
  *
  * Uses `HttpApp.toWebHandler()` with in-process layers — no real server needed.
  * Covers: §4 Start & Query, §4.4 History, §4.5 Logs, §11 Cancel, §12 Resume,
- *         §15 Artifacts, §21 Concurrent ops & definition mutation.
+ *         §21 Concurrent ops & definition mutation.
  *
  * @module
  */
 
 import { HttpApp, HttpRouter } from '@effect/platform';
 import { Effect, Layer, ManagedRuntime } from 'effect';
-import { beforeAll, describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { ActionRegistry, ActionRegistryLive } from '@/machines/ActionRegistry.js';
-import { FsArtifactStoreLive } from '@/machines/artifacts/FsArtifactStore.js';
+import { ActionRegistryLive } from '@/machines/ActionRegistry.js';
 import { MachineEventPubSubLive } from '@/machines/EventPubSub.js';
 import { ExecutionSemaphoreLive } from '@/machines/ExecutionSemaphore.js';
 import { makeMiddlewareExecutorLayer } from '@/machines/middleware/MiddlewareExecutor.js';
 import { StateMachineRunnerLive } from '@/machines/StateMachineRunner.js';
 import { InMemoryMachineStoreLive } from '@/machines/store/index.js';
-import { mkActionError } from '@/machines/types.js';
 
 import { MachineRouter } from './index.js';
 
@@ -32,28 +33,11 @@ const RegistryLive = ActionRegistryLive;
 const MiddlewareLive = makeMiddlewareExecutorLayer([]);
 const SemaphoreLive = ExecutionSemaphoreLive;
 const PubSubLive = MachineEventPubSubLive;
-const ArtifactLive = FsArtifactStoreLive.pipe(Layer.provide(StoreLive));
 const RunnerLive = StateMachineRunnerLive.pipe(
-  Layer.provide(
-    Layer.mergeAll(
-      StoreLive,
-      RegistryLive,
-      ArtifactLive,
-      MiddlewareLive,
-      SemaphoreLive,
-      PubSubLive,
-    ),
-  ),
+  Layer.provide(Layer.mergeAll(StoreLive, RegistryLive, MiddlewareLive, SemaphoreLive, PubSubLive)),
 );
 
-const TestLayer = Layer.mergeAll(
-  StoreLive,
-  RegistryLive,
-  ArtifactLive,
-  RunnerLive,
-  SemaphoreLive,
-  PubSubLive,
-);
+const TestLayer = Layer.mergeAll(StoreLive, RegistryLive, RunnerLive, SemaphoreLive, PubSubLive);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Handler
@@ -67,41 +51,6 @@ const TestLayer = Layer.mergeAll(
 async function makeHandler() {
   const managedRuntime = ManagedRuntime.make(TestLayer);
   const runtime = await managedRuntime.runtime();
-
-  // Register a test-only action that writes an artifact
-  await managedRuntime.runPromise(
-    Effect.gen(function* () {
-      const registry = yield* ActionRegistry;
-      yield* registry.register(
-        'save-artifact',
-        (ctx) =>
-          Effect.gen(function* () {
-            const content = ctx.stateData as {
-              filename?: string;
-              content?: string;
-              nextState?: string;
-            };
-            const filename = content.filename ?? 'output.txt';
-            const fileContent = content.content ?? 'hello from artifact';
-            const nextState = content.nextState ?? 'completed';
-
-            yield* ctx.artifacts.write(filename, new TextEncoder().encode(fileContent)).pipe(
-              Effect.mapError((e) =>
-                mkActionError({
-                  actionId: 'save-artifact',
-                  stateName: ctx.stateName,
-                  cause: e.cause,
-                }),
-              ),
-            );
-            yield* ctx.logger.info(`Wrote artifact: ${filename}`);
-
-            return { nextState, data: { artifact: filename } };
-          }),
-        { description: 'Test action that writes an artifact file' },
-      );
-    }),
-  );
 
   const served = MachineRouter.pipe(HttpRouter.use((httpApp) => Effect.provide(httpApp, runtime)));
   return HttpApp.toWebHandler(served);
@@ -162,36 +111,21 @@ const slowDefinitionBody = {
   ],
 };
 
-/**
- * A machine that uses a save-artifact action so we can test artifact download.
- */
-const artifactDefinitionBody = {
-  name: 'artifact-machine',
-  inputSchema: { type: 'object' },
-  outputSchema: { type: 'object' },
-  states: {
-    start: { name: 'start', type: 'action', actionId: 'save-artifact' },
-    completed: { name: 'completed', type: 'terminal' },
-    cancelled: { name: 'cancelled', type: 'terminal' },
-    error: { name: 'error', type: 'terminal' },
-  },
-  initialState: 'start',
-  transitions: [
-    { from: 'start', to: 'completed' },
-    { from: 'start', to: 'cancelled' },
-    { from: 'start', to: 'error' },
-  ],
-};
-
 // ────────────────────────────────────────────────────────────────────────────
 // Tests
 // ────────────────────────────────────────────────────────────────────────────
 
 describe('InstancesRouter', () => {
   let handler: ReturnType<typeof HttpApp.toWebHandler>;
+  let TEST_WORKSPACE: string;
 
   beforeAll(async () => {
     handler = await makeHandler();
+    TEST_WORKSPACE = fs.mkdtempSync(path.join(os.tmpdir(), 'aiflow-test-'));
+  });
+
+  afterAll(() => {
+    fs.rmSync(TEST_WORKSPACE, { recursive: true, force: true });
   });
 
   // ── HTTP Helpers ────────────────────────────────────────────────────────
@@ -240,12 +174,6 @@ describe('InstancesRouter', () => {
       }),
     );
 
-  const getArtifacts = (id: string, query = '') =>
-    handler(new Request(`http://localhost/api/machines/instances/${id}/artifacts${query}`));
-
-  const getArtifact = (id: string, name: string) =>
-    handler(new Request(`http://localhost/api/machines/instances/${id}/artifacts/${name}`));
-
   const putDef = (id: string, body: unknown) =>
     handler(
       new Request(`http://localhost/api/machines/definitions/${id}`, {
@@ -279,7 +207,7 @@ describe('InstancesRouter', () => {
     definitionId: string,
     input: unknown = { message: 'hello', nextState: 'completed' },
   ): Promise<{ id: string; status: string; [key: string]: unknown }> {
-    const res = await postInstance({ definitionId, input });
+    const res = await postInstance({ definitionId, input, workspaceRoot: TEST_WORKSPACE });
     expect(res.status).toBe(201);
     return (await res.json()) as { id: string; status: string };
   }
@@ -292,44 +220,111 @@ describe('InstancesRouter', () => {
       const res = await postInstance({
         definitionId: defId,
         input: { message: 'hello', nextState: 'completed' },
+        workspaceRoot: TEST_WORKSPACE,
       });
       expect(res.status).toBe(201);
 
-      const body = (await res.json()) as { id: string; definitionId: string };
+      const body = (await res.json()) as {
+        id: string;
+        definitionId: string;
+        workspaceRoot: string;
+        familyRootInstanceId: string;
+        artifactsPath: string;
+      };
       expect(body).toHaveProperty('id');
       expect(body.definitionId).toBe(defId);
+      // New workspace fields (§15.5)
+      expect(body.workspaceRoot).toBe(TEST_WORKSPACE);
+      expect(body.familyRootInstanceId).toBe(body.id);
+      expect(body.artifactsPath).toContain(body.id);
+      // No artifacts array
+      expect(body).not.toHaveProperty('artifacts');
     });
 
     it('POST with missing definitionId → 400', async () => {
-      const res = await postInstance({ input: {} });
+      const res = await postInstance({ input: {}, workspaceRoot: TEST_WORKSPACE });
       expect(res.status).toBe(400);
     });
 
-    it('POST with missing input (Schema.Unknown accepts undefined) → 404 for non-existent def', async () => {
+    it('POST with missing workspaceRoot → 400', async () => {
+      const defId = await createDefinition();
+      const res = await postInstance({ definitionId: defId, input: {} });
+      expect(res.status).toBe(400);
+    });
+
+    it('POST with relative workspaceRoot → 400', async () => {
+      const defId = await createDefinition();
+      const res = await postInstance({
+        definitionId: defId,
+        input: {},
+        workspaceRoot: 'relative/path',
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { message: string };
+      expect(body.message).toContain('absolute path');
+    });
+
+    it('POST with non-existent workspaceRoot → 400', async () => {
+      const defId = await createDefinition();
+      const res = await postInstance({
+        definitionId: defId,
+        input: {},
+        workspaceRoot: '/nonexistent/path/that/does/not/exist',
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { message: string };
+      expect(body.message).toContain('does not exist');
+    });
+
+    it('POST with workspaceRoot pointing to a file → 400', async () => {
+      const filePath = path.join(TEST_WORKSPACE, 'not-a-dir.txt');
+      fs.writeFileSync(filePath, 'hello');
+      const defId = await createDefinition();
+      const res = await postInstance({ definitionId: defId, input: {}, workspaceRoot: filePath });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { message: string };
+      expect(body.message).toContain('not a directory');
+    });
+
+    it('POST with missing input (Schema.Unknown accepts undefined) → 400 for missing workspaceRoot', async () => {
       const res = await postInstance({ definitionId: 'some-id' });
-      // input: Schema.Unknown accepts undefined, so decode succeeds
-      // Route then looks up the non-existent definitionId → 404
-      expect(res.status).toBe(404);
+      // workspaceRoot is now required — decode fails → 400
+      expect(res.status).toBe(400);
     });
 
     it('POST with non-existent definition ID → 404', async () => {
-      const res = await postInstance({ definitionId: 'non-existent', input: {} });
+      const res = await postInstance({
+        definitionId: 'non-existent',
+        input: {},
+        workspaceRoot: TEST_WORKSPACE,
+      });
       expect(res.status).toBe(404);
 
       const body = (await res.json()) as { message: string };
       expect(body.message).toContain('not found');
     });
 
-    it('GET list returns instances', async () => {
+    it('GET list returns instances with workspace fields', async () => {
       const defId = await createDefinition();
       await startInstance(defId);
 
       const res = await getInstances();
       expect(res.status).toBe(200);
 
-      const list = (await res.json()) as unknown[];
+      const list = (await res.json()) as {
+        workspaceRoot: string;
+        familyRootInstanceId: string;
+        artifactsPath: string;
+      }[];
       expect(Array.isArray(list)).toBe(true);
       expect(list.length).toBeGreaterThan(0);
+      // Every instance should have workspace fields (§15.5)
+      for (const inst of list) {
+        expect(inst.workspaceRoot).toBeTruthy();
+        expect(inst.familyRootInstanceId).toBeTruthy();
+        expect(inst.artifactsPath).toBeTruthy();
+        expect(inst).not.toHaveProperty('artifacts');
+      }
     });
 
     it('GET list supports status filter', async () => {
@@ -361,16 +356,27 @@ describe('InstancesRouter', () => {
       }
     });
 
-    it('GET by id returns full instance', async () => {
+    it('GET by id returns full instance with workspace fields', async () => {
       const defId = await createDefinition();
       const instance = await startInstance(defId);
 
       const res = await getInstance(instance.id);
       expect(res.status).toBe(200);
 
-      const body = (await res.json()) as { id: string; definitionId: string };
+      const body = (await res.json()) as {
+        id: string;
+        definitionId: string;
+        workspaceRoot: string;
+        familyRootInstanceId: string;
+        artifactsPath: string;
+      };
       expect(body.id).toBe(instance.id);
       expect(body.definitionId).toBe(defId);
+      // Workspace fields (§15.5)
+      expect(body.workspaceRoot).toBe(TEST_WORKSPACE);
+      expect(body.familyRootInstanceId).toBe(body.id);
+      expect(body.artifactsPath).toContain(body.id);
+      expect(body).not.toHaveProperty('artifacts');
     });
 
     it('GET non-existent instance → 404', async () => {
@@ -546,7 +552,11 @@ describe('InstancesRouter', () => {
       const defId = await createDefinition(errorDef);
 
       // Start with invalid input (missing message/nextState for log-message)
-      const res = await postInstance({ definitionId: defId, input: {} });
+      const res = await postInstance({
+        definitionId: defId,
+        input: {},
+        workspaceRoot: TEST_WORKSPACE,
+      });
       expect(res.status).toBe(201);
       const instance = (await res.json()) as { id: string };
 
@@ -608,78 +618,6 @@ describe('InstancesRouter', () => {
     });
   });
 
-  // ── Artifacts (§15) ───────────────────────────────────────────────────
-
-  describe('Artifacts', () => {
-    it('GET /instances/:id/artifacts returns artifact list', async () => {
-      const defId = await createDefinition();
-      const instance = await startInstance(defId);
-      await new Promise((r) => setTimeout(r, 200));
-
-      const res = await getArtifacts(instance.id);
-      expect(res.status).toBe(200);
-
-      const artifacts = (await res.json()) as unknown[];
-      expect(Array.isArray(artifacts)).toBe(true);
-    });
-
-    it('GET /instances/:id/artifacts?tree=true returns recursive tree', async () => {
-      const defId = await createDefinition();
-      const instance = await startInstance(defId);
-      await new Promise((r) => setTimeout(r, 200));
-
-      const res = await getArtifacts(instance.id, '?tree=true');
-      expect(res.status).toBe(200);
-
-      const tree = await res.json();
-      expect(tree).toBeDefined();
-    });
-
-    it('GET /instances/:id/artifacts for non-existent instance → 404', async () => {
-      const res = await getArtifacts('non-existent');
-      expect(res.status).toBe(404);
-    });
-
-    it('GET /instances/:id/artifacts/:name downloads file content', async () => {
-      const defId = await createDefinition(artifactDefinitionBody);
-      const instance = await startInstance(defId, {
-        filename: 'report.txt',
-        content: 'artifact content here',
-        nextState: 'completed',
-      });
-
-      // Wait for machine to complete and artifact to be written
-      await new Promise((r) => setTimeout(r, 300));
-
-      // Verify the instance completed
-      const instRes = await getInstance(instance.id);
-      const instBody = (await instRes.json()) as { status: string };
-      expect(instBody.status).toBe('completed');
-
-      // List artifacts — should include our file
-      const listRes = await getArtifacts(instance.id);
-      expect(listRes.status).toBe(200);
-      const artifacts = (await listRes.json()) as { name: string }[];
-      expect(artifacts.some((a) => a.name === 'report.txt')).toBe(true);
-
-      // Download the artifact
-      const downloadRes = await getArtifact(instance.id, 'report.txt');
-      expect(downloadRes.status).toBe(200);
-
-      const body = await downloadRes.text();
-      expect(body).toBe('artifact content here');
-    });
-
-    it('GET /instances/:id/artifacts/:name for non-existent artifact → 404', async () => {
-      const defId = await createDefinition();
-      const instance = await startInstance(defId);
-      await new Promise((r) => setTimeout(r, 200));
-
-      const res = await getArtifact(instance.id, 'non-existent-artifact');
-      expect(res.status).toBe(404);
-    });
-  });
-
   // ── Concurrent Operations (§21.2) ─────────────────────────────────────
 
   describe('Concurrent Operations', () => {
@@ -691,6 +629,7 @@ describe('InstancesRouter', () => {
         postInstance({
           definitionId: defId,
           input: { message: `hello-${String(i)}`, nextState: 'completed' },
+          workspaceRoot: TEST_WORKSPACE,
         }),
       );
 

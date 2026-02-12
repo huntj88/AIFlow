@@ -132,11 +132,12 @@ This is handled by the runner (Task 05) and the instance payload (Task 10).
 
 ## Validation Checklist
 
-- [ ] `POST /instances` requires `workspaceRoot` in request body
-- [ ] Missing `workspaceRoot` returns 400
-- [ ] Relative path returns 400 with descriptive message
-- [ ] Non-existent path returns 400 with descriptive message
-- [ ] Non-directory path returns 400
-- [ ] Valid `workspaceRoot` is passed to `runner.run()` via `RunOptions`
-- [ ] Returned instance includes `workspaceRoot`, `familyRootInstanceId`, `artifactsPath`
+- [x] `POST /instances` requires `workspaceRoot` in request body
+- [x] Missing `workspaceRoot` returns 400
+- [x] Relative path returns 400 with descriptive message
+- [x] Non-existent path returns 400 with descriptive message
+- [x] Non-directory path returns 400
+- [x] Valid `workspaceRoot` is passed to `runner.run()` via `RunOptions`
+- [x] Returned instance includes `workspaceRoot`, `familyRootInstanceId`, `artifactsPath`
 - [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes
+      <!-- Blocked: StateMachineRunner.test.ts, suspend-resume.test.ts, types.test.ts, etc. still have pre-existing artifact/opts errors — fixed in Tasks 15-16 -->

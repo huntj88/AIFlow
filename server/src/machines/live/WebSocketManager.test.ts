@@ -594,22 +594,15 @@ describe('WebSocketManager', () => {
           b: { status: 'completed', output: 2, instanceId: 'c2' },
         },
       }),
-      makeEvent('artifact_created', 'inst-1', {
-        name: 'file.txt',
-        instanceId: 'inst-1',
-        stateName: 'a',
-        size: 42,
-        createdAt: '2026-01-01T00:00:00Z',
-      }),
     ];
 
-    const collecting = collectMessages(ws, 10, 3000);
+    const collecting = collectMessages(ws, 9, 3000);
     for (const event of events) {
       await harness.publish(event);
     }
 
     const msgs = await collecting;
-    expect(msgs).toHaveLength(10);
+    expect(msgs).toHaveLength(9);
 
     const receivedTypes = msgs.map(
       (m) => (m as { type: 'event'; payload: MachineEvent }).payload.type,
@@ -624,7 +617,6 @@ describe('WebSocketManager', () => {
       'child_completed',
       'children_spawned',
       'children_completed',
-      'artifact_created',
     ]);
 
     ws.close();

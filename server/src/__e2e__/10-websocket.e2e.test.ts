@@ -31,8 +31,7 @@ import type { ActionRegistry } from '@/machines/ActionRegistry.js';
 import { MachineEventPubSub } from '@/machines/EventPubSub.js';
 import { parseClientMessage, serializeServerMessage } from '@/machines/live/events.js';
 import { MachineStore } from '@/machines/store/index.js';
-import type { ActionContext, MachineEvent } from '@/machines/types.js';
-import { mkActionError } from '@/machines/types.js';
+import type { MachineEvent } from '@/machines/types.js';
 import { MachineRouter } from '@/routes/machines/index.js';
 
 import { type ApiHelpers, makeApiHelpers } from './helpers/api-helpers.js';
@@ -55,33 +54,6 @@ const DELAY_MS = 300;
 
 /** Simple delay machine: delay(300ms) → completed */
 const DELAY_INPUT = { delayMs: DELAY_MS, nextState: 'completed' };
-
-/**
- * Two-state machine: delay(300ms) → write_artifact → completed.
- * The delay buys time for subscription; the artifact action writes a file.
- */
-const ARTIFACT_DEFINITION = {
-  name: 'E2E WS Artifact Machine',
-  inputSchema: { type: 'object' },
-  outputSchema: { type: 'object' },
-  initialState: 'wait',
-  states: {
-    wait: { name: 'wait', type: 'action' as const, actionId: 'delay' },
-    write_artifact: {
-      name: 'write_artifact',
-      type: 'action' as const,
-      actionId: 'test-write-artifact',
-    },
-    completed: { name: 'completed', type: 'terminal' as const },
-    cancelled: { name: 'cancelled', type: 'terminal' as const },
-    error: { name: 'error', type: 'terminal' as const },
-  },
-  transitions: [
-    { from: 'wait', to: 'write_artifact' },
-    { from: 'write_artifact', to: 'completed' },
-  ],
-  metadata: { description: 'Delay then write artifact', tags: ['e2e'] },
-};
 
 /**
  * Parent: delay(300ms) → spawn single child → completed.
@@ -150,29 +122,9 @@ const makeDelayedParallelParent = (childDefId: string) => ({
 // Test-only actions
 // ────────────────────────────────────────────────────────────────────────────
 
-function registerTestActions(registry: ActionRegistry): Effect.Effect<void> {
-  return Effect.gen(function* () {
-    yield* registry.register(
-      'test-write-artifact',
-      (ctx: ActionContext) =>
-        Effect.gen(function* () {
-          yield* ctx.logger.info('Writing artifact');
-          yield* ctx.artifacts
-            .write('test-output.txt', new TextEncoder().encode('Hello from artifact action'))
-            .pipe(
-              Effect.mapError((e) =>
-                mkActionError({
-                  actionId: 'test-write-artifact',
-                  stateName: ctx.stateName,
-                  cause: e,
-                }),
-              ),
-            );
-          return { nextState: 'completed' };
-        }),
-      { description: 'Writes a test artifact' },
-    );
-  });
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function registerTestActions(_registry: ActionRegistry): Effect.Effect<void> {
+  return Effect.void;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -571,22 +523,6 @@ describe('§16 — WebSocket Live Updates', () => {
       const results = (completed[0].data as { results: Record<string, unknown> }).results;
       expect(results).toHaveProperty('child_a');
       expect(results).toHaveProperty('child_b');
-      await closeWs(ws);
-    });
-
-    it('artifact_created event with ArtifactRecord', async () => {
-      const { events, ws } = await startSubscribeCollect(ARTIFACT_DEFINITION, {
-        delayMs: DELAY_MS,
-        nextState: 'write_artifact',
-      });
-
-      const artifacts = payloads(events).filter((e) => e.type === 'artifact_created');
-      expect(artifacts.length).toBeGreaterThanOrEqual(1);
-      expect(artifacts[0].data).toHaveProperty('name');
-      expect(artifacts[0].data).toHaveProperty('instanceId');
-      expect(artifacts[0].data).toHaveProperty('stateName');
-      expect(artifacts[0].data).toHaveProperty('size');
-      expect(artifacts[0].data).toHaveProperty('createdAt');
       await closeWs(ws);
     });
 
