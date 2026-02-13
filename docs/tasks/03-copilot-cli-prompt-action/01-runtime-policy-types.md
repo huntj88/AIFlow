@@ -29,7 +29,7 @@ Define shared server/client types for required runtime CLI policy and capture se
 - [ ] Runtime policy types exist on both server and client.
 - [ ] `StartInstanceInput` (client + server usage sites) can represent required `runtimeOptions`.
 - [ ] `CliExecResult` type supports optional transcript metadata for capture-enabled executions.
-- [ ] No runtime policy fields are added to persisted `MachineInstance`.
+- [ ] No runtime policy fields are added to persisted `MachineInstance`. _(Final regression validation is deferred to Task 16 and Task 20 after runner pass-through and full-suite gates.)_
 
 ---
 

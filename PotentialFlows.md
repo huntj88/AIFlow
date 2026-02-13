@@ -49,3 +49,5 @@ AGENTS markdown file could contain: "For tests that expect the server to be runn
 "Create a new document that is a new source of truth. 00 came first, then 01 refactored and added new features.
 
 Don't bother with an implementation plan. Look through the code for any information needed."
+
+"are there any items in the task validation checklists that cannot be validated until a later step? document them as such"
