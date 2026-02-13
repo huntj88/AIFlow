@@ -21,7 +21,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ActionRegistry } from '@/machines/ActionRegistry.js';
 import type { ActionContext } from '@/machines/types.js';
 import { mkActionError } from '@/machines/types.js';
-import { type ApiHelpers, makeApiHelpers } from './helpers/api-helpers.js';
+import {
+  type ApiHelpers,
+  createTestWorkspace,
+  makeApiHelpers,
+  removeTestWorkspace,
+} from './helpers/api-helpers.js';
 import {
   CHILD_DEFINITION,
   DELAY_DEFINITION,
@@ -187,12 +192,14 @@ describe('§6 — Error Handling', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let failDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const def = await api.createDef(ACTION_FAILURE_DEFINITION);
@@ -201,6 +208,7 @@ describe('§6 — Error Handling', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('action that throws → machine reaches error terminal state', async () => {
@@ -242,12 +250,14 @@ describe('§6 — Error Handling', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let illegalDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const def = await api.createDef(ILLEGAL_TRANSITION_DEFINITION);
@@ -256,6 +266,7 @@ describe('§6 — Error Handling', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('action returns nextState not in transitions → machine errors', async () => {
@@ -286,12 +297,14 @@ describe('§6 — Error Handling', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let dataValDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const def = await api.createDef(DATA_VALIDATION_DEFINITION);
@@ -300,6 +313,7 @@ describe('§6 — Error Handling', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('stateData failing target state dataSchema → machine errors', async () => {
@@ -342,12 +356,14 @@ describe('§6 — Error Handling', () => {
     let cleanup: () => Promise<void>;
     let dataValDefId: string;
     let failDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       // ValidationMiddleware is a beforeTransition middleware that fails
@@ -361,6 +377,7 @@ describe('§6 — Error Handling', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('beforeTransition middleware failure → machine errors', async () => {
@@ -413,10 +430,12 @@ describe('§7 — Timeouts & Safety Limits', () => {
     let cleanup: () => Promise<void>;
     let timeoutDefId: string;
     let noTimeoutDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const timeoutDef = await api.createDef(STATE_TIMEOUT_DEFINITION);
@@ -428,6 +447,7 @@ describe('§7 — Timeouts & Safety Limits', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('state with timeoutMs: 200 and slow delay → timeout error', async () => {
@@ -476,17 +496,20 @@ describe('§7 — Timeouts & Safety Limits', () => {
   describe('§7.3 Max Depth', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
     });
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     /**

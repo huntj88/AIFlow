@@ -22,7 +22,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ActionRegistry } from '@/machines/ActionRegistry.js';
 import { StateMachineRunner } from '@/machines/StateMachineRunner.js';
 import type { ActionContext, MachineResult } from '@/machines/types.js';
-import { type ApiHelpers, makeApiHelpers } from './helpers/api-helpers.js';
+import {
+  type ApiHelpers,
+  createTestWorkspace,
+  makeApiHelpers,
+  removeTestWorkspace,
+} from './helpers/api-helpers.js';
 import {
   CHILD_DEFINITION,
   DELAY_DEFINITION,
@@ -234,10 +239,12 @@ describe('§10 — Concurrency & Semaphore', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let delayDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const def = await api.createDef(DELAY_DEFINITION);
@@ -246,6 +253,7 @@ describe('§10 — Concurrency & Semaphore', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('starting more instances than MAX_CONCURRENT → excess queued, not rejected', async () => {
@@ -348,17 +356,20 @@ describe('§10 — Concurrency & Semaphore', () => {
   describe('§10.2 Release-Before-Wait (No Deadlock)', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
     });
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('parent with child_machine releases permit for child', async () => {
@@ -470,10 +481,12 @@ describe('§11 — Cancellation', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let delayDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const def = await api.createDef(DELAY_DEFINITION);
@@ -482,6 +495,7 @@ describe('§11 — Cancellation', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('POST /instances/:id/cancel on running → 200', async () => {
@@ -525,12 +539,14 @@ describe('§11 — Cancellation', () => {
     let cleanup: () => Promise<void>;
     let slowChildDefId: string;
     let parentDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const slowChild = await api.createDef(SLOW_CHILD_DEFINITION);
@@ -541,6 +557,7 @@ describe('§11 — Cancellation', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('cancel parent waiting_for_child → child also cancelled', async () => {
@@ -605,12 +622,14 @@ describe('§11 — Cancellation', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let parallelParentDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const slowChild = await api.createDef(SLOW_CHILD_DEFINITION);
@@ -629,6 +648,7 @@ describe('§11 — Cancellation', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('cancel parent with parallel children → all children cancelled', async () => {
@@ -689,12 +709,16 @@ describe('§11 — Cancellation', () => {
       // We need to test that cancel() handles suspended instances (no fiber).
       // Strategy: start a long-running machine, call suspendAll() via the
       // runner to set it to 'suspended', then use the same handler to cancel.
+      const testWs = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      const api = makeApiHelpers(handler);
+      const api = makeApiHelpers(handler, testWs);
 
       const def = await api.createDef(DELAY_DEFINITION);
       const inst = await api.startInst(def.id, DELAY_INPUT_LONG);
       await api.pollStatus(inst.id, ['running'], 5_000);
+
+      // Brief delay to ensure fiber is registered in the runner's fiberMap
+      await new Promise((r) => setTimeout(r, 200));
 
       // Suspend the instance via the runner's suspendAll()
       await runtime.runPromise(
@@ -703,6 +727,9 @@ describe('§11 — Cancellation', () => {
           yield* runner.suspendAll();
         }),
       );
+
+      // Poll until suspended status propagates
+      await api.pollStatus(inst.id, ['suspended'], 5_000);
 
       // Verify instance is now suspended
       const suspendedRes = await api.getInstance(inst.id);
@@ -735,15 +762,20 @@ describe('§11 — Cancellation', () => {
       expect(final.currentState).toBe('cancelled');
 
       await runtime.dispose();
+      await removeTestWorkspace(testWs);
     });
 
     it('status becomes cancelled', async () => {
+      const testWs = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      const api = makeApiHelpers(handler);
+      const api = makeApiHelpers(handler, testWs);
 
       const def = await api.createDef(DELAY_DEFINITION);
       const inst = await api.startInst(def.id, DELAY_INPUT_LONG);
       await api.pollStatus(inst.id, ['running'], 5_000);
+
+      // Brief delay to ensure fiber is registered in the runner's fiberMap
+      await new Promise((r) => setTimeout(r, 200));
 
       // Suspend via runner
       await runtime.runPromise(
@@ -752,6 +784,9 @@ describe('§11 — Cancellation', () => {
           yield* runner.suspendAll();
         }),
       );
+
+      // Wait for suspended status to propagate
+      await api.pollStatus(inst.id, ['suspended'], 5_000);
 
       // Cancel the suspended instance
       const cancelRes = await api.postCancel(inst.id);
@@ -763,6 +798,7 @@ describe('§11 — Cancellation', () => {
       expect(final.status).toBe('cancelled');
 
       await runtime.dispose();
+      await removeTestWorkspace(testWs);
     });
   });
 
@@ -775,10 +811,12 @@ describe('§11 — Cancellation', () => {
     let cleanup: () => Promise<void>;
     let simpleDefId: string;
     let delayDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const simpleDef = await api.createDef(SIMPLE_DEFINITION);
@@ -790,6 +828,7 @@ describe('§11 — Cancellation', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('cancel already-completed → 409', async () => {
@@ -824,8 +863,9 @@ describe('§11 — Cancellation', () => {
 
     it('cancel already-errored → 409', async () => {
       // Use the error definition which always times out → error state
+      const errTestWs = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      const errApi = makeApiHelpers(handler);
+      const errApi = makeApiHelpers(handler, errTestWs);
 
       const errDef = await errApi.createDef({
         name: 'E2E Always Error',
@@ -857,6 +897,7 @@ describe('§11 — Cancellation', () => {
       expect(body.message).toContain('Cannot cancel');
 
       await runtime.dispose();
+      await removeTestWorkspace(errTestWs);
     });
   });
 
@@ -868,10 +909,12 @@ describe('§11 — Cancellation', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let delayDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const def = await api.createDef(DELAY_DEFINITION);
@@ -880,6 +923,7 @@ describe('§11 — Cancellation', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('cancellation recorded in history as transition to cancelled state', async () => {

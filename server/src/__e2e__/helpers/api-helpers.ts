@@ -8,15 +8,40 @@
  * @module
  */
 
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
 type Handler = (req: Request) => Promise<Response>;
 
 /**
- * Build a set of typed HTTP helpers bound to a given in-process handler.
+ * Create a temporary workspace directory for E2E tests.
+ * Returns the absolute path. Caller must clean up via `fs.rm(path, { recursive: true })`.
  */
-export function makeApiHelpers(handler: Handler) {
+export async function createTestWorkspace(): Promise<string> {
+  return fs.mkdtemp(path.join(os.tmpdir(), 'aiflow-e2e-'));
+}
+
+/**
+ * Remove a temporary workspace directory created by `createTestWorkspace`.
+ */
+export async function removeTestWorkspace(workspaceRoot: string): Promise<void> {
+  await fs.rm(workspaceRoot, { recursive: true, force: true });
+}
+
+/**
+ * Build a set of typed HTTP helpers bound to a given in-process handler.
+ * If `defaultWorkspaceRoot` is provided, it is automatically injected into
+ * every `startInst` and `postInstance` call (unless the caller explicitly
+ * provides one).
+ */
+export function makeApiHelpers(handler: Handler, defaultWorkspaceRoot?: string) {
   const BASE = 'http://localhost/api/machines';
 
   return {
+    /** The default workspace root used for instance creation, if set. */
+    defaultWorkspaceRoot,
+
     // ── Definition CRUD ──────────────────────────────────────────────────
 
     postDefinition: (body: unknown) =>
@@ -57,7 +82,11 @@ export function makeApiHelpers(handler: Handler) {
         new Request(`${BASE}/instances`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify(
+            defaultWorkspaceRoot && typeof body === 'object' && body !== null
+              ? { workspaceRoot: defaultWorkspaceRoot, ...body }
+              : body,
+          ),
         }),
       ),
 
@@ -94,12 +123,19 @@ export function makeApiHelpers(handler: Handler) {
     /**
      * Start an instance and return its parsed body.
      * Throws if the response is not 201.
+     * Uses `defaultWorkspaceRoot` unless an explicit `workspaceRoot` is given.
      */
     async startInst(
       defId: string,
       input: unknown = {},
+      workspaceRoot?: string,
     ): Promise<{ id: string; status: string; [k: string]: unknown }> {
-      const res = await this.postInstance({ definitionId: defId, input });
+      const wsRoot = workspaceRoot ?? defaultWorkspaceRoot;
+      const res = await this.postInstance({
+        definitionId: defId,
+        input,
+        ...(wsRoot ? { workspaceRoot: wsRoot } : {}),
+      });
       if (res.status !== 201) {
         const text = await res.text();
         throw new Error(`startInst failed (${String(res.status)}): ${text}`);

@@ -34,7 +34,12 @@ import { MachineStore } from '@/machines/store/index.js';
 import type { MachineEvent } from '@/machines/types.js';
 import { MachineRouter } from '@/routes/machines/index.js';
 
-import { type ApiHelpers, makeApiHelpers } from './helpers/api-helpers.js';
+import {
+  type ApiHelpers,
+  createTestWorkspace,
+  makeApiHelpers,
+  removeTestWorkspace,
+} from './helpers/api-helpers.js';
 import { CHILD_DEFINITION, DELAY_DEFINITION } from './helpers/fixtures.js';
 import { makeE2ETestLayer } from './helpers/test-handler.js';
 import {
@@ -149,8 +154,10 @@ describe('§16 — WebSocket Live Updates', () => {
   let managedRuntime: ManagedRuntime.ManagedRuntime<any, never>;
   let testHttpServer: import('node:http').Server;
   let testWss: WebSocketServer;
+  let testWorkspaceRoot: string;
 
   beforeAll(async () => {
+    testWorkspaceRoot = await createTestWorkspace();
     // Build machine service layers (store, runner, pubsub, etc.)
     const MachineLive = makeE2ETestLayer();
     managedRuntime = ManagedRuntime.make(MachineLive);
@@ -172,7 +179,7 @@ describe('§16 — WebSocket Live Updates', () => {
       HttpRouter.use((httpApp) => Effect.provide(httpApp, runtime)),
     );
     const handler = HttpApp.toWebHandler(served);
-    api = makeApiHelpers(handler);
+    api = makeApiHelpers(handler, testWorkspaceRoot);
 
     // ── Test-specific HTTP server + WebSocket on random port ──────────
     testHttpServer = createServer();
@@ -259,6 +266,7 @@ describe('§16 — WebSocket Live Updates', () => {
       });
     });
     await managedRuntime.dispose();
+    await removeTestWorkspace(testWorkspaceRoot);
   }, 15_000);
 
   /**

@@ -21,7 +21,12 @@ import { LoggingMiddleware } from '@/machines/middleware/LoggingMiddleware.js';
 import { TelemetryMiddleware } from '@/machines/middleware/TelemetryMiddleware.js';
 import { ValidationMiddleware } from '@/machines/middleware/ValidationMiddleware.js';
 import type { ActionContext, MachineResult, TransitionMiddleware } from '@/machines/types.js';
-import { type ApiHelpers, makeApiHelpers } from './helpers/api-helpers.js';
+import {
+  type ApiHelpers,
+  createTestWorkspace,
+  makeApiHelpers,
+  removeTestWorkspace,
+} from './helpers/api-helpers.js';
 import {
   CHILD_DEFINITION,
   PARENT_INPUT,
@@ -221,6 +226,7 @@ describe('§14.1 — Execution Order', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let defId: string;
+    let testWorkspaceRoot: string;
     const orderLog: string[] = [];
 
     // Middleware that logs before/after ordering alongside the default stack
@@ -239,6 +245,7 @@ describe('§14.1 — Execution Order', () => {
     };
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         middleware: [
           ValidationMiddleware,
@@ -247,7 +254,7 @@ describe('§14.1 — Execution Order', () => {
           TelemetryMiddleware,
         ],
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const def = await api.createDef(SIMPLE_DEFINITION);
@@ -256,6 +263,7 @@ describe('§14.1 — Execution Order', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('beforeTransition middleware fires before action (log appears before transition)', async () => {
@@ -290,9 +298,11 @@ describe('§14.1 — Execution Order', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let defId: string;
+    let testWorkspaceRoot: string;
     const orderLog: string[] = [];
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const mw1 = makeOrderTracker('MW1', orderLog);
       const mw2 = makeOrderTracker('MW2', orderLog);
       const mw3 = makeOrderTracker('MW3', orderLog);
@@ -301,7 +311,7 @@ describe('§14.1 — Execution Order', () => {
       const { handler, runtime } = await makeTestHandler({
         middleware: [mw1, mw2, mw3],
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const def = await api.createDef(SIMPLE_DEFINITION);
@@ -310,6 +320,7 @@ describe('§14.1 — Execution Order', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('multiple beforeTransition run in registration order', async () => {
@@ -351,10 +362,12 @@ describe('§14.2 — Cross-Cutting Concerns', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let validatedDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const def = await api.createDef(VALIDATED_DEFINITION);
@@ -363,6 +376,7 @@ describe('§14.2 — Cross-Cutting Concerns', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('state with dataSchema and bad data → machine errors', async () => {
@@ -392,10 +406,12 @@ describe('§14.2 — Cross-Cutting Concerns', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let defId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const def = await api.createDef(SIMPLE_DEFINITION);
@@ -404,6 +420,7 @@ describe('§14.2 — Cross-Cutting Concerns', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('completed machine has structured log entries for each transition', async () => {
@@ -450,13 +467,15 @@ describe('§14.2 — Cross-Cutting Concerns', () => {
     let cleanup: () => Promise<void>;
     let defId: string;
     let auditMiddleware: AuditMiddlewareInstance;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       auditMiddleware = createAuditMiddleware('e2e-test-actor');
       const { handler, runtime } = await makeTestHandler({
         middleware: [ValidationMiddleware, LoggingMiddleware, TelemetryMiddleware, auditMiddleware],
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const def = await api.createDef(SIMPLE_DEFINITION);
@@ -465,6 +484,7 @@ describe('§14.2 — Cross-Cutting Concerns', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('completed machine has audit records for each transition', async () => {
@@ -498,10 +518,12 @@ describe('§14.2 — Cross-Cutting Concerns', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let defId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const def = await api.createDef(SIMPLE_DEFINITION);
@@ -510,6 +532,7 @@ describe('§14.2 — Cross-Cutting Concerns', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('OTel spans created per transition (no crash when OTel disabled)', async () => {
@@ -541,14 +564,16 @@ describe('§14.3 — Child Machine Middleware', () => {
     let childDefId: string;
     let parentDefId: string;
     let auditMiddleware: AuditMiddlewareInstance;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       auditMiddleware = createAuditMiddleware('child-test-actor');
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
         middleware: [ValidationMiddleware, LoggingMiddleware, TelemetryMiddleware, auditMiddleware],
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const childDef = await api.createDef(CHILD_DEFINITION);
@@ -559,6 +584,7 @@ describe('§14.3 — Child Machine Middleware', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('middleware fires on child machine transitions independently of parent', async () => {
@@ -614,14 +640,16 @@ describe('§14.3 — Child Machine Middleware', () => {
     let multiChildDefId: string;
     let parentDefId: string;
     let auditMiddleware: AuditMiddlewareInstance;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       auditMiddleware = createAuditMiddleware('multi-child-actor');
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
         middleware: [ValidationMiddleware, LoggingMiddleware, TelemetryMiddleware, auditMiddleware],
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const childDef = await api.createDef(MULTI_STEP_CHILD_DEFINITION);
@@ -632,6 +660,7 @@ describe('§14.3 — Child Machine Middleware', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('child with multiple transitions → middleware fires for each', async () => {

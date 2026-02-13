@@ -26,7 +26,12 @@ import { parseClientMessage, serializeServerMessage } from '@/machines/live/even
 import type { ActionContext, MachineEvent } from '@/machines/types.js';
 import { MachineRouter } from '@/routes/machines/index.js';
 
-import { type ApiHelpers, makeApiHelpers } from './helpers/api-helpers.js';
+import {
+  type ApiHelpers,
+  createTestWorkspace,
+  makeApiHelpers,
+  removeTestWorkspace,
+} from './helpers/api-helpers.js';
 import {
   CHILD_DEFINITION,
   DELAY_DEFINITION,
@@ -216,8 +221,10 @@ describe('§21 — Negative & Edge Cases', () => {
     let api: ApiHelpers;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let managedRuntime: ManagedRuntime.ManagedRuntime<any, never>;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const MachineLive = makeE2ETestLayer();
       managedRuntime = ManagedRuntime.make(MachineLive);
       const runtime = await managedRuntime.runtime();
@@ -225,11 +232,12 @@ describe('§21 — Negative & Edge Cases', () => {
       const served = MachineRouter.pipe(
         HttpRouter.use((httpApp) => Effect.provide(httpApp, runtime)),
       );
-      api = makeApiHelpers(HttpApp.toWebHandler(served));
+      api = makeApiHelpers(HttpApp.toWebHandler(served), testWorkspaceRoot);
     });
 
     afterAll(async () => {
       await managedRuntime.dispose();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('POST /instances with missing definitionId → 400', async () => {
@@ -270,8 +278,10 @@ describe('§21 — Negative & Edge Cases', () => {
     let wsUrl: string;
     let testHttpServer: import('node:http').Server;
     let testWss: WebSocketServer;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const MachineLive = makeE2ETestLayer();
       managedRuntime = ManagedRuntime.make(MachineLive);
       const runtime = await managedRuntime.runtime();
@@ -279,7 +289,7 @@ describe('§21 — Negative & Edge Cases', () => {
       const served = MachineRouter.pipe(
         HttpRouter.use((httpApp) => Effect.provide(httpApp, runtime)),
       );
-      api = makeApiHelpers(HttpApp.toWebHandler(served));
+      api = makeApiHelpers(HttpApp.toWebHandler(served), testWorkspaceRoot);
 
       // ── Test WS server for the "two clients" test ──────────────────
       testHttpServer = createServer();
@@ -355,6 +365,7 @@ describe('§21 — Negative & Edge Cases', () => {
         });
       });
       await managedRuntime.dispose();
+      await removeTestWorkspace(testWorkspaceRoot);
     }, 15_000);
 
     it('starting 10 instances of same definition concurrently → no data corruption', async () => {
@@ -458,8 +469,10 @@ describe('§21 — Negative & Edge Cases', () => {
     let api: ApiHelpers;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let managedRuntime: ManagedRuntime.ManagedRuntime<any, never>;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const MachineLive = makeE2ETestLayer();
       managedRuntime = ManagedRuntime.make(MachineLive);
       const runtime = await managedRuntime.runtime();
@@ -467,11 +480,12 @@ describe('§21 — Negative & Edge Cases', () => {
       const served = MachineRouter.pipe(
         HttpRouter.use((httpApp) => Effect.provide(httpApp, runtime)),
       );
-      api = makeApiHelpers(HttpApp.toWebHandler(served));
+      api = makeApiHelpers(HttpApp.toWebHandler(served), testWorkspaceRoot);
     });
 
     afterAll(async () => {
       await managedRuntime.dispose();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('updating definition while instance running → running instance unaffected', async () => {
@@ -546,8 +560,10 @@ describe('§21 — Negative & Edge Cases', () => {
     let api: ApiHelpers;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let managedRuntime: ManagedRuntime.ManagedRuntime<any, never>;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const MachineLive = makeE2ETestLayer();
       managedRuntime = ManagedRuntime.make(MachineLive);
       const runtime = await managedRuntime.runtime();
@@ -566,11 +582,12 @@ describe('§21 — Negative & Edge Cases', () => {
       const served = MachineRouter.pipe(
         HttpRouter.use((httpApp) => Effect.provide(httpApp, runtime)),
       );
-      api = makeApiHelpers(HttpApp.toWebHandler(served));
+      api = makeApiHelpers(HttpApp.toWebHandler(served), testWorkspaceRoot);
     }, 20_000);
 
     afterAll(async () => {
       await managedRuntime.dispose();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('machine with 50+ states and transitions runs correctly', async () => {
@@ -644,8 +661,10 @@ describe('§21 — Negative & Edge Cases', () => {
     let wsUrl: string;
     let testHttpServer: import('node:http').Server;
     let testWss: WebSocketServer;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const MachineLive = makeE2ETestLayer();
       managedRuntime = ManagedRuntime.make(MachineLive);
       const runtime = await managedRuntime.runtime();
@@ -653,7 +672,7 @@ describe('§21 — Negative & Edge Cases', () => {
       const served = MachineRouter.pipe(
         HttpRouter.use((httpApp) => Effect.provide(httpApp, runtime)),
       );
-      api = makeApiHelpers(HttpApp.toWebHandler(served));
+      api = makeApiHelpers(HttpApp.toWebHandler(served), testWorkspaceRoot);
 
       // ── Test WS server ─────────────────────────────────────────────
       testHttpServer = createServer();
@@ -729,6 +748,7 @@ describe('§21 — Negative & Edge Cases', () => {
         });
       });
       await managedRuntime.dispose();
+      await removeTestWorkspace(testWorkspaceRoot);
     }, 15_000);
 
     it('subscribing to completed instance delivers no events', async () => {

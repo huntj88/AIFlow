@@ -15,7 +15,12 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { type ApiHelpers, makeApiHelpers } from './helpers/api-helpers.js';
+import {
+  type ApiHelpers,
+  createTestWorkspace,
+  makeApiHelpers,
+  removeTestWorkspace,
+} from './helpers/api-helpers.js';
 import { SIMPLE_DEFINITION, SIMPLE_INPUT } from './helpers/fixtures.js';
 import { makeTestHandler } from './helpers/test-handler.js';
 
@@ -97,15 +102,18 @@ describe('E2E Infrastructure — Definition CRUD', () => {
 describe('E2E Infrastructure — Instance Lifecycle', () => {
   let api: ApiHelpers;
   let cleanup: () => Promise<void>;
+  let testWorkspaceRoot: string;
 
   beforeAll(async () => {
+    testWorkspaceRoot = await createTestWorkspace();
     const { handler, runtime } = await makeTestHandler();
-    api = makeApiHelpers(handler);
+    api = makeApiHelpers(handler, testWorkspaceRoot);
     cleanup = () => runtime.dispose().then(() => undefined);
   });
 
   afterAll(async () => {
     await cleanup();
+    await removeTestWorkspace(testWorkspaceRoot);
   });
 
   it('starts an instance and polls to completion', async () => {

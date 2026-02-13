@@ -251,11 +251,11 @@ Verify `artifact_created` is never received.
 
 ## Validation Checklist
 
-- [ ] All existing E2E tests updated with `workspaceRoot`
-- [ ] Workspace root validation E2E tests pass
-- [ ] Instance payload E2E tests verify new fields
-- [ ] Child inheritance E2E tests pass
-- [ ] Artifact endpoint removal E2E tests pass (404s)
-- [ ] CLI helper E2E tests pass
-- [ ] WebSocket E2E tests updated (no artifact_created)
-- [ ] `pnpm --filter @aiflow/server run test:e2e` passes
+- [x] All existing E2E tests updated with `workspaceRoot`
+- [x] Workspace root validation E2E tests pass
+- [x] Instance payload E2E tests verify new fields
+- [x] Child inheritance E2E tests pass
+- [x] Artifact endpoint removal E2E tests pass (404s)
+- [x] CLI helper E2E tests pass
+- [x] WebSocket E2E tests updated (no artifact_created)
+- [x] `pnpm --filter @aiflow/server run test:e2e` passes

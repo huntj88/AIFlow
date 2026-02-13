@@ -23,7 +23,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ActionRegistry } from '@/machines/ActionRegistry.js';
 import type { ActionContext, MachineResult, ParallelChildrenResult } from '@/machines/types.js';
 import { mkActionError } from '@/machines/types.js';
-import { type ApiHelpers, makeApiHelpers } from './helpers/api-helpers.js';
+import {
+  type ApiHelpers,
+  createTestWorkspace,
+  makeApiHelpers,
+  removeTestWorkspace,
+} from './helpers/api-helpers.js';
 import { CHILD_DEFINITION, PARENT_INPUT, PARALLEL_INPUT } from './helpers/fixtures.js';
 import { makeTestHandler } from './helpers/test-handler.js';
 
@@ -224,12 +229,14 @@ describe('§8 — Child Machine (Single)', () => {
     let cleanup: () => Promise<void>;
     let childDefId: string;
     let parentDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const childDef = await api.createDef(CHILD_DEFINITION);
@@ -240,6 +247,7 @@ describe('§8 — Child Machine (Single)', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('child instance created with parentInstanceId pointing to parent', async () => {
@@ -370,12 +378,14 @@ describe('§8 — Child Machine (Single)', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let childDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const childDef = await api.createDef(CHILD_DEFINITION);
@@ -384,6 +394,7 @@ describe('§8 — Child Machine (Single)', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('childInputMapping JSONPath extracts child input correctly', async () => {
@@ -442,12 +453,14 @@ describe('§8 — Child Machine (Single)', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let errorChildDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const errorChildDef = await api.createDef(ERROR_CHILD_DEFINITION);
@@ -456,6 +469,7 @@ describe('§8 — Child Machine (Single)', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('child error → parent receives MachineResult with status error', async () => {
@@ -503,12 +517,14 @@ describe('§8 — Child Machine (Single)', () => {
     let cleanup: () => Promise<void>;
     let childDefId: string;
     let parentDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const childDef = await api.createDef(CHILD_DEFINITION);
@@ -519,6 +535,7 @@ describe('§8 — Child Machine (Single)', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('child parentContext has parentInstanceId and parentStateName', async () => {
@@ -589,12 +606,14 @@ describe('§9 — Parallel Children', () => {
     let cleanup: () => Promise<void>;
     let childDefId: string;
     let parallelDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const childDef = await api.createDef(CHILD_DEFINITION);
@@ -616,6 +635,7 @@ describe('§9 — Parallel Children', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('3 children spawned and visible in GET /instances', async () => {
@@ -712,12 +732,14 @@ describe('§9 — Parallel Children', () => {
     let cleanup: () => Promise<void>;
     let errorChildDefId: string;
     let slowChildDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const errorChildDef = await api.createDef(ERROR_CHILD_DEFINITION);
@@ -729,6 +751,7 @@ describe('§9 — Parallel Children', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('one child errors → remaining children cancelled', async () => {
@@ -843,12 +866,14 @@ describe('§9 — Parallel Children', () => {
     let cleanup: () => Promise<void>;
     let childDefId: string;
     let errorChildDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const childDef = await api.createDef(CHILD_DEFINITION);
@@ -860,6 +885,7 @@ describe('§9 — Parallel Children', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('one child errors → other children still finish', async () => {
@@ -953,12 +979,14 @@ describe('§9 — Parallel Children', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let childDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const childDef = await api.createDef(CHILD_DEFINITION);
@@ -967,6 +995,7 @@ describe('§9 — Parallel Children', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('each child inputMapping extracts correct input from parent context', async () => {
@@ -1054,12 +1083,14 @@ describe('§9 — Parallel Children', () => {
     let api: ApiHelpers;
     let cleanup: () => Promise<void>;
     let childDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      api = makeApiHelpers(handler);
+      api = makeApiHelpers(handler, testWorkspaceRoot);
       cleanup = () => runtime.dispose().then(() => undefined);
 
       const childDef = await api.createDef(CHILD_DEFINITION);
@@ -1068,6 +1099,7 @@ describe('§9 — Parallel Children', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('results correctly keyed by ChildSpawnDefinition.key', async () => {

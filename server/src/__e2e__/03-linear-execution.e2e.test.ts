@@ -16,7 +16,12 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { type ApiHelpers, makeApiHelpers } from './helpers/api-helpers.js';
+import {
+  type ApiHelpers,
+  createTestWorkspace,
+  makeApiHelpers,
+  removeTestWorkspace,
+} from './helpers/api-helpers.js';
 import {
   BRANCHING_DEFINITION,
   BRANCHING_INPUT_FALSE,
@@ -124,10 +129,12 @@ describe('§4 — Machine Execution: Linear Flow', () => {
   let linearDefId: string;
   let strictDefId: string;
   let simpleDefId: string;
+  let testWorkspaceRoot: string;
 
   beforeAll(async () => {
+    testWorkspaceRoot = await createTestWorkspace();
     const { handler, runtime } = await makeTestHandler();
-    api = makeApiHelpers(handler);
+    api = makeApiHelpers(handler, testWorkspaceRoot);
     cleanup = () => runtime.dispose().then(() => undefined);
 
     const linearDef = await api.createDef(LINEAR_DEFINITION);
@@ -142,6 +149,7 @@ describe('§4 — Machine Execution: Linear Flow', () => {
 
   afterAll(async () => {
     await cleanup();
+    await removeTestWorkspace(testWorkspaceRoot);
   });
 
   // ────────────────────────────────────────────────────────────────────────
@@ -518,10 +526,12 @@ describe('§5 — Machine Execution: Branching', () => {
   let cleanup: () => Promise<void>;
   let branchDefId: string;
   let multiPathDefId: string;
+  let testWorkspaceRoot: string;
 
   beforeAll(async () => {
+    testWorkspaceRoot = await createTestWorkspace();
     const { handler, runtime } = await makeTestHandler();
-    api = makeApiHelpers(handler);
+    api = makeApiHelpers(handler, testWorkspaceRoot);
     cleanup = () => runtime.dispose().then(() => undefined);
 
     const branchDef = await api.createDef(BRANCHING_DEFINITION);
@@ -533,6 +543,7 @@ describe('§5 — Machine Execution: Branching', () => {
 
   afterAll(async () => {
     await cleanup();
+    await removeTestWorkspace(testWorkspaceRoot);
   });
 
   it('conditional-branch routes to trueState when condition met', async () => {

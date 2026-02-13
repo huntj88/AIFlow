@@ -21,7 +21,12 @@ import type { ActionRegistry } from '@/machines/ActionRegistry.js';
 import { StateMachineRunner } from '@/machines/StateMachineRunner.js';
 import { MachineStore } from '@/machines/store/index.js';
 import type { ActionContext, MachineInstance, MachineResult } from '@/machines/types.js';
-import { type ApiHelpers, makeApiHelpers } from './helpers/api-helpers.js';
+import {
+  type ApiHelpers,
+  createTestWorkspace,
+  makeApiHelpers,
+  removeTestWorkspace,
+} from './helpers/api-helpers.js';
 import {
   DELAY_DEFINITION,
   DELAY_INPUT_LONG,
@@ -219,8 +224,9 @@ describe('§12 — Resumability', () => {
 
   describe('§12.2 Resume — Happy Path', () => {
     it('POST /instances/:id/resume on suspended instance → 200', async () => {
+      const testWs = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      const api = makeApiHelpers(handler);
+      const api = makeApiHelpers(handler, testWs);
 
       const def = await api.createDef(DELAY_DEFINITION);
       const inst = await api.startInst(def.id, DELAY_INPUT_SHORT);
@@ -235,11 +241,13 @@ describe('§12 — Resumability', () => {
       expect(resumeRes.status).toBe(200);
 
       await runtime.dispose();
+      await removeTestWorkspace(testWs);
     });
 
     it('resumed instance changes to running then reaches terminal state', async () => {
+      const testWs = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      const api = makeApiHelpers(handler);
+      const api = makeApiHelpers(handler, testWs);
 
       const def = await api.createDef(DELAY_DEFINITION);
       const inst = await api.startInst(def.id, DELAY_INPUT_SHORT);
@@ -257,11 +265,13 @@ describe('§12 — Resumability', () => {
       expect(final.status).toBe('completed');
 
       await runtime.dispose();
+      await removeTestWorkspace(testWs);
     });
 
     it('runner re-enters currentState and re-executes action', async () => {
+      const testWs = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      const api = makeApiHelpers(handler);
+      const api = makeApiHelpers(handler, testWs);
 
       const def = await api.createDef(MULTI_STATE_DEFINITION);
       const inst = await api.startInst(def.id, {
@@ -304,11 +314,13 @@ describe('§12 — Resumability', () => {
       expect(step2ToCompleted).toBeDefined();
 
       await runtime.dispose();
+      await removeTestWorkspace(testWs);
     });
 
     it('already-completed transitions are not re-executed', async () => {
+      const testWs = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      const api = makeApiHelpers(handler);
+      const api = makeApiHelpers(handler, testWs);
 
       const def = await api.createDef(MULTI_STATE_DEFINITION);
       const inst = await api.startInst(def.id, {
@@ -352,11 +364,13 @@ describe('§12 — Resumability', () => {
       expect(step1CountAfter).toBe(step1Count);
 
       await runtime.dispose();
+      await removeTestWorkspace(testWs);
     });
 
     it('machine runs to completion from resumed state', async () => {
+      const testWs = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler();
-      const api = makeApiHelpers(handler);
+      const api = makeApiHelpers(handler, testWs);
 
       const def = await api.createDef(DELAY_DEFINITION);
       const inst = await api.startInst(def.id, DELAY_INPUT_SHORT);
@@ -374,6 +388,7 @@ describe('§12 — Resumability', () => {
       expect(final.status).toBe('completed');
 
       await runtime.dispose();
+      await removeTestWorkspace(testWs);
     });
   });
 
@@ -383,13 +398,11 @@ describe('§12 — Resumability', () => {
 
   describe('§12.3 Resume — With Single Child', () => {
     it('resuming parent with suspended child → child resumed first', async () => {
-      // Strategy: start parent + slow child, wait for waiting_for_child,
-      // manually set both to suspended with childInstanceId set on parent,
-      // then resume parent via HTTP.
+      const testWs = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      const api = makeApiHelpers(handler);
+      const api = makeApiHelpers(handler, testWs);
 
       const childDef = await api.createDef(SLOW_CHILD_DEFINITION);
       const parentDef = await api.createDef(makeSlowParentDef(childDef.id));
@@ -435,15 +448,15 @@ describe('§12 — Resumability', () => {
       expect(childFinal.status).toBe('completed');
 
       await runtime.dispose();
+      await removeTestWorkspace(testWs);
     });
 
     it('child completes then parent continues', async () => {
-      // Parent is suspended at child_machine state, child already completed.
-      // On resume, parent should see completed child and proceed.
+      const testWs = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      const api = makeApiHelpers(handler);
+      const api = makeApiHelpers(handler, testWs);
 
       const childDef = await api.createDef(SLOW_CHILD_DEFINITION);
       const parentDef = await api.createDef(makeSlowParentDef(childDef.id));
@@ -486,13 +499,15 @@ describe('§12 — Resumability', () => {
       expect(final.status).toBe('completed');
 
       await runtime.dispose();
+      await removeTestWorkspace(testWs);
     });
 
     it('already-completed child is not re-run', async () => {
+      const testWs = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      const api = makeApiHelpers(handler);
+      const api = makeApiHelpers(handler, testWs);
 
       const childDef = await api.createDef(SLOW_CHILD_DEFINITION);
       const parentDef = await api.createDef(makeSlowParentDef(childDef.id));
@@ -543,6 +558,7 @@ describe('§12 — Resumability', () => {
       expect(histAfter.length).toBe(histLenBefore);
 
       await runtime.dispose();
+      await removeTestWorkspace(testWs);
     });
   });
 
@@ -552,10 +568,11 @@ describe('§12 — Resumability', () => {
 
   describe('§12.4 Resume — With Parallel Children', () => {
     it('suspended children resumed, completed children skipped', async () => {
+      const testWs = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      const api = makeApiHelpers(handler);
+      const api = makeApiHelpers(handler, testWs);
 
       // Two slow children
       const child1Def = await api.createDef(SLOW_CHILD_DEFINITION);
@@ -619,13 +636,15 @@ describe('§12 — Resumability', () => {
       expect(c1Final.status).toBe('completed');
 
       await runtime.dispose();
+      await removeTestWorkspace(testWs);
     });
 
     it('parent waits for all children to reach terminal', async () => {
+      const testWs = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      const api = makeApiHelpers(handler);
+      const api = makeApiHelpers(handler, testWs);
 
       const child1Def = await api.createDef(SLOW_CHILD_DEFINITION);
       const child2Def = await api.createDef(SLOW_CHILD_DEFINITION);
@@ -680,13 +699,15 @@ describe('§12 — Resumability', () => {
       expect(['completed', 'error']).toContain(parentFinal.status);
 
       await runtime.dispose();
+      await removeTestWorkspace(testWs);
     });
 
     it('ParallelChildrenResult mixes pre-completed and just-resumed', async () => {
+      const testWs = await createTestWorkspace();
       const { handler, runtime } = await makeTestHandler({
         registerActions: registerTestActions,
       });
-      const api = makeApiHelpers(handler);
+      const api = makeApiHelpers(handler, testWs);
 
       const child1Def = await api.createDef(SLOW_CHILD_DEFINITION);
       const child2Def = await api.createDef(SLOW_CHILD_DEFINITION);
@@ -745,6 +766,7 @@ describe('§12 — Resumability', () => {
       expect(['completed', 'error']).toContain(parentFinal.status);
 
       await runtime.dispose();
+      await removeTestWorkspace(testWs);
     });
   });
 
@@ -758,10 +780,12 @@ describe('§12 — Resumability', () => {
     let runtime: Awaited<ReturnType<typeof makeTestHandler>>['runtime'];
     let simpleDefId: string;
     let delayDefId: string;
+    let testWorkspaceRoot: string;
 
     beforeAll(async () => {
+      testWorkspaceRoot = await createTestWorkspace();
       const result = await makeTestHandler();
-      api = makeApiHelpers(result.handler);
+      api = makeApiHelpers(result.handler, testWorkspaceRoot);
       runtime = result.runtime;
       cleanup = () => result.runtime.dispose().then(() => undefined);
 
@@ -773,6 +797,7 @@ describe('§12 — Resumability', () => {
 
     afterAll(async () => {
       await cleanup();
+      await removeTestWorkspace(testWorkspaceRoot);
     });
 
     it('resume running instance → 409', async () => {
@@ -895,27 +920,35 @@ describe('§12 — Resumability', () => {
 
 describe('§12.1 — Graceful Shutdown (in-process)', () => {
   it('suspendAll → running instances become suspended', async () => {
+    const testWs = await createTestWorkspace();
     const { handler, runtime } = await makeTestHandler();
-    const api = makeApiHelpers(handler);
+    const api = makeApiHelpers(handler, testWs);
 
     const def = await api.createDef(DELAY_DEFINITION);
     const inst = await api.startInst(def.id, DELAY_INPUT_LONG);
     await api.pollStatus(inst.id, ['running'], 5_000);
 
+    // Brief delay to ensure fiber is registered in the runner's fiberMap
+    await new Promise((r) => setTimeout(r, 200));
+
     await suspendViaRunner(runtime);
+
+    await api.pollStatus(inst.id, ['suspended'], 5_000);
 
     const res = await api.getInstance(inst.id);
     const data = (await res.json()) as { status: string };
     expect(data.status).toBe('suspended');
 
     await runtime.dispose();
+    await removeTestWorkspace(testWs);
   });
 
   it('suspendAll → waiting_for_child parents also suspended', async () => {
+    const testWs = await createTestWorkspace();
     const { handler, runtime } = await makeTestHandler({
       registerActions: registerTestActions,
     });
-    const api = makeApiHelpers(handler);
+    const api = makeApiHelpers(handler, testWs);
 
     const childDef = await api.createDef(SLOW_CHILD_DEFINITION);
     const parentDef = await api.createDef(makeSlowParentDef(childDef.id));
@@ -927,20 +960,27 @@ describe('§12.1 — Graceful Shutdown (in-process)', () => {
 
     await api.pollStatus(parentInst.id, ['waiting_for_child'], 5_000);
 
+    // Brief delay to ensure fiber is registered in the runner's fiberMap
+    await new Promise((r) => setTimeout(r, 200));
+
     await suspendViaRunner(runtime);
+
+    await api.pollStatus(parentInst.id, ['suspended'], 5_000);
 
     const res = await api.getInstance(parentInst.id);
     const data = (await res.json()) as { status: string };
     expect(data.status).toBe('suspended');
 
     await runtime.dispose();
+    await removeTestWorkspace(testWs);
   });
 
   it('suspendAll → children of suspended parents also suspended', async () => {
+    const testWs = await createTestWorkspace();
     const { handler, runtime } = await makeTestHandler({
       registerActions: registerTestActions,
     });
-    const api = makeApiHelpers(handler);
+    const api = makeApiHelpers(handler, testWs);
 
     const childDef = await api.createDef(SLOW_CHILD_DEFINITION);
     const parentDef = await api.createDef(makeSlowParentDef(childDef.id));
@@ -959,6 +999,9 @@ describe('§12.1 — Graceful Shutdown (in-process)', () => {
     const childId = children[0].id;
     await api.pollStatus(childId, ['running'], 5_000);
 
+    // Brief delay to ensure fiber is registered in the runner's fiberMap
+    await new Promise((r) => setTimeout(r, 200));
+
     await suspendViaRunner(runtime);
 
     const childRes = await api.getInstance(childId);
@@ -966,29 +1009,33 @@ describe('§12.1 — Graceful Shutdown (in-process)', () => {
     expect(childData.status).toBe('suspended');
 
     await runtime.dispose();
+    await removeTestWorkspace(testWs);
   });
 
   it('suspended status ≠ cancelled', async () => {
+    const testWs = await createTestWorkspace();
     const { handler, runtime } = await makeTestHandler();
-    const api = makeApiHelpers(handler);
+    const api = makeApiHelpers(handler, testWs);
 
     const def = await api.createDef(DELAY_DEFINITION);
     const inst = await api.startInst(def.id, DELAY_INPUT_LONG);
     await api.pollStatus(inst.id, ['running'], 5_000);
 
+    // Brief delay to ensure fiber is registered in the runner's fiberMap
+    await new Promise((r) => setTimeout(r, 200));
+
     await suspendViaRunner(runtime);
 
-    const res = await api.getInstance(inst.id);
-    const data = (await res.json()) as { status: string };
-    expect(data.status).toBe('suspended');
-    expect(data.status).not.toBe('cancelled');
+    await api.pollStatus(inst.id, ['suspended'], 5_000);
 
     await runtime.dispose();
+    await removeTestWorkspace(testWs);
   });
 
   it('GET /instances shows suspended instances after shutdown', async () => {
+    const testWs = await createTestWorkspace();
     const { handler, runtime } = await makeTestHandler();
-    const api = makeApiHelpers(handler);
+    const api = makeApiHelpers(handler, testWs);
 
     const def = await api.createDef(DELAY_DEFINITION);
     const inst1 = await api.startInst(def.id, DELAY_INPUT_LONG);
@@ -996,7 +1043,13 @@ describe('§12.1 — Graceful Shutdown (in-process)', () => {
     await api.pollStatus(inst1.id, ['running'], 5_000);
     await api.pollStatus(inst2.id, ['running'], 5_000);
 
+    // Brief delay to ensure fibers are registered in the runner's fiberMap
+    await new Promise((r) => setTimeout(r, 200));
+
     await suspendViaRunner(runtime);
+
+    await api.pollStatus(inst1.id, ['suspended'], 5_000);
+    await api.pollStatus(inst2.id, ['suspended'], 5_000);
 
     const res = await api.getInstances('?status=suspended');
     const body = (await res.json()) as { id: string; status: string }[];
@@ -1006,6 +1059,7 @@ describe('§12.1 — Graceful Shutdown (in-process)', () => {
     }
 
     await runtime.dispose();
+    await removeTestWorkspace(testWs);
   });
 });
 
@@ -1015,8 +1069,9 @@ describe('§12.1 — Graceful Shutdown (in-process)', () => {
 
 describe('§13 — Persistence Checkpoints', () => {
   it('CP1: immediately after start → running, currentState=initial', async () => {
+    const testWs = await createTestWorkspace();
     const { handler, runtime } = await makeTestHandler();
-    const api = makeApiHelpers(handler);
+    const api = makeApiHelpers(handler, testWs);
 
     const def = await api.createDef(DELAY_DEFINITION);
     const inst = await api.startInst(def.id, DELAY_INPUT_LONG);
@@ -1030,11 +1085,13 @@ describe('§13 — Persistence Checkpoints', () => {
     expect(running.currentState).toBe('waiting'); // DELAY_DEFINITION initial state
 
     await runtime.dispose();
+    await removeTestWorkspace(testWs);
   });
 
   it('CP3: after transition → history appended, currentState advanced', async () => {
+    const testWs = await createTestWorkspace();
     const { handler, runtime } = await makeTestHandler();
-    const api = makeApiHelpers(handler);
+    const api = makeApiHelpers(handler, testWs);
 
     const def = await api.createDef(MULTI_STATE_DEFINITION);
     const inst = await api.startInst(def.id, {
@@ -1062,11 +1119,13 @@ describe('§13 — Persistence Checkpoints', () => {
     expect(t).toBeDefined();
 
     await runtime.dispose();
+    await removeTestWorkspace(testWs);
   });
 
   it('CP4: terminal → status set, output or error populated', async () => {
+    const testWs = await createTestWorkspace();
     const { handler, runtime } = await makeTestHandler();
-    const api = makeApiHelpers(handler);
+    const api = makeApiHelpers(handler, testWs);
 
     // Successful completion
     const def = await api.createDef(SIMPLE_DEFINITION);
@@ -1114,11 +1173,13 @@ describe('§13 — Persistence Checkpoints', () => {
     expect(typeof errFinal.error).toBe('string');
 
     await runtime.dispose();
+    await removeTestWorkspace(testWs);
   });
 
   it('CP5: suspension → status=suspended, currentState=interrupted state', async () => {
+    const testWs = await createTestWorkspace();
     const { handler, runtime } = await makeTestHandler();
-    const api = makeApiHelpers(handler);
+    const api = makeApiHelpers(handler, testWs);
 
     const def = await api.createDef(DELAY_DEFINITION);
     const inst = await api.startInst(def.id, DELAY_INPUT_LONG);
@@ -1128,7 +1189,12 @@ describe('§13 — Persistence Checkpoints', () => {
     const running = (await runningRes.json()) as { currentState: string };
     expect(running.currentState).toBe('waiting');
 
+    // Brief delay to ensure fiber is registered in the runner's fiberMap
+    await new Promise((r) => setTimeout(r, 200));
+
     await suspendViaRunner(runtime);
+
+    await api.pollStatus(inst.id, ['suspended'], 5_000);
 
     const suspRes = await api.getInstance(inst.id);
     const susp = (await suspRes.json()) as { status: string; currentState: string };
@@ -1136,5 +1202,6 @@ describe('§13 — Persistence Checkpoints', () => {
     expect(susp.currentState).toBe('waiting');
 
     await runtime.dispose();
+    await removeTestWorkspace(testWs);
   });
 });
