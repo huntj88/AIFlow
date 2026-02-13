@@ -122,7 +122,6 @@ The following refactors are prerequisites and apply platform-wide (not just `cop
 
 2. **Toggleable capture policy at machine runtime**
    - Add machine-level runtime option (for example in start-instance input) to enable/disable capture.
-   - Add optional `artifactDir` override (default `cli-command-output`).
    - Custom actions should not re-implement capture logic; they rely on `ctx.cli.exec` behavior.
 
 3. **Instance-lineage artifact path helper**
@@ -152,7 +151,7 @@ This migration intentionally makes breaking changes to move directly to the targ
 1. **Replace start-instance contract**
    - Replace the request contract with required `runtimeOptions` (not optional):
      - `cliDirectoryPolicy: { workspaceDirs: string[]; artifactDirs: string[] }`
-     - `cliOutputCapture: { enabled: boolean; artifactDir?: string }`
+     - `cliOutputCapture: { enabled: boolean }`
    - Remove legacy start behavior that runs without runtime CLI policy input.
 
 2. **Update runner/action context to require runtime policy**
@@ -198,9 +197,9 @@ Capture includes all CLI calls in this action flow (initial prompt execution, JS
 Each transcript is written under an artifacts folder scoped to the machine instance that executed the command:
 
 - Root instance:
-  - `ctx.artifactsWorkspace.resolve("<captureArtifactDir>/<stateName>/<sequence>.txt")`
+  - `ctx.artifactsWorkspace.resolve("<stateName>/<sequence>.txt")`
 - Child instance:
-  - `ctx.artifactsWorkspace.resolve("<captureArtifactDir>/children/<childInstanceId>/<stateName>/<sequence>.txt")`
+  - `ctx.artifactsWorkspace.resolve("children/<childInstanceId>/<stateName>/<sequence>.txt")`
 - Nested children:
   - Continue nesting with `/children/<instanceId>/...` for each level.
 
@@ -302,7 +301,7 @@ Return:
     "commandOutputFiles": [
       {
         "workspace": "artifacts",
-        "path": "cli-command-output/runCopilotPrompt/001-main-prompt.txt",
+        "path": "runCopilotPrompt/001-main-prompt.txt",
         "resolvedPath": "/abs/path/to/artifacts/.../001-main-prompt.txt"
       }
     ]
@@ -438,8 +437,7 @@ actionRegistry.register('handle-copilot-exec-error', handleCopilotExecErrorActio
       "artifactDirs": ["/home/user/.aiflow/artifacts/<rootInstanceId>"]
     },
     "cliOutputCapture": {
-      "enabled": true,
-      "artifactDir": "cli-command-output"
+      "enabled": true
     }
   },
   "input": {
@@ -455,9 +453,9 @@ actionRegistry.register('handle-copilot-exec-error', handleCopilotExecErrorActio
 ### 6) Example transcript artifact paths
 
 - Root machine command:
-  - `cli-command-output/runCopilotPrompt/001-main-prompt.txt`
+  - `runCopilotPrompt/001-main-prompt.txt`
 - Child machine command:
-  - `cli-command-output/children/<childInstanceId>/runCopilotPrompt/001-main-prompt.txt`
+  - `children/<childInstanceId>/runCopilotPrompt/001-main-prompt.txt`
 
 ### 7) Developer curl workflow script requirement
 
