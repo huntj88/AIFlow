@@ -409,11 +409,20 @@ Include `conversationId` in returned data when available so downstream states ca
 
 ### 1) Machine definition snippet
 
+Use the right shape for the right API surface:
+
+- **Stored/returned definition shape** (what `GET /api/machines/definitions/:id` returns): includes server-managed fields.
+- **Create/update request payload shape** (what `POST/PUT /api/machines/definitions` accepts): excludes server-managed fields.
+
+#### Stored/returned definition shape (server response)
+
 ```json
 {
-  "id": "copilot-file-workflow",
+  "id": "<definitionId>",
   "name": "Copilot file workflow",
   "version": 1,
+  "inputSchema": { "type": "object" },
+  "outputSchema": { "type": "object" },
   "initialState": "runCopilotPrompt",
   "states": {
     "runCopilotPrompt": {
@@ -443,7 +452,61 @@ Include `conversationId` in returned data when available so downstream states ca
     { "from": "runFollowupPrompt", "to": "completed" },
     { "from": "runFollowupPrompt", "to": "handleCopilotExecError" },
     { "from": "handleCopilotExecError", "to": "completed" }
-  ]
+  ],
+  "metadata": {
+    "createdAt": "<server-generated-iso>",
+    "updatedAt": "<server-generated-iso>",
+    "description": "Copilot CLI workflow",
+    "tags": ["copilot", "workflow"]
+  }
+}
+```
+
+Use this returned `id` value as `definitionId` when starting instances.
+
+#### Create/update request payload shape (request body)
+
+No `id`, no `version`, and no `metadata.createdAt/updatedAt`.
+
+```json
+{
+  "name": "Copilot file workflow",
+  "inputSchema": { "type": "object" },
+  "outputSchema": { "type": "object" },
+  "initialState": "runCopilotPrompt",
+  "states": {
+    "runCopilotPrompt": {
+      "name": "runCopilotPrompt",
+      "type": "action",
+      "actionId": "copilot-cli-prompt",
+      "dataSchema": { "type": "object" },
+      "timeoutMs": 120000
+    },
+    "runFollowupPrompt": {
+      "name": "runFollowupPrompt",
+      "type": "action",
+      "actionId": "copilot-cli-prompt"
+    },
+    "handleCopilotExecError": {
+      "name": "handleCopilotExecError",
+      "type": "action",
+      "actionId": "handle-copilot-exec-error"
+    },
+    "completed": { "name": "completed", "type": "terminal" },
+    "cancelled": { "name": "cancelled", "type": "terminal" },
+    "error": { "name": "error", "type": "terminal" }
+  },
+  "transitions": [
+    { "from": "runCopilotPrompt", "to": "runFollowupPrompt" },
+    { "from": "runCopilotPrompt", "to": "handleCopilotExecError" },
+    { "from": "runFollowupPrompt", "to": "completed" },
+    { "from": "runFollowupPrompt", "to": "handleCopilotExecError" },
+    { "from": "handleCopilotExecError", "to": "completed" }
+  ],
+  "metadata": {
+    "description": "Copilot CLI workflow",
+    "tags": ["copilot", "workflow"]
+  }
 }
 ```
 
@@ -452,7 +515,6 @@ Include `conversationId` in returned data when available so downstream states ca
 ```json
 {
   "prompt": "Create a typed parser and update tests.",
-  "conversationId": "copilot-conv-123",
   "contextFilePaths": [
     { "workspace": "workspace", "path": "server/src/config/parser.ts" },
     { "workspace": "workspace", "path": "server/src/config/parser.test.ts" }
@@ -461,6 +523,8 @@ Include `conversationId` in returned data when available so downstream states ca
   "execErrorState": "handleCopilotExecError"
 }
 ```
+
+Note: omit `conversationId` on the first turn so the directory-guidance prelude is prepended.
 
 ### 3) Example state input for second AI action (chained paths)
 
@@ -489,8 +553,8 @@ Example resulting state input:
 ### 4) Action registry setup (illustrative)
 
 ```typescript
-actionRegistry.register('copilot-cli-prompt', copilotCliPromptAction);
-actionRegistry.register('handle-copilot-exec-error', handleCopilotExecErrorAction);
+yield * registry.register('copilot-cli-prompt', copilotCliPromptAction);
+yield * registry.register('handle-copilot-exec-error', handleCopilotExecErrorAction);
 ```
 
 ### 5) Start-instance request (system data included)
@@ -499,7 +563,7 @@ actionRegistry.register('handle-copilot-exec-error', handleCopilotExecErrorActio
 
 ```json
 {
-  "definitionId": "copilot-file-workflow",
+  "definitionId": "<definitionId>",
   "workspaceRoot": "/home/user/my-repo",
   "runtimeOptions": {
     "cliDirectoryPolicy": {
