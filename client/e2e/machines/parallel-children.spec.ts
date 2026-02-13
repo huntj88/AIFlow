@@ -10,7 +10,9 @@ import { expect, test } from '@playwright/test';
 
 import { CHILD_DEFINITION, makeParallelDefinition, PARALLEL_INPUT } from '../fixtures/definitions';
 import {
+  E2E_TEST_WORKSPACE_ROOT,
   apiCreateDefinition,
+  apiGetInstance,
   apiListChildren,
   apiStartInstance,
   clickInstanceTab,
@@ -42,6 +44,13 @@ test.describe('Parallel children', () => {
     // 5. Verify children were created
     const children = await apiListChildren(request, parentInst.id);
     expect(children.length).toBeGreaterThanOrEqual(2);
+
+    // 5b. Verify every child inherits workspace fields
+    for (const child of children) {
+      const childInst = await apiGetInstance(request, child.id);
+      expect(childInst).toHaveProperty('workspaceRoot', E2E_TEST_WORKSPACE_ROOT);
+      expect(childInst).toHaveProperty('familyRootInstanceId', parentInst.id);
+    }
 
     // 6. Navigate to parent instance → children tab
     await navigateToInstance(page, parentInst.id);
@@ -79,6 +88,8 @@ test.describe('Parallel children', () => {
     for (const child of children) {
       await navigateToInstance(page, child.id);
       await expect(page.getByTestId('machine-instance-page')).toBeVisible();
+      await expect(page.getByTestId('workspace-root')).toContainText(E2E_TEST_WORKSPACE_ROOT);
+      await expect(page.getByTestId('family-root-instance-id')).toContainText(parentInst.id);
     }
   });
 });

@@ -8,6 +8,7 @@
 import { type APIRequestContext, expect, type Page } from '@playwright/test';
 
 const API_BASE = 'http://localhost:3001/api';
+export const E2E_TEST_WORKSPACE_ROOT = '/tmp/aiflow-e2e-test';
 
 // ────────────────────────────────────────────────────────────────────────────
 // API helpers (bypass the UI for fast seeding)
@@ -48,9 +49,10 @@ export async function apiStartInstance(
   request: APIRequestContext,
   definitionId: string,
   input: object = {},
+  workspaceRoot: string = E2E_TEST_WORKSPACE_ROOT,
 ): Promise<{ id: string; status: string; definitionId: string; [k: string]: unknown }> {
   const res = await request.post(`${API_BASE}/machines/instances`, {
-    data: { definitionId, input },
+    data: { definitionId, input, workspaceRoot },
   });
   expect(res.status()).toBe(201);
   return res.json();
@@ -205,6 +207,7 @@ export async function startInstanceViaUI(
   page: Page,
   definitionId: string,
   input: object = {},
+  workspaceRoot: string = E2E_TEST_WORKSPACE_ROOT,
 ): Promise<void> {
   const panel = page.getByTestId('quick-start-panel');
   await expect(panel).toBeVisible();
@@ -216,6 +219,10 @@ export async function startInstanceViaUI(
   // Fill input JSON
   const inputField = page.getByTestId('json-input');
   await inputField.fill(JSON.stringify(input));
+
+  // Fill workspace root
+  const workspaceRootField = page.getByTestId('workspace-root-input');
+  await workspaceRootField.fill(workspaceRoot);
 
   // Click launch
   await page.getByTestId('launch-button').click();

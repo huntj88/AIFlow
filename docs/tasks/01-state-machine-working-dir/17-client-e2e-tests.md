@@ -219,11 +219,11 @@ Remove or replace them.
 
 ## Validation Checklist
 
-- [ ] All E2E tests provide `workspaceRoot` when launching instances
-- [ ] Test workspace directory created via global setup/teardown
-- [ ] `artifacts.spec.ts` replaced with `artifacts-path.spec.ts`
-- [ ] No artifact-related assertions remain (old model)
-- [ ] Workspace fields verified in instance viewer
-- [ ] Child inheritance verified in parent-child and parallel tests
-- [ ] Suspend/resume tests verify workspace field persistence
-- [ ] `pnpm --filter @aiflow/client run test:e2e` passes
+- [x] All E2E tests provide `workspaceRoot` when launching instances
+- [x] Test workspace directory created via global setup/teardown
+- [x] `artifacts.spec.ts` replaced with `artifacts-path.spec.ts`
+- [x] No artifact-related assertions remain (old model)
+- [x] Workspace fields verified in instance viewer
+- [x] Child inheritance verified in parent-child and parallel tests
+- [x] Suspend/resume tests verify workspace field persistence
+- [x] `pnpm --filter @aiflow/client run test:e2e` passes

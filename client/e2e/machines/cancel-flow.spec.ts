@@ -14,6 +14,7 @@ import {
   SIMPLE_INPUT,
 } from '../fixtures/definitions';
 import {
+  E2E_TEST_WORKSPACE_ROOT,
   apiCreateDefinition,
   apiStartInstance,
   navigateToInstance,
@@ -35,6 +36,7 @@ test.describe('Cancel flow', () => {
 
     // 4. Verify it's running
     await waitForStatusBadge(page, 'running');
+    await expect(page.getByTestId('workspace-root')).toContainText(E2E_TEST_WORKSPACE_ROOT);
 
     // 5. Click the "Cancel" button
     const cancelBtn = page.getByTestId('cancel-button');

@@ -14,12 +14,14 @@ import {
   SIMPLE_INPUT,
 } from '../fixtures/definitions';
 import {
+  E2E_TEST_WORKSPACE_ROOT,
   apiCreateDefinition,
   apiStartInstance,
   clickInstanceTab,
   navigateToInstance,
   navigateToMachines,
   pollInstanceStatus,
+  waitForDefinitionCard,
   waitForInstanceRow,
   waitForStatusBadge,
 } from '../helpers/machine-helpers';
@@ -56,7 +58,7 @@ test.describe('Negative & Edge Cases', () => {
 
     // Send a request with malformed body
     const res = await request.post('http://localhost:3001/api/machines/instances', {
-      data: { definitionId: def.id, input: 'not-an-object' },
+      data: { definitionId: def.id, input: 'not-an-object', workspaceRoot: E2E_TEST_WORKSPACE_ROOT },
     });
 
     // The server should still accept this (input schema is { type: 'object' })
@@ -67,7 +69,11 @@ test.describe('Negative & Edge Cases', () => {
 
   test('start instance for non-existent definition returns 404', async ({ request }) => {
     const res = await request.post('http://localhost:3001/api/machines/instances', {
-      data: { definitionId: 'non-existent-def-id', input: {} },
+      data: {
+        definitionId: 'non-existent-def-id',
+        input: {},
+        workspaceRoot: E2E_TEST_WORKSPACE_ROOT,
+      },
     });
     expect(res.status()).toBe(404);
 
@@ -100,6 +106,26 @@ test.describe('Negative & Edge Cases', () => {
     const errorPanel = page.getByTestId('validation-errors');
     await errorPanel.scrollIntoViewIfNeeded();
     await expect(errorPanel).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('quick start validates missing and invalid workspace root', async ({ page, request }) => {
+    const def = await apiCreateDefinition(request, SIMPLE_DEFINITION);
+
+    await navigateToMachines(page);
+    await waitForDefinitionCard(page, def.id);
+
+    const definitionSelect = page.getByTestId('definition-select');
+    await definitionSelect.selectOption(def.id);
+
+    const launchBtn = page.getByTestId('launch-button');
+    await expect(launchBtn).toBeDisabled();
+
+    const workspaceRootInput = page.getByTestId('workspace-root-input');
+    await workspaceRootInput.fill('tmp/not-absolute');
+    await expect(launchBtn).toBeEnabled();
+
+    await launchBtn.click();
+    await expect(page.getByTestId('workspace-root-error')).toBeVisible();
   });
 
   test('concurrent instances visible on dashboard', async ({ page, request }) => {

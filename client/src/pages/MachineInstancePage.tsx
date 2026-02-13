@@ -291,15 +291,21 @@ export function MachineInstancePage() {
       <div className="mt-3 text-sm text-[var(--color-text-muted)]" data-testid="workspace-info">
         <div>
           <span className="font-medium">{t('machines.instance.workspace_root')}:</span>{' '}
-          <code className="text-xs">{instance.workspaceRoot}</code>
+          <code className="text-xs" data-testid="workspace-root">
+            {instance.workspaceRoot}
+          </code>
         </div>
         <div>
           <span className="font-medium">{t('machines.instance.artifacts_directory')}:</span>{' '}
-          <code className="text-xs">{instance.artifactsPath}</code>
+          <code className="text-xs" data-testid="artifacts-path">
+            {instance.artifactsPath}
+          </code>
         </div>
         <div>
           <span className="font-medium">{t('machines.instance.family_root')}:</span>{' '}
-          <code className="text-xs">{instance.familyRootInstanceId}</code>
+          <code className="text-xs" data-testid="family-root-instance-id">
+            {instance.familyRootInstanceId}
+          </code>
         </div>
       </div>
 

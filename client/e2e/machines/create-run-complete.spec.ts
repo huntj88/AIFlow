@@ -10,6 +10,7 @@ import { expect, test } from '@playwright/test';
 
 import { LINEAR_DEFINITION, LINEAR_INPUT, SIMPLE_DEFINITION, SIMPLE_INPUT } from '../fixtures/definitions';
 import {
+  E2E_TEST_WORKSPACE_ROOT,
   apiCreateDefinition,
   apiStartInstance,
   clickInstanceTab,
@@ -40,6 +41,11 @@ test.describe('Create → Run → Complete', () => {
 
     // 5. Verify status badge shows "completed"
     await waitForStatusBadge(page, 'completed');
+
+    // 5b. Verify workspace information is displayed
+    await expect(page.getByTestId('workspace-root')).toContainText(E2E_TEST_WORKSPACE_ROOT);
+    await expect(page.getByTestId('artifacts-path')).toContainText('artifacts');
+    await expect(page.getByTestId('family-root-instance-id')).toContainText(inst.id);
 
     // 6. Verify state diagram tab shows all states as visited
     await clickInstanceTab(page, 'diagram');
@@ -73,13 +79,17 @@ test.describe('Create → Run → Complete', () => {
     await waitForDefinitionCard(page, def.id);
 
     // 4. Start instance via the QuickStartPanel
-    await startInstanceViaUI(page, def.id, SIMPLE_INPUT);
+    await startInstanceViaUI(page, def.id, SIMPLE_INPUT, E2E_TEST_WORKSPACE_ROOT);
 
     // 5. Should navigate to instance viewer
     await expect(page.getByTestId('machine-instance-page')).toBeVisible({ timeout: 10_000 });
 
     // 6. Wait for completion
     await waitForStatusBadge(page, 'completed', 15_000);
+
+    // 7. Verify workspace fields on instance viewer
+    await expect(page.getByTestId('workspace-root')).toContainText(E2E_TEST_WORKSPACE_ROOT);
+    await expect(page.getByTestId('artifacts-path')).toContainText('artifacts');
   });
 
   test('instance appears on the dashboard after creation', async ({ page, request }) => {

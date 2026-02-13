@@ -3,6 +3,8 @@ import { defineConfig, devices } from '@playwright/test';
 // eslint-disable-next-line import/no-default-export
 export default defineConfig({
   testDir: './e2e',
+  globalSetup: './e2e/global-setup.ts',
+  globalTeardown: './e2e/global-teardown.ts',
   outputDir: './playwright-report',
   reporter: 'list',
   fullyParallel: true,

@@ -19,8 +19,8 @@ import { expect, test } from '@playwright/test';
 
 import { DELAY_DEFINITION, DELAY_INPUT_LONG, DELAY_INPUT_SHORT } from '../fixtures/definitions';
 import {
+  E2E_TEST_WORKSPACE_ROOT,
   apiCreateDefinition,
-  apiGetInstance,
   apiStartInstance,
   navigateToInstance,
   pollInstanceStatus,
@@ -44,6 +44,8 @@ test.describe('Suspend → Resume', () => {
 
     // 4. Navigate to the instance
     await navigateToInstance(page, inst.id);
+    await expect(page.getByTestId('workspace-root')).toContainText(E2E_TEST_WORKSPACE_ROOT);
+    await expect(page.getByTestId('family-root-instance-id')).toContainText(inst.id);
 
     // 5. Completed instance should NOT have a resume button
     await expect(page.getByTestId('resume-button')).not.toBeVisible();
@@ -57,6 +59,8 @@ test.describe('Suspend → Resume', () => {
     // 2. Navigate to instance viewer
     await navigateToInstance(page, inst.id);
     await waitForStatusBadge(page, 'running');
+    await expect(page.getByTestId('workspace-root')).toContainText(E2E_TEST_WORKSPACE_ROOT);
+    await expect(page.getByTestId('family-root-instance-id')).toContainText(inst.id);
 
     // 3. Running instance should show cancel but NOT resume
     await expect(page.getByTestId('cancel-button')).toBeVisible();
@@ -67,6 +71,11 @@ test.describe('Suspend → Resume', () => {
       `http://localhost:3001/api/machines/instances/${inst.id}/cancel`,
     );
     expect(cancelRes.ok()).toBeTruthy();
+
+    await page.reload();
+    await expect(page.getByTestId('machine-instance-page')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('workspace-root')).toContainText(E2E_TEST_WORKSPACE_ROOT);
+    await expect(page.getByTestId('family-root-instance-id')).toContainText(inst.id);
   });
 
   test('delay machine completes after short wait', async ({ request }) => {

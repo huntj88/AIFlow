@@ -15,6 +15,7 @@ import { expect, test } from '@playwright/test';
 
 import { CHILD_DEFINITION, makeParentDefinition, PARENT_INPUT } from '../fixtures/definitions';
 import {
+  E2E_TEST_WORKSPACE_ROOT,
   apiCreateDefinition,
   apiGetInstance,
   apiListChildren,
@@ -48,6 +49,11 @@ test.describe('Parent-Child composition', () => {
     // 5. Verify child instance(s) were created
     const children = await apiListChildren(request, parentInst.id);
     expect(children.length).toBeGreaterThanOrEqual(1);
+
+    // 5b. Child should inherit workspace fields from parent family
+    const childInst = await apiGetInstance(request, children[0].id);
+    expect(childInst).toHaveProperty('workspaceRoot', E2E_TEST_WORKSPACE_ROOT);
+    expect(childInst).toHaveProperty('familyRootInstanceId', parentInst.id);
 
     // 6. Navigate to parent instance viewer
     await navigateToInstance(page, parentInst.id);
@@ -87,6 +93,8 @@ test.describe('Parent-Child composition', () => {
 
     // 6. Verify we're on the child instance page
     await expect(page.getByTestId('machine-instance-page')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('workspace-root')).toContainText(E2E_TEST_WORKSPACE_ROOT);
+    await expect(page.getByTestId('family-root-instance-id')).toContainText(parentInst.id);
 
     // 7. Verify the parent breadcrumb is visible
     const breadcrumb = page.getByTestId('parent-breadcrumb');
@@ -110,5 +118,7 @@ test.describe('Parent-Child composition', () => {
 
     const childInst = await apiGetInstance(request, children[0].id);
     expect(childInst).toHaveProperty('parentInstanceId', parentInst.id);
+    expect(childInst).toHaveProperty('workspaceRoot', E2E_TEST_WORKSPACE_ROOT);
+    expect(childInst).toHaveProperty('familyRootInstanceId', parentInst.id);
   });
 });
