@@ -25,11 +25,11 @@ Enforce runtime policy validation in `POST /api/machines/instances` and pass the
 
 ## Acceptance Checklist
 
-- [ ] Missing `runtimeOptions` returns 400.
-- [ ] Missing nested runtime fields returns 400.
-- [ ] Relative directory policy paths return validation errors.
-- [ ] Valid runtime policy reaches runner call path.
-- [ ] No fallback path exists for legacy start payloads.
+- [x] Missing `runtimeOptions` returns 400.
+- [x] Missing nested runtime fields returns 400.
+- [x] Relative directory policy paths return validation errors.
+- [x] Valid runtime policy reaches runner call path.
+- [x] No fallback path exists for legacy start payloads.
 
 ---
 

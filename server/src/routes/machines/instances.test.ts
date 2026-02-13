@@ -130,6 +130,16 @@ describe('InstancesRouter', () => {
 
   // ── HTTP Helpers ────────────────────────────────────────────────────────
 
+  const makeRuntimeOptions = (workspaceRoot: string) => ({
+    cliDirectoryPolicy: {
+      workspaceDirs: [workspaceRoot],
+      artifactDirs: [path.join(workspaceRoot, 'artifacts')],
+    },
+    cliOutputCapture: {
+      enabled: false,
+    },
+  });
+
   const postDef = (body: unknown) =>
     handler(
       new Request('http://localhost/api/machines/definitions', {
@@ -144,7 +154,21 @@ describe('InstancesRouter', () => {
       new Request('http://localhost/api/machines/instances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(
+          typeof body === 'object' && body !== null
+            ? (() => {
+                const payload = body as {
+                  workspaceRoot?: string;
+                  runtimeOptions?: unknown;
+                };
+                const workspaceRoot = payload.workspaceRoot;
+                return {
+                  ...(workspaceRoot ? { runtimeOptions: makeRuntimeOptions(workspaceRoot) } : {}),
+                  ...payload,
+                };
+              })()
+            : body,
+        ),
       }),
     );
 
@@ -249,6 +273,51 @@ describe('InstancesRouter', () => {
     it('POST with missing workspaceRoot → 400', async () => {
       const defId = await createDefinition();
       const res = await postInstance({ definitionId: defId, input: {} });
+      expect(res.status).toBe(400);
+    });
+
+    it('POST with missing runtimeOptions → 400', async () => {
+      const defId = await createDefinition();
+      const res = await postInstance({
+        definitionId: defId,
+        input: {},
+        workspaceRoot: TEST_WORKSPACE,
+        runtimeOptions: undefined,
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it('POST with missing runtimeOptions nested keys → 400', async () => {
+      const defId = await createDefinition();
+      const res = await postInstance({
+        definitionId: defId,
+        input: {},
+        workspaceRoot: TEST_WORKSPACE,
+        runtimeOptions: {
+          cliDirectoryPolicy: {
+            workspaceDirs: [TEST_WORKSPACE],
+          },
+        },
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it('POST with relative runtimeOptions directories → 400', async () => {
+      const defId = await createDefinition();
+      const res = await postInstance({
+        definitionId: defId,
+        input: {},
+        workspaceRoot: TEST_WORKSPACE,
+        runtimeOptions: {
+          cliDirectoryPolicy: {
+            workspaceDirs: ['relative/workspace'],
+            artifactDirs: [path.join(TEST_WORKSPACE, 'artifacts')],
+          },
+          cliOutputCapture: {
+            enabled: false,
+          },
+        },
+      });
       expect(res.status).toBe(400);
     });
 

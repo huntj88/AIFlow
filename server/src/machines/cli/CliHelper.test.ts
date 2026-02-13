@@ -30,7 +30,19 @@ beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-helper-test-'));
   artifactsDir = path.join(tmpDir, 'artifacts');
   fs.mkdirSync(artifactsDir, { recursive: true });
-  opts = { workspaceRoot: tmpDir, artifactsRoot: artifactsDir };
+  opts = {
+    workspaceRoot: tmpDir,
+    artifactsRoot: artifactsDir,
+    runtimeOptions: {
+      cliDirectoryPolicy: {
+        workspaceDirs: [tmpDir],
+        artifactDirs: [artifactsDir],
+      },
+      cliOutputCapture: {
+        enabled: false,
+      },
+    },
+  };
   cli = makeCliHelper(opts);
 });
 

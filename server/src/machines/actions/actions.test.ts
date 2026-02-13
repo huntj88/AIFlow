@@ -48,6 +48,15 @@ function makeCtx(stateData: unknown, overrides?: Partial<ActionContext>): Action
     stateName: 'test-state',
     stateData,
     machineInput: {},
+    runtimeOptions: {
+      cliDirectoryPolicy: {
+        workspaceDirs: ['/tmp/test-workspace'],
+        artifactDirs: ['/tmp/data/artifacts'],
+      },
+      cliOutputCapture: {
+        enabled: false,
+      },
+    },
     logger: mockLogger(),
     cli: {
       exec: () => Effect.succeed({ exitCode: 0, stdout: '', stderr: '', durationMs: 0 }),

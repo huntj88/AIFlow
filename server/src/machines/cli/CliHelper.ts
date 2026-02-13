@@ -12,6 +12,7 @@ import { Effect } from 'effect';
 import { spawn } from 'node:child_process';
 
 import type { CliExecResult, CliHelper } from '../types.js';
+import type { MachineRuntimeOptions } from '../types.js';
 
 /** Maximum bytes captured per stream (stdout / stderr). */
 const MAX_OUTPUT_BYTES = 1024 * 1024; // 1 MiB
@@ -23,6 +24,7 @@ const TRUNCATION_SUFFIX = '\n...<truncated>';
 export interface MakeCliHelperOptions {
   readonly workspaceRoot: string;
   readonly artifactsRoot: string;
+  readonly runtimeOptions: MachineRuntimeOptions;
 }
 
 /**

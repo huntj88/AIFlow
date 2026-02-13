@@ -123,6 +123,23 @@ export interface ActionMetadata {
   readonly outputSchema?: JsonSchema;
 }
 
+/** Runtime CLI directory policy provided when starting an instance. */
+export interface CliDirectoryPolicy {
+  readonly workspaceDirs: readonly string[];
+  readonly artifactDirs: readonly string[];
+}
+
+/** Runtime CLI transcript capture policy provided when starting an instance. */
+export interface CliOutputCapturePolicy {
+  readonly enabled: boolean;
+}
+
+/** Runtime options required at start time for CLI directory + capture behavior. */
+export interface MachineRuntimeOptions {
+  readonly cliDirectoryPolicy: CliDirectoryPolicy;
+  readonly cliOutputCapture: CliOutputCapturePolicy;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Instance Filter
 // ────────────────────────────────────────────────────────────────────────────
@@ -132,6 +149,7 @@ export interface StartInstanceInput {
   readonly definitionId: string;
   readonly input: unknown;
   readonly workspaceRoot: string;
+  readonly runtimeOptions: MachineRuntimeOptions;
 }
 
 /** Filters for querying machine instances. */

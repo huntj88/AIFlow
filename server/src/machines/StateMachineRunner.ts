@@ -65,6 +65,7 @@ import type {
   MachineError,
   MachineEvent,
   MachineInstance,
+  MachineRuntimeOptions,
   MachineResult,
   NotFoundError,
   ParallelChildrenResult,
@@ -112,6 +113,8 @@ export interface RunOptions {
   readonly workspaceRoot: string;
   /** Family root instance ID (set for child instances; root instances default to own ID). */
   readonly familyRootInstanceId?: string;
+  /** Runtime CLI directory/capture policy for action execution. */
+  readonly runtimeOptions?: MachineRuntimeOptions;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -201,6 +204,7 @@ interface LoopState {
   readonly workspaceRoot: string;
   readonly familyRootInstanceId: string;
   readonly artifactsPath: string;
+  readonly runtimeOptions: MachineRuntimeOptions;
   currentState: string;
   stateData: unknown;
   history: TransitionRecord[];
@@ -406,6 +410,7 @@ export const StateMachineRunnerLive = Layer.effect(
         const cli = makeCliHelper({
           workspaceRoot: ls.workspaceRoot,
           artifactsRoot: ls.artifactsPath,
+          runtimeOptions: ls.runtimeOptions,
         });
         const workspace = makeWorkspaceContext(ls.workspaceRoot);
         const artifactsWorkspace = makeArtifactsWorkspaceContext(
@@ -420,6 +425,7 @@ export const StateMachineRunnerLive = Layer.effect(
           stateName: ls.currentState,
           stateData: ls.stateData,
           machineInput: ls.machineInput,
+          runtimeOptions: ls.runtimeOptions,
           parentContext: ls.parentContext,
           logger,
           cli,
@@ -786,6 +792,7 @@ export const StateMachineRunnerLive = Layer.effect(
                 depth: childRunDepth,
                 workspaceRoot: ls.workspaceRoot,
                 familyRootInstanceId: ls.familyRootInstanceId,
+                runtimeOptions: ls.runtimeOptions,
               },
             );
 
@@ -1123,6 +1130,7 @@ export const StateMachineRunnerLive = Layer.effect(
                       depth: (opts?.depth ?? 0) + 1,
                       workspaceRoot: ls.workspaceRoot,
                       familyRootInstanceId: ls.familyRootInstanceId,
+                      runtimeOptions: ls.runtimeOptions,
                     })
                     .pipe(Effect.either),
                 { concurrency: 'unbounded' },
@@ -1170,6 +1178,7 @@ export const StateMachineRunnerLive = Layer.effect(
                     depth: (opts?.depth ?? 0) + 1,
                     workspaceRoot: ls.workspaceRoot,
                     familyRootInstanceId: ls.familyRootInstanceId,
+                    runtimeOptions: ls.runtimeOptions,
                   }),
                 );
                 fibers.push({ key: spec.key, fiber: fiber });
@@ -1704,6 +1713,13 @@ export const StateMachineRunnerLive = Layer.effect(
           const MAX_MACHINE_DEPTH = parseInt(process.env['MAX_MACHINE_DEPTH'] ?? '10', 10);
           /* eslint-enable @typescript-eslint/dot-notation */
           const depth = opts?.depth ?? 0;
+          const runtimeOptions: MachineRuntimeOptions = opts?.runtimeOptions ?? {
+            cliDirectoryPolicy: {
+              workspaceDirs: opts?.workspaceRoot ? [opts.workspaceRoot] : [],
+              artifactDirs: [ARTIFACT_ROOT],
+            },
+            cliOutputCapture: { enabled: false },
+          };
 
           if (depth > MAX_MACHINE_DEPTH) {
             return yield* Effect.fail(
@@ -1802,6 +1818,7 @@ export const StateMachineRunnerLive = Layer.effect(
             workspaceRoot: opts?.workspaceRoot ?? '',
             familyRootInstanceId,
             artifactsPath: instanceArtifactsPath,
+            runtimeOptions,
             currentState: definition.initialState,
             stateData: input,
             history: [],
@@ -2113,6 +2130,13 @@ export const StateMachineRunnerLive = Layer.effect(
             workspaceRoot: instance.workspaceRoot,
             familyRootInstanceId: instance.familyRootInstanceId,
             artifactsPath: instance.artifactsPath,
+            runtimeOptions: {
+              cliDirectoryPolicy: {
+                workspaceDirs: [instance.workspaceRoot],
+                artifactDirs: [instance.artifactsPath],
+              },
+              cliOutputCapture: { enabled: false },
+            },
             currentState: instance.currentState,
             stateData: instance.stateData,
             history: [...instance.history],

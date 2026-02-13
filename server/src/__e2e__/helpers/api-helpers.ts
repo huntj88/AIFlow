@@ -38,6 +38,37 @@ export async function removeTestWorkspace(workspaceRoot: string): Promise<void> 
 export function makeApiHelpers(handler: Handler, defaultWorkspaceRoot?: string) {
   const BASE = 'http://localhost/api/machines';
 
+  const makeRuntimeOptions = (workspaceRoot: string) => ({
+    cliDirectoryPolicy: {
+      workspaceDirs: [workspaceRoot],
+      artifactDirs: [path.join(workspaceRoot, 'artifacts')],
+    },
+    cliOutputCapture: {
+      enabled: false,
+    },
+  });
+
+  const withRuntimeOptions = (body: unknown) => {
+    if (typeof body !== 'object' || body === null) {
+      return body;
+    }
+
+    const payload = body as {
+      workspaceRoot?: string;
+      runtimeOptions?: unknown;
+      [k: string]: unknown;
+    };
+
+    const workspaceRoot =
+      typeof payload.workspaceRoot === 'string' ? payload.workspaceRoot : defaultWorkspaceRoot;
+
+    return {
+      ...(workspaceRoot ? { workspaceRoot } : {}),
+      ...(workspaceRoot ? { runtimeOptions: makeRuntimeOptions(workspaceRoot) } : {}),
+      ...payload,
+    };
+  };
+
   return {
     /** The default workspace root used for instance creation, if set. */
     defaultWorkspaceRoot,
@@ -82,11 +113,7 @@ export function makeApiHelpers(handler: Handler, defaultWorkspaceRoot?: string) 
         new Request(`${BASE}/instances`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            defaultWorkspaceRoot && typeof body === 'object' && body !== null
-              ? { workspaceRoot: defaultWorkspaceRoot, ...body }
-              : body,
-          ),
+          body: JSON.stringify(withRuntimeOptions(body)),
         }),
       ),
 
@@ -134,7 +161,12 @@ export function makeApiHelpers(handler: Handler, defaultWorkspaceRoot?: string) 
       const res = await this.postInstance({
         definitionId: defId,
         input,
-        ...(wsRoot ? { workspaceRoot: wsRoot } : {}),
+        ...(wsRoot
+          ? {
+              workspaceRoot: wsRoot,
+              runtimeOptions: makeRuntimeOptions(wsRoot),
+            }
+          : {}),
       });
       if (res.status !== 201) {
         const text = await res.text();

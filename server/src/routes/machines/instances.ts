@@ -78,6 +78,40 @@ const validateWorkspaceRoot = (workspaceRoot: string) =>
     }
   });
 
+/** Validate that every policy path is absolute. */
+const validateAbsolutePolicyPaths = (paths: readonly string[], fieldPath: string) =>
+  Effect.gen(function* () {
+    for (let i = 0; i < paths.length; i++) {
+      const value = paths[i];
+      if (!path.isAbsolute(value)) {
+        return yield* Effect.fail(
+          mkValidationError({
+            message: `${fieldPath}[${String(i)}] must be an absolute path`,
+            path: `${fieldPath}.${String(i)}`,
+          }),
+        );
+      }
+    }
+  });
+
+/** Validate runtime CLI directory policy path semantics. */
+const validateRuntimeDirectoryPolicy = (runtimeOptions: {
+  readonly cliDirectoryPolicy: {
+    readonly workspaceDirs: readonly string[];
+    readonly artifactDirs: readonly string[];
+  };
+}) =>
+  Effect.gen(function* () {
+    yield* validateAbsolutePolicyPaths(
+      runtimeOptions.cliDirectoryPolicy.workspaceDirs,
+      'runtimeOptions.cliDirectoryPolicy.workspaceDirs',
+    );
+    yield* validateAbsolutePolicyPaths(
+      runtimeOptions.cliDirectoryPolicy.artifactDirs,
+      'runtimeOptions.cliDirectoryPolicy.artifactDirs',
+    );
+  });
+
 /**
  * Extract query parameters from the current request URL.
  * Returns a `URLSearchParams` object.
@@ -114,6 +148,8 @@ export const InstancesRouter = HttpRouter.empty.pipe(
 
       // Validate workspaceRoot (§4.4)
       yield* validateWorkspaceRoot(body.workspaceRoot);
+      // Validate runtime directory policy absolute path semantics
+      yield* validateRuntimeDirectoryPolicy(body.runtimeOptions);
 
       // Load definition — 404 if not found
       const store = yield* MachineStore;
@@ -136,7 +172,10 @@ export const InstancesRouter = HttpRouter.empty.pipe(
       // Fork the run so the HTTP response returns immediately
       const runner = yield* StateMachineRunner;
       yield* Effect.forkDaemon(
-        runner.run(definition, body.input, { workspaceRoot: body.workspaceRoot }),
+        runner.run(definition, body.input, {
+          workspaceRoot: body.workspaceRoot,
+          runtimeOptions: body.runtimeOptions,
+        }),
       );
 
       // Yield to the scheduler so the forked fiber can save the instance

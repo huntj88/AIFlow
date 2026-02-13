@@ -117,11 +117,29 @@ export const UpdateDefinitionRequestSchema = CreateDefinitionRequestSchema;
 // Instance Schemas
 // ────────────────────────────────────────────────────────────────────────────
 
+/** Runtime validator for `CliDirectoryPolicy`. */
+export const CliDirectoryPolicySchema = Schema.Struct({
+  workspaceDirs: Schema.Array(Schema.String),
+  artifactDirs: Schema.Array(Schema.String),
+});
+
+/** Runtime validator for `CliOutputCapturePolicy`. */
+export const CliOutputCapturePolicySchema = Schema.Struct({
+  enabled: Schema.Boolean,
+});
+
+/** Runtime validator for `MachineRuntimeOptions`. */
+export const MachineRuntimeOptionsSchema = Schema.Struct({
+  cliDirectoryPolicy: CliDirectoryPolicySchema,
+  cliOutputCapture: CliOutputCapturePolicySchema,
+});
+
 /** Runtime validator for `StartInstanceRequest`. */
 export const StartInstanceRequestSchema = Schema.Struct({
   definitionId: Schema.String,
   input: Schema.Unknown,
   workspaceRoot: Schema.String,
+  runtimeOptions: MachineRuntimeOptionsSchema,
 });
 
 /** The six allowed instance statuses as a Schema union of literals. */

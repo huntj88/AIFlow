@@ -143,6 +143,31 @@ export interface InstanceFilter {
   readonly offset?: number;
 }
 
+/** Runtime CLI directory policy provided when starting an instance. */
+export interface CliDirectoryPolicy {
+  readonly workspaceDirs: readonly string[];
+  readonly artifactDirs: readonly string[];
+}
+
+/** Runtime CLI transcript capture policy provided when starting an instance. */
+export interface CliOutputCapturePolicy {
+  readonly enabled: boolean;
+}
+
+/** Runtime options required at start time for CLI directory + capture behavior. */
+export interface MachineRuntimeOptions {
+  readonly cliDirectoryPolicy: CliDirectoryPolicy;
+  readonly cliOutputCapture: CliOutputCapturePolicy;
+}
+
+/** Payload for starting an instance via API. */
+export interface StartInstanceRequest {
+  readonly definitionId: string;
+  readonly input: unknown;
+  readonly workspaceRoot: string;
+  readonly runtimeOptions: MachineRuntimeOptions;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // CLI Types
 // ────────────────────────────────────────────────────────────────────────────
@@ -153,6 +178,14 @@ export interface CliExecResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly durationMs: number;
+  readonly transcript?: {
+    readonly workspace: 'workspace' | 'artifacts';
+    readonly relativePath: string;
+    readonly resolvedPath: string;
+    readonly label: string;
+    readonly exitCode: number;
+    readonly durationMs: number;
+  };
 }
 
 /** Helper for executing CLI commands within an action. */
@@ -190,6 +223,7 @@ export interface ActionContext {
   readonly stateName: string;
   readonly stateData: unknown;
   readonly machineInput: unknown;
+  readonly runtimeOptions: MachineRuntimeOptions;
   readonly parentContext?: {
     readonly parentInstanceId: string;
     readonly parentStateName: string;

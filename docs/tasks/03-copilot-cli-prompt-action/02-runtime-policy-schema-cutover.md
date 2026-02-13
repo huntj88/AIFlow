@@ -24,10 +24,10 @@ Make `runtimeOptions` required in request decoding and schema validation with no
 
 ## Acceptance Checklist
 
-- [ ] Missing `runtimeOptions` fails schema decode.
-- [ ] Missing nested keys (`workspaceDirs`, `artifactDirs`, `enabled`) fail schema decode.
-- [ ] Legacy `{ definitionId, input, workspaceRoot }` payload no longer validates.
-- [ ] Schema tests explicitly cover hard-cut behavior.
+- [x] Missing `runtimeOptions` fails schema decode.
+- [x] Missing nested keys (`workspaceDirs`, `artifactDirs`, `enabled`) fail schema decode.
+- [x] Legacy `{ definitionId, input, workspaceRoot }` payload no longer validates.
+- [x] Schema tests explicitly cover hard-cut behavior.
 
 ---
 

@@ -53,6 +53,15 @@ const validStartPayload = () => ({
   definitionId: 'def-001',
   input: { prompt: 'hello' },
   workspaceRoot: '/tmp/test-workspace',
+  runtimeOptions: {
+    cliDirectoryPolicy: {
+      workspaceDirs: ['/tmp/test-workspace'],
+      artifactDirs: ['/tmp/data/artifacts'],
+    },
+    cliOutputCapture: {
+      enabled: false,
+    },
+  },
 });
 
 /** Minimal valid machine instance payload. */
@@ -222,6 +231,13 @@ describe('StartInstanceRequestSchema', () => {
       definitionId: 'def-1',
       input: null,
       workspaceRoot: '/tmp/ws',
+      runtimeOptions: {
+        cliDirectoryPolicy: {
+          workspaceDirs: ['/tmp/ws'],
+          artifactDirs: ['/tmp/artifacts'],
+        },
+        cliOutputCapture: { enabled: false },
+      },
     });
     expect(Either.isRight(result)).toBe(true);
   });
@@ -231,8 +247,61 @@ describe('StartInstanceRequestSchema', () => {
       definitionId: 'def-1',
       input: { nested: { data: [1, 2, 3] } },
       workspaceRoot: '/tmp/ws',
+      runtimeOptions: {
+        cliDirectoryPolicy: {
+          workspaceDirs: ['/tmp/ws'],
+          artifactDirs: ['/tmp/artifacts'],
+        },
+        cliOutputCapture: { enabled: true },
+      },
     });
     expect(Either.isRight(result)).toBe(true);
+  });
+
+  it('requires runtimeOptions', () => {
+    const payload = omit(validStartPayload(), 'runtimeOptions');
+    const result = decodeStartInstance(payload);
+    expect(Either.isLeft(result)).toBe(true);
+  });
+
+  it('requires runtimeOptions.cliDirectoryPolicy.workspaceDirs', () => {
+    const payload = {
+      ...validStartPayload(),
+      runtimeOptions: {
+        ...validStartPayload().runtimeOptions,
+        cliDirectoryPolicy: {
+          artifactDirs: ['/tmp/data/artifacts'],
+        },
+      },
+    };
+    const result = decodeStartInstance(payload);
+    expect(Either.isLeft(result)).toBe(true);
+  });
+
+  it('requires runtimeOptions.cliDirectoryPolicy.artifactDirs', () => {
+    const payload = {
+      ...validStartPayload(),
+      runtimeOptions: {
+        ...validStartPayload().runtimeOptions,
+        cliDirectoryPolicy: {
+          workspaceDirs: ['/tmp/test-workspace'],
+        },
+      },
+    };
+    const result = decodeStartInstance(payload);
+    expect(Either.isLeft(result)).toBe(true);
+  });
+
+  it('requires runtimeOptions.cliOutputCapture.enabled', () => {
+    const payload = {
+      ...validStartPayload(),
+      runtimeOptions: {
+        ...validStartPayload().runtimeOptions,
+        cliOutputCapture: {},
+      },
+    };
+    const result = decodeStartInstance(payload);
+    expect(Either.isLeft(result)).toBe(true);
   });
 
   it('rejects non-object input', () => {

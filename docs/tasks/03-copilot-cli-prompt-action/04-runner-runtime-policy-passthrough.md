@@ -27,9 +27,9 @@ Refactor runner execution wiring so runtime CLI policy and capture settings are 
 ## Acceptance Checklist
 
 - [ ] Runner rejects missing runtime policy internally (no silent defaults).
-- [ ] Child/parallel runs inherit runtime policy from parent run context.
-- [ ] Action context receives runtime policy-derived execution settings.
-- [ ] Runtime policy is not persisted to instance records.
+- [x] Child/parallel runs inherit runtime policy from parent run context.
+- [x] Action context receives runtime policy-derived execution settings.
+- [x] Runtime policy is not persisted to instance records.
 
 ---
 
