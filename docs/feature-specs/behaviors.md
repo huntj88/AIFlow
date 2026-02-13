@@ -1,9 +1,12 @@
 # State Machine — Testable Behaviors
 
 > Comprehensive catalog of discrete, end-to-end testable behaviors derived from the
-> [state-machines.md](state-machines.md) feature specification. Intended as the source
-> of truth for Playwright e2e tests (Phase 6) and integration tests. Each item describes
-> an observable behavior from the outside — what a client or API consumer can verify.
+> [00-state-machine.md](00-state-machine.md) and
+> [01-state-machine-working-directory.md](01-state-machine-working-directory.md) and
+> [03-copilot-cli-prompt-action.md](03-copilot-cli-prompt-action.md) feature
+> specifications. Intended as the source of truth for Playwright e2e tests and
+> integration tests. Each item describes an observable behavior from the outside — what
+> a client or API consumer can verify.
 
 ---
 
@@ -78,6 +81,7 @@
 - [ ] `GET /api/machines/actions/:id` returns metadata for a specific registered action
 - [ ] `GET /api/machines/actions/:id` for a non-existent action ID returns 404
 - [ ] Built-in actions are present on server startup: `http-request`, `delay`, `transform-data`, `log-message`, `conditional-branch`
+- [ ] Copilot rollout actions are registered and discoverable: `copilot-cli-prompt`, `handle-invalid-copilot-result`, `handle-copilot-exec-error`
 
 ---
 
@@ -85,8 +89,11 @@
 
 ### 4.1 Start & Complete
 
-- [ ] `POST /api/machines/instances` with a valid definition ID and input returns 201 with an instance ID
+- [ ] `POST /api/machines/instances` with a valid definition ID, input, `workspaceRoot`, and required `runtimeOptions` returns 201 with an instance ID
 - [ ] The returned instance has `status: 'running'` (or `'completed'` if fast enough) and `currentState` set
+- [ ] The returned instance includes `workspaceRoot`, `familyRootInstanceId`, and `artifactsPath`
+- [ ] For a root instance, `familyRootInstanceId` equals the instance's own `id`
+- [ ] `artifactsPath` points to `<ARTIFACT_ROOT>/<familyRootInstanceId>/`
 - [ ] A simple linear machine (A → B → C → completed) runs to the `completed` terminal state
 - [ ] On completion, `GET /instances/:id` shows `status: 'completed'` and populated `output`
 - [ ] The `output` matches what the final action returned as transition `data` to the `completed` state
@@ -94,8 +101,10 @@
 ### 4.2 State Data Flow
 
 - [ ] The initial state's action receives `ctx.machineInput` matching the input provided at start
-- [ ] `ctx.stateData` in the first state is `undefined`/empty (no prior transition data)
+- [ ] `ctx.stateData` in the initial state equals the machine's `input` (same as `machineInput`)
 - [ ] When an action returns `{ nextState, data }`, the next state's action receives that `data` as `ctx.stateData`
+- [ ] When an action returns `{ nextState }` without `data` (or `data: undefined`), the previous `stateData` carries forward unchanged
+- [ ] `ctx.machineInput` remains the same immutable original input in every state throughout the machine's lifetime
 - [ ] Each action receives the correct `ctx.stateName`, `ctx.machineInstanceId`, and `ctx.machineDefId`
 
 ### 4.3 Input Validation
@@ -104,14 +113,30 @@
 - [ ] Starting an instance with input that satisfies `inputSchema` proceeds normally
 - [ ] Starting an instance for a non-existent definition ID returns 404
 
-### 4.4 Transition History
+### 4.4 Workspace Root Validation
+
+- [ ] Starting an instance without `workspaceRoot` returns 400 Bad Request
+- [ ] Starting an instance with a relative `workspaceRoot` returns a validation error
+- [ ] Starting an instance with a `workspaceRoot` that does not exist on disk returns a validation error
+- [ ] Starting an instance with a valid absolute `workspaceRoot` that exists succeeds
+
+### 4.5 Runtime CLI Options Validation
+
+- [ ] Starting an instance without `runtimeOptions` returns 400 Bad Request
+- [ ] Starting an instance without `runtimeOptions.cliDirectoryPolicy.workspaceDirs` returns 400 Bad Request
+- [ ] Starting an instance without `runtimeOptions.cliDirectoryPolicy.artifactDirs` returns 400 Bad Request
+- [ ] Starting an instance without `runtimeOptions.cliOutputCapture.enabled` returns 400 Bad Request
+- [ ] Starting an instance with relative paths in runtime CLI directory policy returns a validation error
+- [ ] Starting an instance with valid runtime CLI options proceeds normally
+
+### 4.6 Transition History
 
 - [ ] `GET /instances/:id/history` returns an ordered array of `TransitionRecord`s
 - [ ] Each record has `fromState`, `toState`, `timestamp`, `durationMs`, and `actionId`
 - [ ] History length equals the number of transitions the machine took
 - [ ] History records are in chronological order
 
-### 4.5 Logs
+### 4.7 Logs
 
 - [ ] `GET /instances/:id/logs` returns all `LogEntry` records emitted during execution
 - [ ] Each log entry has `stateName`, `level`, `message`, `timestamp`
@@ -204,6 +229,14 @@
 - [ ] The child's `TransitionRecord` entries include `childInstanceId` and `childDefinitionId`
 - [ ] The parent's `TransitionRecord` for the child_machine state includes `childInstanceId`
 
+### 8.5 Workspace & Family Inheritance
+
+- [ ] The child instance inherits the parent's `workspaceRoot` (same user workspace)
+- [ ] The child instance inherits the parent's `familyRootInstanceId` (always the top-level root's ID)
+- [ ] The child's `artifactsPath` equals the parent's `artifactsPath` (shared family root)
+- [ ] The child's `ctx.workspace.root` is the same as the parent's `ctx.workspace.root`
+- [ ] The child's `ctx.artifactsWorkspace.root` is the same as the parent's `ctx.artifactsWorkspace.root`
+
 ---
 
 ## 9. Parallel Children
@@ -239,6 +272,12 @@
 
 - [ ] Results are correctly keyed by `ChildSpawnDefinition.key` — no key collisions
 - [ ] The action can identify which child produced which result by key
+
+### 9.6 Workspace & Family Inheritance
+
+- [ ] All parallel children inherit the parent's `workspaceRoot`
+- [ ] All parallel children inherit the parent's `familyRootInstanceId`
+- [ ] All parallel children share the same `artifactsWorkspace.root` (the family root)
 
 ---
 
@@ -350,7 +389,7 @@
 > These behaviors verify that the `MachineInstance` is in the correct state at each
 > checkpoint, which is essential for correct resume behavior.
 
-- [ ] **Checkpoint 1 — Instance creation**: immediately after start, a `GET /instances/:id` returns `status: 'running'`, `currentState` = `initialState`, and `stateData` matching input
+- [ ] **Checkpoint 1 — Instance creation**: immediately after start, a `GET /instances/:id` returns `status: 'running'`, `currentState` = `initialState`, `stateData` matching input, and `workspaceRoot` / `familyRootInstanceId` / `artifactsPath` populated
 - [ ] **Checkpoint 2 — Before state entry**: `currentState` and `stateData` are persisted before the action runs (if the action were to "crash", the store reflects the unfinished state)
 - [ ] **Checkpoint 3 — After transition**: `history[]` is appended, `currentState` is advanced to `nextState`, `stateData` is the transition result's `data`
 - [ ] **Checkpoint 4 — Terminal state**: `status` is one of `'completed'` / `'cancelled'` / `'error'`; `output` or `error` field is populated
@@ -382,45 +421,122 @@
 
 ---
 
-## 15. Artifacts
+## 15. Working Directories & Artifacts Workspace
 
-### 15.1 Write & Read
+> After the working-directory migration, the term "artifact" refers to any file written
+> to the artifacts workspace. There are no system-managed artifact records, metadata, or
+> artifact API endpoints. Artifacts are plain files accessed via
+> `ctx.artifactsWorkspace.resolve(...)`.
 
-- [ ] An action calling `ctx.artifacts.write('report.pdf', content)` creates a file on disk under `<ARTIFACT_ROOT>/<instanceId>/report.pdf`
-- [ ] The `ArtifactRecord` is appended to the instance's `artifacts[]` with correct `name`, `instanceId`, `stateName`, `size`, `createdAt`
-- [ ] An action calling `ctx.artifacts.read('report.pdf')` retrieves the file's content
-- [ ] `ctx.artifacts.list()` returns all artifacts written by this instance (not children)
+### 15.1 User Workspace
 
-### 15.2 Sandbox / Path Traversal
+- [ ] `ctx.workspace.root` returns the absolute `workspaceRoot` path provided at instance start
+- [ ] `ctx.workspace.resolve('path/to/file')` returns an absolute path within the workspace root
+- [ ] The workspace root is inherited by child instances (same value as parent)
+- [ ] Actions can read and write files within the workspace root via standard filesystem operations
 
-- [ ] Writing a filename containing `../` is rejected (no escaping the instance directory)
-- [ ] Writing a filename with absolute path is rejected
-- [ ] `readChild` with a `childInstanceId` that is not a descendant of the current instance is rejected with `NotFoundError`
+### 15.2 Artifacts Workspace — Family Root
 
-### 15.3 Parent–Child Artifact Access
+- [ ] `ctx.artifactsWorkspace.root` returns `<ARTIFACT_ROOT>/<familyRootInstanceId>/`
+- [ ] `ctx.artifactsWorkspace.resolve('report.json')` returns an absolute path within the family root
+- [ ] The artifacts workspace root is the same for all instances in the same family (parent, children, grandchildren)
+- [ ] The artifacts workspace directory is created on disk when the root instance starts
 
-- [ ] After a child completes, the parent action can read the child's artifact via `ctx.artifacts.readChild(childId, 'file.csv')`
-- [ ] After parallel children complete, the parent action can read each child's artifacts by their instance ID
-- [ ] `ctx.artifacts.listChild(childId)` returns the child's artifact list
+### 15.3 Artifacts Workspace — File Operations
 
-### 15.4 REST API
+- [ ] An action can write a file to the artifacts workspace using `ctx.artifactsWorkspace.resolve('report.json')` and standard filesystem APIs
+- [ ] An action can read a file from the artifacts workspace using the resolved path
+- [ ] No path traversal restrictions are enforced — the artifacts root is advisory only
+- [ ] Actions may write to any path (including absolute paths outside the artifacts workspace) — no enforcement
 
-- [ ] `GET /instances/:id/artifacts` returns a flat list of `ArtifactRecord`s for the instance
-- [ ] `GET /instances/:id/artifacts/:name` downloads the artifact file content
-- [ ] `GET /instances/:id/artifacts/:name` for a non-existent artifact returns 404
-- [ ] `GET /instances/:id/artifacts?tree=true` returns a recursive `ArtifactTree` including children and grandchildren
+### 15.4 Family Artifact Sharing
 
-### 15.5 Directory Structure
+- [ ] A child action can access parent artifacts via `ctx.artifactsWorkspace.resolve('parent-report.json')` (shared family root)
+- [ ] A parent action can access child artifacts via `ctx.artifactsWorkspace.resolve('children/<childInstanceId>/file.json')` after the child completes
+- [ ] Siblings within the same family share the same `artifactsWorkspace.root` and can access each other's files
+- [ ] The `children/<childInstanceId>/` subdirectory structure is a naming convention, not enforced by the system
 
-- [ ] Parent artifacts live at `<ARTIFACT_ROOT>/<parentId>/`
-- [ ] Child artifacts live at `<ARTIFACT_ROOT>/<parentId>/children/<childId>/`
-- [ ] Grandchild artifacts nest further: `.../children/<childId>/children/<grandchildId>/`
+### 15.5 Instance Payload
+
+- [ ] `GET /instances/:id` includes `workspaceRoot` (the user-specified workspace path)
+- [ ] `GET /instances/:id` includes `familyRootInstanceId` (the top-level root instance ID)
+- [ ] `GET /instances/:id` includes `artifactsPath` (the resolved family artifacts root directory path)
+- [ ] The instance payload does **not** include `artifacts: ArtifactRecord[]` (removed)
+
+### 15.6 Removed Artifact API Surface
+
+- [ ] `GET /instances/:id/artifacts` returns 404 (endpoint removed)
+- [ ] `GET /instances/:id/artifacts/:name` returns 404 (endpoint removed)
+- [ ] `GET /instances/:id/artifacts?tree=true` returns 404 (endpoint removed)
+- [ ] No `ArtifactRecord`, `ArtifactStore`, or `ArtifactTree` types exist in the codebase
 
 ---
 
-## 16. WebSocket — Live Updates
+## 16. CLI Helper
 
-### 16.1 Connection & Subscription
+> The CLI helper (`ctx.cli`) provides standardized command execution and result capture.
+> It is a plain property on `ActionContext`, constructed by the runner.
+
+### 16.1 Basic Execution
+
+- [ ] `ctx.cli.exec({ command: 'echo', args: ['hello'] })` returns a `CliExecResult` with `exitCode: 0` and `stdout: 'hello\n'`
+- [ ] `CliExecResult` contains `exitCode`, `stdout`, `stderr`, and `durationMs`
+- [ ] `exec` never fails in the Effect error channel — all outcomes are surfaced in `CliExecResult`
+- [ ] Spawn failures (e.g., command not found) set `exitCode: -1` with the error message in `stderr`
+
+### 16.2 Working Directory
+
+- [ ] By default, CLI commands run in `ctx.workspace.root` (the user workspace)
+- [ ] `cli.exec({ command, cwd: '/some/path' })` runs the command in the specified directory
+- [ ] Actions may issue multiple `cli.exec(...)` calls with different `cwd` values within a single action
+- [ ] `cwd` may be set to any path — no enforcement or restriction
+
+### 16.3 Environment Variables
+
+- [ ] Every `cli.exec(...)` call provides `WORKSPACE_ROOT` in the process environment (set to `ctx.workspace.root`)
+- [ ] Every `cli.exec(...)` call provides `ARTIFACTS_ROOT` in the process environment (set to `ctx.artifactsWorkspace.root`)
+- [ ] Actions may pass additional env vars via `cli.exec({ command, env: { MY_VAR: 'value' } })`
+- [ ] Action-provided env vars are merged with (and override) the default environment
+
+### 16.4 Output Capture
+
+- [ ] `stdout` is captured up to 1 MiB; larger output is truncated with a `\n...<truncated>` suffix
+- [ ] `stderr` is captured up to 1 MiB; larger output is truncated with a `\n...<truncated>` suffix
+- [ ] The action still receives `exitCode` and `durationMs` even when output is truncated
+
+### 16.5 Timeout Integration
+
+- [ ] The CLI helper does **not** enforce its own timeout — it runs the child process indefinitely
+- [ ] If the state's `timeoutMs` fires, the runner interrupts the action's Effect fiber and kills the in-flight child process
+- [ ] There is no `timedOut` field or timeout sentinel exit code in `CliExecResult`
+
+### 16.6 Exit Code Branching
+
+- [ ] An action can inspect `result.exitCode` and return different `nextState` values based on success (`0`) vs failure (non-zero)
+- [ ] Non-zero exit codes do **not** automatically fail the machine — the action decides the transition
+- [ ] An action can parse `result.stdout` (e.g., JSON) to determine the next state dynamically
+
+### 16.7 Global Transcript Capture (Runtime Toggle)
+
+- [ ] With `runtimeOptions.cliOutputCapture.enabled = true`, every `ctx.cli.exec(...)` call in any action writes a `.txt` transcript artifact
+- [ ] With `runtimeOptions.cliOutputCapture.enabled = false`, no transcript artifacts are written
+- [ ] Transcript content includes command/args, cwd, exit code, stdout, stderr, and duration
+- [ ] `ctx.cli.exec(...)` returns capture metadata (transcript file reference) when capture is enabled
+- [ ] Capture behavior is centralized in the CLI helper (actions do not implement custom capture logic)
+
+### 16.8 Transcript Lineage Paths
+
+- [ ] Root-instance CLI transcripts are written under `<stateName>/<visitIndex>-<label>.txt` in the family artifacts root
+- [ ] Child-instance CLI transcripts are written under `children/<childInstanceId>/<stateName>/<visitIndex>-<label>.txt`
+- [ ] Deeply nested children continue lineage nesting as `children/<instanceId>/...`
+- [ ] Re-visiting the same state increments `<visitIndex>` (`001`, `002`, ...)
+- [ ] Parent/child integration tests verify transcript paths are associated with the instance that executed each command
+
+---
+
+## 17. WebSocket — Live Updates
+
+### 17.1 Connection & Subscription
 
 - [ ] Client connects to `ws://host/api/machines/live` successfully
 - [ ] Sending `{ type: 'subscribe', instanceId }` begins receiving events for that instance
@@ -428,7 +544,7 @@
 - [ ] Subscribing to multiple instances concurrently delivers events for all of them
 - [ ] Events for instances the client is **not** subscribed to are **not** delivered
 
-### 16.2 Event Types
+### 17.2 Event Types
 
 - [ ] `state_changed` event fires on each state transition with `previousState`, `currentState`, `stateData`, `timestamp`
 - [ ] `transition_recorded` event fires with the full `TransitionRecord` after each transition
@@ -438,15 +554,17 @@
 - [ ] `child_completed` event fires when the single child finishes, with the child's `MachineResult`
 - [ ] `children_spawned` event fires when a `parallel_children` state spawns all children, with `childInstanceIds` (keyed)
 - [ ] `children_completed` event fires when all parallel children finish, with `results` (keyed)
-- [ ] `artifact_created` event fires when an action writes an artifact, with the `ArtifactRecord`
 - [ ] `machine_resumed` event fires when a suspended instance is resumed, with `previousState` and `resumedState`
 
-### 16.3 Event Ordering
+> **Removed:** The `artifact_created` event has been removed. Artifacts are plain files
+> in the artifacts workspace — there is no system-level artifact tracking or event emission.
+
+### 17.3 Event Ordering
 
 - [ ] Events for a single instance arrive in causal order (state_changed before transition_recorded for the same transition)
 - [ ] Log entries from an action arrive before the transition_recorded event for that action's state
 
-### 16.4 Reconnection
+### 17.4 Reconnection
 
 - [ ] After a WebSocket disconnect, the client reconnects with exponential backoff (1s → 2s → 4s → … → 30s cap)
 - [ ] On reconnect, the client re-subscribes to previously subscribed instances
@@ -454,7 +572,7 @@
 
 ---
 
-## 17. Client UI — Dashboard
+## 18. Client UI — Dashboard
 
 - [ ] The machines dashboard page lists all saved definitions
 - [ ] Each definition shows its name, version, description, and tags
@@ -464,14 +582,15 @@
 - [ ] The dashboard lists recent / running / suspended instances
 - [ ] Each instance row shows: definition name, status, current state, created timestamp
 - [ ] Suspended instances display a "Resume" button that calls `POST /instances/:id/resume` and refreshes
-- [ ] A "Quick Start" control allows: selecting a definition, entering JSON input, and clicking "Launch"
+- [ ] A "Quick Start" control allows: selecting a definition, entering JSON input, specifying a workspace root, and clicking "Launch"
+- [ ] Quick Start collects/provides required runtime CLI options (`cliDirectoryPolicy` and `cliOutputCapture`) when launching
 - [ ] Launching redirects to the new instance's viewer page
 
 ---
 
-## 18. Client UI — Instance Viewer
+## 19. Client UI — Instance Viewer
 
-### 18.1 State Diagram
+### 19.1 State Diagram
 
 - [ ] The instance page renders a state diagram (node-and-edge graph) from the definition
 - [ ] The current state node is visually highlighted (distinct color/border)
@@ -479,14 +598,14 @@
 - [ ] Transitions (edges) are labeled when the definition provides labels
 - [ ] As the machine progresses (via WebSocket), the highlighted node updates in real time
 
-### 18.2 Transition History
+### 19.2 Transition History
 
 - [ ] A history panel/table shows all completed transitions in chronological order
 - [ ] Each row shows: from → to, action ID, duration, timestamp
 - [ ] Transition data (stateData carried) is expandable / viewable per row
 - [ ] New transitions appear in real time as the machine runs
 
-### 18.3 Logs Panel
+### 19.3 Logs Panel
 
 - [ ] A logs panel displays all log entries for the instance
 - [ ] Logs can be filtered by state name (dropdown of all states)
@@ -494,26 +613,28 @@
 - [ ] New log entries appear in real time via WebSocket
 - [ ] Log entries show timestamp, state, level, message, and optional data
 
-### 18.4 Child Machine Tree
+### 19.4 Child Machine Tree
 
 - [ ] If the instance spawned children, a tree view shows the parent → child hierarchy
 - [ ] Clicking a child in the tree navigates to that child's instance viewer page
 - [ ] Parallel children are grouped under their parent state
 - [ ] The tree updates live when children are spawned or complete
 
-### 18.5 Artifacts Panel
+### 19.5 Artifacts Path Display
 
-- [ ] An artifacts panel shows a file-explorer-style tree of all artifacts
-- [ ] The tree mirrors the instance hierarchy (parent files, then child folders)
-- [ ] Clicking an artifact triggers a download (or preview for text/image)
-- [ ] New artifacts appear in real time via `artifact_created` WebSocket events
-- [ ] The tree can be expanded/collapsed per child instance level
+> The artifacts panel displays the `artifactsPath` from the instance payload as a
+> read-only filesystem path. There is no artifacts API or file browser — the user
+> accesses the artifacts workspace directory on their own filesystem.
+
+- [ ] The instance viewer displays the `artifactsPath` as a read-only text string
+- [ ] The path is selectable / copyable by the user
+- [ ] The `workspaceRoot` is also displayed alongside the artifacts path
 
 ---
 
-## 19. Client UI — Definition Editor
+## 20. Client UI — Definition Editor
 
-### 19.1 Visual Graph Editing
+### 20.1 Visual Graph Editing
 
 - [ ] The editor displays states as draggable nodes on a canvas
 - [ ] Transitions are displayed as connectable edges between nodes
@@ -523,7 +644,7 @@
 - [ ] Removing an edge removes the corresponding transition rule
 - [ ] The three required terminal states (`completed`, `cancelled`, `error`) are always present and cannot be deleted
 
-### 19.2 State Configuration
+### 20.2 State Configuration
 
 - [ ] Selecting a state node opens a side panel for configuration
 - [ ] The panel allows setting: name, type, description
@@ -533,20 +654,20 @@
 - [ ] For `parallel_children`: a `parallelMode` selector (all_or_interrupt / all_settled)
 - [ ] Schema editors allow defining `dataSchema` per state and `inputSchema` / `outputSchema` for the machine
 
-### 19.3 Validation
+### 20.3 Validation
 
 - [ ] A "Validate" button checks all 14 definition validation rules and displays errors inline
 - [ ] Errors highlight the offending states/transitions on the canvas
 - [ ] The "Save" button is disabled (or warns) when validation errors exist
 - [ ] Validation errors include human-readable descriptions of each violation
 
-### 19.4 Import / Export
+### 20.4 Import / Export
 
 - [ ] An "Export JSON" button downloads the current definition as a JSON file
 - [ ] An "Import JSON" button loads a definition from a JSON file into the editor
 - [ ] Importing an invalid JSON file shows a parse error
 
-### 19.5 Editor State
+### 20.5 Editor State
 
 - [ ] Undo / Redo support for all editing operations (add state, remove state, add transition, change config)
 - [ ] Dirty tracking: the editor warns before navigating away with unsaved changes
@@ -554,22 +675,22 @@
 
 ---
 
-## 20. End-to-End Workflows
+## 21. End-to-End Workflows
 
 > Full user journeys that exercise multiple subsystems together. These are the most
 > valuable e2e tests — they prove the system works as a whole.
 
-### 20.1 Create → Run → View → Complete
+### 21.1 Create → Run → View → Complete
 
 - [ ] User creates a 3-state linear definition via the editor → saves
-- [ ] User launches an instance from the dashboard with JSON input
+- [ ] User launches an instance from the dashboard with JSON input and a workspace root
 - [ ] User is redirected to the instance viewer
 - [ ] The state diagram highlights each state as the machine progresses
 - [ ] Transition history and logs update in real time
 - [ ] The machine reaches `completed` and the diagram shows the terminal state highlighted
 - [ ] The instance status in the dashboard changes to `completed`
 
-### 20.2 Create → Run → Cancel
+### 21.2 Create → Run → Cancel
 
 - [ ] User creates a definition with a `delay` action (slow enough to cancel)
 - [ ] User launches an instance and sees it running
@@ -578,17 +699,18 @@
 - [ ] The state diagram updates to show `cancelled` highlighted
 - [ ] The dashboard shows the instance as `cancelled`
 
-### 20.3 Parent–Child Composition
+### 21.3 Parent–Child Composition
 
 - [ ] User creates a child definition (validation pipeline) and a parent definition referencing it
-- [ ] User launches the parent
+- [ ] User launches the parent with a workspace root
 - [ ] The instance viewer shows the child being spawned (child_spawned event)
 - [ ] The child machine tree appears with the child instance
 - [ ] Clicking the child in the tree opens the child's instance viewer
 - [ ] The child completes and the parent continues
 - [ ] Both instances end as `completed`
+- [ ] Both instances share the same `workspaceRoot` and `familyRootInstanceId`
 
-### 20.4 Parallel Children
+### 21.4 Parallel Children
 
 - [ ] User creates a parent definition with a `parallel_children` state referencing 3 child definitions
 - [ ] User launches the parent
@@ -596,7 +718,7 @@
 - [ ] Children run concurrently and complete
 - [ ] The parent's action aggregates results and the machine completes
 
-### 20.5 Suspend → Resume
+### 21.5 Suspend → Resume
 
 - [ ] User launches a multi-step machine with a `delay` action
 - [ ] Server is shut down gracefully while the machine is running
@@ -605,53 +727,105 @@
 - [ ] The machine continues from where it left off and completes
 - [ ] Already-completed states are not re-executed (verified via transition count)
 
-### 20.6 Artifacts Workflow
+### 21.6 CLI → Artifacts Workspace Workflow
 
-- [ ] User launches a machine whose actions produce artifact files
-- [ ] The artifacts panel in the instance viewer shows the files appearing in real time
-- [ ] User clicks an artifact to download it; the downloaded content is correct
-- [ ] For a parent–child machine, the artifact tree shows files from both parent and child
+- [ ] User launches a machine whose action runs a CLI command via `ctx.cli.exec()`
+- [ ] The action writes output to the artifacts workspace via `ctx.artifactsWorkspace.resolve('output.json')`
+- [ ] The instance viewer displays the `artifactsPath` where the file was written
+- [ ] For a parent–child machine, the child can read files written by the parent via the shared artifacts workspace
+- [ ] The parent can read files written by the child after the child completes
 
-### 20.7 Definition Editing Round-Trip
+### 21.7 CLI Branching by Exit Code
+
+- [ ] User launches a machine with a `run-cli` action state
+- [ ] The CLI command succeeds (`exitCode === 0`) and the machine transitions to the success state
+- [ ] (Alternate run) The CLI command fails (`exitCode !== 0`) and the machine transitions to the error-handling state
+- [ ] The error-handling state receives `stderr` and `exitCode` in `ctx.stateData`
+
+### 21.8 Definition Editing Round-Trip
 
 - [ ] User creates a definition in the visual editor
 - [ ] User exports it as JSON, modifies the JSON externally, and re-imports
 - [ ] The editor reflects the imported changes
 - [ ] User saves and launches an instance — it runs correctly with the modified definition
 
+### 21.9 Copilot CLI Prompt Action Workflow
+
+- [ ] User launches a machine whose action is `copilot-cli-prompt` with valid `prompt`, transition targets, and runtime CLI options
+- [ ] The action prepends system directory-guidance text before the user prompt sent to Copilot CLI
+- [ ] The Copilot CLI call runs in YOLO mode and includes runtime-policy `--allow-dir` arguments
+- [ ] Optional `contextFilePaths` are forwarded as CLI context arguments after resolution
+- [ ] The action performs strict JSON result capture and validates required schema fields
+- [ ] On schema-valid result (including `status: 'error'`), machine transitions to `successState` and emits `copilotResult` + `normalizedFilePaths`
+- [ ] Integration run verifies normalized file-path records include `workspace`, `path`, and `resolvedPath`
+- [ ] If first result JSON is invalid, action issues exactly one JSON-repair reprompt
+- [ ] If reprompt output is still invalid, machine transitions to `invalidResultState` with validation details and raw output
+- [ ] If Copilot CLI execution fails, machine transitions to `execErrorState` with `stderr`/`exitCode`
+- [ ] With output capture enabled, returned data includes `commandOutputFiles` references for all CLI calls in the flow
+
+### 21.10 Developer Curl Workflow Script
+
+- [ ] Developer script upserts a full machine definition that uses `copilot-cli-prompt`
+- [ ] Script starts an instance with prompt text requesting creation of `helloWorld.md`
+- [ ] Script polls instance status until a terminal state is reached
+- [ ] Script prints live progress updates plus final completion status
+- [ ] Script is provided as developer tooling (not an e2e test) and can be run repeatedly
+
 ---
 
-## 21. Negative / Edge-Case Behaviors
+## 22. Negative / Edge-Case Behaviors
 
-### 21.1 API Error Responses
+### 22.1 API Error Responses
 
 - [ ] `POST /instances` with a missing `definitionId` returns 400 Bad Request
 - [ ] `POST /instances` with a missing `input` field returns 400 Bad Request
+- [ ] `POST /instances` with a missing `workspaceRoot` field returns 400 Bad Request
+- [ ] `POST /instances` with missing `runtimeOptions` returns 400 Bad Request
+- [ ] `POST /instances` with missing `runtimeOptions.cliDirectoryPolicy` returns 400 Bad Request
+- [ ] `POST /instances` with missing `runtimeOptions.cliOutputCapture` returns 400 Bad Request
+- [ ] `POST /instances` with a non-absolute `workspaceRoot` returns 400 Bad Request
 - [ ] `GET /instances/:id` with a non-existent ID returns 404
 - [ ] `POST /instances/:id/cancel` on a non-existent instance returns 404
 - [ ] `POST /instances/:id/resume` on a non-existent instance returns 404
 
-### 21.2 Concurrent Operations
+### 22.2 Concurrent Operations
 
 - [ ] Starting multiple instances of the same definition concurrently does not cause data corruption
 - [ ] Cancelling an instance while it is transitioning between states completes without error (cancel takes effect at next yield point)
 - [ ] Two clients subscribing to the same instance via WebSocket both receive the same events
 
-### 21.3 Definition Mutation During Execution
+### 22.3 Definition Mutation During Execution
 
 - [ ] Updating a definition while an instance of it is running does not affect the running instance (it uses the version at start time)
 - [ ] Deleting a definition while an instance is running does not crash the instance (it already loaded the definition)
 - [ ] After the definition is deleted, the completed instance is still viewable via `GET /instances/:id`
 
-### 21.4 Large-Scale Behaviors
+### 22.4 Large-Scale Behaviors
 
 - [ ] A machine with 50+ states and transitions runs correctly
 - [ ] A parallel_children state with 20+ children completes (queued by semaphore as needed)
 - [ ] An instance with 1000+ log entries can be retrieved and filtered
 
-### 21.5 WebSocket Edge Cases
+### 22.5 WebSocket Edge Cases
 
 - [ ] Subscribing to an instance that has already completed delivers no events (the machine is done)
 - [ ] Subscribing to a non-existent instance ID does not crash the connection
 - [ ] Sending malformed JSON over the WebSocket does not crash the server
 - [ ] Multiple rapid subscribe/unsubscribe cycles do not leak subscriptions
+
+### 22.6 CLI Edge Cases
+
+- [ ] `cli.exec` with a non-existent command returns `exitCode: -1` and the error in `stderr`
+- [ ] `cli.exec` with a command that produces >1 MiB stdout returns truncated output with `\n...<truncated>` suffix
+- [ ] `cli.exec` with a long-running command that exceeds the state's `timeoutMs` is interrupted (child process killed)
+- [ ] Multiple concurrent `cli.exec` calls within a single action all complete and return their results
+
+### 22.7 `copilot-cli-prompt` Edge Cases
+
+- [ ] Missing/empty `prompt` in action input routes to the configured invalid-result handling path
+- [ ] Non-relative or root-escaping `contextFilePaths[].path` fails validation and routes to `invalidResultState`
+- [ ] Unknown `contextFilePaths[].workspace` value fails validation and routes to `invalidResultState`
+- [ ] JSON result missing any required key (`schemaVersion`, `status`, `summary`, `data`, `filePaths`, `diagnostics`) routes to `invalidResultState`
+- [ ] JSON result with `additionalProperties` at top-level fails validation and routes to `invalidResultState`
+- [ ] Invalid `filePaths[]` entries in model output fail normalization and route to `invalidResultState`
+- [ ] Conversation state is reset after result-capture prompts so follow-up user prompts do not include the temporary JSON-formatting system prompts
