@@ -197,11 +197,12 @@ Capture includes all CLI calls in this action flow (initial prompt execution, JS
 Each transcript is written under an artifacts folder scoped to the machine instance that executed the command:
 
 - Root instance:
-  - `ctx.artifactsWorkspace.resolve("<stateName>/<sequence>.txt")`
+  - `ctx.artifactsWorkspace.resolve("<stateName>/<visitIndex>-<label>.txt")`
 - Child instance:
-  - `ctx.artifactsWorkspace.resolve("children/<childInstanceId>/<stateName>/<sequence>.txt")`
+  - `ctx.artifactsWorkspace.resolve("children/<childInstanceId>/<stateName>/<visitIndex>-<label>.txt")`
 - Nested children:
   - Continue nesting with `/children/<instanceId>/...` for each level.
+- `<visitIndex>` is the 1-based count of how many times that state has been visited for the executing instance (for example: `001`, then `002`).
 
 This keeps command outputs associated with the spawning machine instance while preserving parent/child hierarchy.
 
