@@ -251,6 +251,41 @@ describe('§21 — Negative & Edge Cases', () => {
       expect([400, 404]).toContain(res.status);
     });
 
+    it('POST /instances with missing runtimeOptions → 400', async () => {
+      const def = await api.createDef(SIMPLE_DEFINITION);
+
+      const res = await api.postInstance({
+        definitionId: def.id,
+        input: SIMPLE_INPUT,
+        workspaceRoot: testWorkspaceRoot,
+        runtimeOptions: undefined,
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { details?: string[] };
+      expect((body.details ?? []).join(' ')).toContain('runtimeOptions');
+    });
+
+    it('POST /instances with malformed runtimeOptions nested keys → 400', async () => {
+      const def = await api.createDef(SIMPLE_DEFINITION);
+
+      const res = await api.postInstance({
+        definitionId: def.id,
+        input: SIMPLE_INPUT,
+        workspaceRoot: testWorkspaceRoot,
+        runtimeOptions: {
+          cliDirectoryPolicy: {
+            workspaceDirs: [testWorkspaceRoot],
+          },
+          // missing cliOutputCapture and artifactDirs
+        },
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { details?: string[] };
+      expect((body.details ?? []).join(' ')).toContain('runtimeOptions');
+    });
+
     it('GET /instances/:id with non-existent ID → 404', async () => {
       const res = await api.getInstance('00000000-0000-0000-0000-000000000000');
       expect(res.status).toBe(404);

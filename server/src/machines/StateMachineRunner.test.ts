@@ -3570,6 +3570,137 @@ describe('CLI transcript capture lineage', () => {
   });
 });
 
+describe('runtimeOptions pass-through integration', () => {
+  it('forwards runtimeOptions into child actions and does not persist them on instances', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-runtime-policy-'));
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      let parentRuntimeSnapshot: unknown;
+      let childRuntimeSnapshot: unknown;
+
+      const parentCaptureAction: ActionFunction = (ctx) =>
+        Effect.sync(() => {
+          parentRuntimeSnapshot = ctx.runtimeOptions;
+          return {
+            nextState: 'spawnChild',
+            data: { observed: true },
+          } as TransitionResult;
+        });
+
+      const childCaptureAction: ActionFunction = (ctx) =>
+        Effect.sync(() => {
+          childRuntimeSnapshot = ctx.runtimeOptions;
+          return {
+            nextState: 'completed',
+            data: { capturedInChild: true },
+          } as TransitionResult;
+        });
+
+      const forwardChildResult: ActionFunction = (ctx) => {
+        const childResult = ctx.stateData as { status?: string };
+        return Effect.succeed({
+          nextState: childResult.status === 'completed' ? 'completed' : 'error',
+          data: childResult,
+        } as TransitionResult);
+      };
+
+      yield* registry.register('parent-capture-runtime', parentCaptureAction, {
+        description: 'capture parent runtime options',
+      });
+      yield* registry.register('child-capture-runtime', childCaptureAction, {
+        description: 'capture child runtime options',
+      });
+      yield* registry.register('forward-child-runtime', forwardChildResult, {
+        description: 'forward child result',
+      });
+
+      const childDef = yield* store.saveDefinition({
+        name: 'Runtime child definition',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          runChild: { name: 'runChild', type: 'action', actionId: 'child-capture-runtime' },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'runChild',
+        transitions: [{ from: 'runChild', to: 'completed' }],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      });
+
+      const parentDef: StateMachineDefinition = {
+        id: 'def-runtime-parent',
+        name: 'Runtime parent definition',
+        version: 1,
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          captureParent: {
+            name: 'captureParent',
+            type: 'action',
+            actionId: 'parent-capture-runtime',
+          },
+          spawnChild: {
+            name: 'spawnChild',
+            type: 'child_machine',
+            actionId: 'forward-child-runtime',
+            childMachineDefId: childDef.id,
+            childInputMapping: '$.machineInput',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'captureParent',
+        transitions: [
+          { from: 'captureParent', to: 'spawnChild' },
+          { from: 'spawnChild', to: 'completed' },
+          { from: 'spawnChild', to: 'error' },
+        ],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      };
+
+      const runtimeOptions = {
+        cliDirectoryPolicy: {
+          workspaceDirs: [tmpDir],
+          artifactDirs: [tmpDir],
+        },
+        cliOutputCapture: {
+          enabled: true,
+        },
+      };
+
+      const result = yield* runner.run(
+        parentDef,
+        { value: 1 },
+        { workspaceRoot: tmpDir, runtimeOptions },
+      );
+      expect(result.status).toBe('completed');
+      expect(parentRuntimeSnapshot).toEqual(runtimeOptions);
+      expect(childRuntimeSnapshot).toEqual(runtimeOptions);
+
+      const parent = yield* store.getInstance(result.instanceId);
+      const children = yield* store.listInstances({ parentInstanceId: parent.id });
+      expect(children).toHaveLength(1);
+
+      expect(parent).not.toHaveProperty('runtimeOptions');
+      expect(children[0]).not.toHaveProperty('runtimeOptions');
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // §15.6 — Artifact Infrastructure Removal (Task 15)
 // ════════════════════════════════════════════════════════════════════════════

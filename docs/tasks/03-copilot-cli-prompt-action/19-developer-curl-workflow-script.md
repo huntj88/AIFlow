@@ -37,12 +37,12 @@ Provide required developer tooling script under `scripts/dev/` that exercises th
 
 ## Acceptance Checklist
 
-- [ ] Script is under `scripts/dev/` and executable.
-- [ ] Script sends required `runtimeOptions` payload.
-- [ ] Script logs incremental progress and final terminal status.
-- [ ] Script includes conversation chaining flow.
-- [ ] Script implements explicit `GET` -> (`PUT` or `POST`) upsert branching and logs chosen branch.
-- [ ] Script fails with non-zero exit and clear diagnostics on malformed API responses or missing `definitionId`.
+- [x] Script is under `scripts/dev/` and executable.
+- [x] Script sends required `runtimeOptions` payload.
+- [x] Script logs incremental progress and final terminal status.
+- [x] Script includes conversation chaining flow.
+- [x] Script implements explicit `GET` -> (`PUT` or `POST`) upsert branching and logs chosen branch.
+- [x] Script fails with non-zero exit and clear diagnostics on malformed API responses or missing `definitionId`.
 
 ---
 

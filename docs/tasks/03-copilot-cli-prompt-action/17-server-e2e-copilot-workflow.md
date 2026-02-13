@@ -31,10 +31,10 @@ Add HTTP-level e2e coverage for runtime-option validation and the full copilot p
 
 ## Acceptance Checklist
 
-- [ ] RuntimeOptions validation e2e coverage matches behavior spec.
-- [ ] Copilot workflow e2e coverage includes success and all required failure branches.
-- [ ] E2E confirms `conversationId` propagation for chained states.
-- [ ] E2E confirms capture metadata references for all CLI calls when enabled.
+- [x] RuntimeOptions validation e2e coverage matches behavior spec.
+- [x] Copilot workflow e2e coverage includes success and all required failure branches.
+- [x] E2E confirms `conversationId` propagation for chained states.
+- [x] E2E confirms capture metadata references for all CLI calls when enabled.
 
 ---
 

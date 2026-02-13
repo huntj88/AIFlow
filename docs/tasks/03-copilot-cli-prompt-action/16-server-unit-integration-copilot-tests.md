@@ -27,10 +27,10 @@ Add deterministic unit/integration tests for copilot action internals and runtim
 
 ## Acceptance Checklist
 
-- [ ] Unit tests cover happy path + bounded retry + reset-failure branches.
-- [ ] Integration tests cover runtime policy inheritance into child executions.
-- [ ] Tests verify no runtime policy persistence on `MachineInstance`.
-- [ ] Server unit/integration suite passes with new contract.
+- [x] Unit tests cover happy path + bounded retry + reset-failure branches.
+- [x] Integration tests cover runtime policy inheritance into child executions.
+- [x] Tests verify no runtime policy persistence on `MachineInstance`.
+- [x] Server unit/integration suite passes with new contract.
 
 ---
 

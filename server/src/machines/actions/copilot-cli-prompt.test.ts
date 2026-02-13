@@ -150,4 +150,103 @@ describe('copilot-cli-prompt action', () => {
     expect(firstCallArgs).toContain('--conversation-id');
     expect(firstCallArgs).toContain('conv-existing');
   });
+
+  it('routes schema-valid status:error payloads to successState', () => {
+    const ctx = makeCtx(
+      {
+        prompt: 'Handle expected failure',
+        successState: 'next',
+        execErrorState: 'handleErr',
+      },
+      [
+        {
+          exitCode: 0,
+          stdout: 'Conversation ID: conv-error-ok',
+          stderr: '',
+          durationMs: 10,
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            schemaVersion: 'copilot-action-result.v1',
+            status: 'error',
+            summary: 'lint failed but structured',
+            data: { detail: 'expected by workflow' },
+            filePaths: [],
+            diagnostics: { exitCode: 2, durationMs: 22 },
+          }),
+          stderr: '',
+          durationMs: 5,
+        },
+        {
+          exitCode: 0,
+          stdout: 'OK',
+          stderr: '',
+          durationMs: 2,
+        },
+      ],
+    );
+
+    const result = Effect.runSync(copilotCliPromptAction(ctx));
+
+    expect(result.nextState).toBe('next');
+    const data = result.data as {
+      conversationId: string;
+      copilotResult: { status: 'ok' | 'error'; summary: string };
+    };
+    expect(data.conversationId).toBe('conv-error-ok');
+    expect(data.copilotResult.status).toBe('error');
+    expect(data.copilotResult.summary).toContain('structured');
+  });
+
+  it('routes reset failures to execErrorState with reset diagnostics', () => {
+    const ctx = makeCtx(
+      {
+        prompt: 'Cause reset failure',
+        successState: 'next',
+        execErrorState: 'handleErr',
+      },
+      [
+        {
+          exitCode: 0,
+          stdout: 'Conversation ID: conv-reset-fail',
+          stderr: '',
+          durationMs: 10,
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            schemaVersion: 'copilot-action-result.v1',
+            status: 'ok',
+            summary: 'json done',
+            data: {},
+            filePaths: [],
+            diagnostics: { exitCode: 0, durationMs: 10 },
+          }),
+          stderr: '',
+          durationMs: 5,
+        },
+        {
+          exitCode: 9,
+          stdout: '',
+          stderr: 'reset failed',
+          durationMs: 2,
+        },
+      ],
+    );
+
+    const result = Effect.runSync(copilotCliPromptAction(ctx));
+
+    expect(result.nextState).toBe('handleErr');
+    const data = result.data as {
+      reason: string;
+      exitCode: number;
+      stderr: string;
+      conversationId: string;
+    };
+    expect(data.reason).toBe('conversation_reset_failed');
+    expect(data.exitCode).toBe(9);
+    expect(data.stderr).toContain('reset failed');
+    expect(data.conversationId).toBe('conv-reset-fail');
+  });
 });
