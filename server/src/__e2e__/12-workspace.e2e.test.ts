@@ -13,6 +13,8 @@
  */
 
 import { Effect } from 'effect';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { ActionRegistry } from '@/machines/ActionRegistry.js';
@@ -77,6 +79,7 @@ const registerCliTestActions = (registry: ActionRegistry) =>
               exitCode: result.exitCode,
               stdout: result.stdout,
               stderr: result.stderr,
+              transcript: result.transcript,
             },
           };
         }),
@@ -636,5 +639,81 @@ describe('§16 — CLI Helper via Action', () => {
     };
     // ARTIFACTS_ROOT should match the instance's artifactsPath
     expect(data.stateData.stdout).toBe(data.artifactsPath);
+  });
+
+  it('capture enabled writes transcript and returns metadata', async () => {
+    const def = await api.createDef(makeCliDefinition('cli-exec-echo'));
+    const res = await api.postInstance({
+      definitionId: def.id,
+      input: {},
+      workspaceRoot: testWorkspaceRoot,
+      runtimeOptions: {
+        cliDirectoryPolicy: {
+          workspaceDirs: [testWorkspaceRoot],
+          artifactDirs: [path.join(testWorkspaceRoot, 'artifacts-base')],
+        },
+        cliOutputCapture: {
+          enabled: true,
+        },
+      },
+    });
+    expect(res.status).toBe(201);
+    const inst = (await res.json()) as { id: string };
+
+    const final = await api.pollStatus(inst.id, ['completed', 'error'], 10_000);
+    expect(final.status).toBe('completed');
+
+    const instanceRes = await api.getInstance(inst.id);
+    const data = (await instanceRes.json()) as {
+      artifactsPath: string;
+      stateData: {
+        transcript?: { path: string; resolvedPath: string; label: string };
+      };
+    };
+
+    expect(data.stateData.transcript?.path).toBe('run_cli/001-echo.txt');
+    expect(data.stateData.transcript?.label).toBe('echo');
+    expect(data.stateData.transcript?.resolvedPath).toBe(
+      path.join(data.artifactsPath, 'run_cli/001-echo.txt'),
+    );
+    expect(fs.existsSync(path.join(data.artifactsPath, 'run_cli/001-echo.txt'))).toBe(true);
+  });
+
+  it('child instance transcript path includes children/<childInstanceId> lineage', async () => {
+    const childDef = await api.createDef(makeCliDefinition('cli-exec-echo'));
+    const parentDef = await api.createDef(makeWsParentDefinition(childDef.id));
+
+    const res = await api.postInstance({
+      definitionId: parentDef.id,
+      input: {},
+      workspaceRoot: testWorkspaceRoot,
+      runtimeOptions: {
+        cliDirectoryPolicy: {
+          workspaceDirs: [testWorkspaceRoot],
+          artifactDirs: [path.join(testWorkspaceRoot, 'artifacts-base')],
+        },
+        cliOutputCapture: {
+          enabled: true,
+        },
+      },
+    });
+    expect(res.status).toBe(201);
+    const parentStart = (await res.json()) as { id: string };
+
+    const parent = await api.pollStatus(parentStart.id, ['completed', 'error'], 15_000);
+    expect(parent.status).toBe('completed');
+
+    const parentRes = await api.getInstance(parentStart.id);
+    const parentData = (await parentRes.json()) as { id: string; artifactsPath: string };
+
+    const childrenRes = await api.getInstances(`?parentInstanceId=${parentData.id}`);
+    const children = (await childrenRes.json()) as { id: string }[];
+    expect(children.length).toBeGreaterThanOrEqual(1);
+
+    const childTranscript = path.join(
+      parentData.artifactsPath,
+      `children/${children[0].id}/run_cli/001-echo.txt`,
+    );
+    expect(fs.existsSync(childTranscript)).toBe(true);
   });
 });

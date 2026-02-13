@@ -3335,6 +3335,241 @@ describe('CLI exit code branching', () => {
   });
 });
 
+describe('CLI transcript capture lineage', () => {
+  it('writes root, child, and nested-child transcripts in lineage paths', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-cli-lineage-'));
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      const captureAction =
+        (nextState: string): ActionFunction =>
+        (ctx) =>
+          Effect.gen(function* () {
+            const result = yield* ctx.cli.exec({ command: 'echo', args: [ctx.stateName] });
+            return {
+              nextState,
+              data: {
+                transcriptPath: result.transcript?.path,
+              },
+            } as TransitionResult;
+          });
+
+      const forwardChild: ActionFunction = (ctx) => {
+        const childResult = ctx.stateData as { status?: string };
+        return Effect.succeed({
+          nextState: childResult.status === 'completed' ? 'completed' : 'error',
+          data: ctx.stateData,
+        } as TransitionResult);
+      };
+
+      yield* registry.register('capture-parent', captureAction('spawnChild'), {
+        description: 'capture parent',
+      });
+      yield* registry.register('capture-child', captureAction('spawnGrand'), {
+        description: 'capture child',
+      });
+      yield* registry.register('capture-grand', captureAction('completed'), {
+        description: 'capture grandchild',
+      });
+      yield* registry.register('forward-child', forwardChild, { description: 'forward child' });
+
+      const grandchildDef = yield* store.saveDefinition({
+        name: 'Grandchild lineage',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          runGrand: { name: 'runGrand', type: 'action', actionId: 'capture-grand' },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'runGrand',
+        transitions: [{ from: 'runGrand', to: 'completed' }],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      });
+
+      const childDef = yield* store.saveDefinition({
+        name: 'Child lineage',
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          runChild: { name: 'runChild', type: 'action', actionId: 'capture-child' },
+          spawnGrand: {
+            name: 'spawnGrand',
+            type: 'child_machine',
+            actionId: 'forward-child',
+            childMachineDefId: grandchildDef.id,
+            childInputMapping: '$.machineInput',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'runChild',
+        transitions: [
+          { from: 'runChild', to: 'spawnGrand' },
+          { from: 'spawnGrand', to: 'completed' },
+          { from: 'spawnGrand', to: 'error' },
+        ],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      });
+
+      const parentDef: StateMachineDefinition = {
+        id: 'def-parent-cli-lineage',
+        name: 'Parent lineage',
+        version: 1,
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          runParent: { name: 'runParent', type: 'action', actionId: 'capture-parent' },
+          spawnChild: {
+            name: 'spawnChild',
+            type: 'child_machine',
+            actionId: 'forward-child',
+            childMachineDefId: childDef.id,
+            childInputMapping: '$.machineInput',
+          },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'runParent',
+        transitions: [
+          { from: 'runParent', to: 'spawnChild' },
+          { from: 'spawnChild', to: 'completed' },
+          { from: 'spawnChild', to: 'error' },
+        ],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      };
+
+      const result = yield* runner.run(
+        parentDef,
+        {},
+        {
+          workspaceRoot: tmpDir,
+          runtimeOptions: {
+            cliDirectoryPolicy: {
+              workspaceDirs: [tmpDir],
+              artifactDirs: [tmpDir],
+            },
+            cliOutputCapture: {
+              enabled: true,
+            },
+          },
+        },
+      );
+
+      expect(result.status).toBe('completed');
+
+      const parent = yield* store.getInstance(result.instanceId);
+      const children = yield* store.listInstances({ parentInstanceId: parent.id });
+      expect(children).toHaveLength(1);
+      const child = children[0];
+
+      const grandchildren = yield* store.listInstances({ parentInstanceId: child.id });
+      expect(grandchildren).toHaveLength(1);
+      const grandchild = grandchildren[0];
+
+      expect(fs.existsSync(path.join(parent.artifactsPath, 'runParent/001-echo.txt'))).toBe(true);
+      expect(
+        fs.existsSync(
+          path.join(parent.artifactsPath, `children/${child.id}/runChild/001-echo.txt`),
+        ),
+      ).toBe(true);
+      expect(
+        fs.existsSync(
+          path.join(
+            parent.artifactsPath,
+            `children/${child.id}/children/${grandchild.id}/runGrand/001-echo.txt`,
+          ),
+        ),
+      ).toBe(true);
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+
+  it('increments visit index for repeated visits to the same state', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-cli-visit-index-'));
+    const layer = makeTestLayer();
+
+    await Effect.gen(function* () {
+      const runner = yield* StateMachineRunner;
+      const store = yield* MachineStore;
+      const registry = yield* ActionRegistry;
+
+      const loopAction: ActionFunction = (ctx) =>
+        Effect.gen(function* () {
+          const current = (ctx.stateData as { count?: number } | null)?.count ?? 0;
+          yield* ctx.cli.exec({ command: 'echo', args: [`visit-${String(current + 1)}`] });
+          return {
+            nextState: current >= 1 ? 'completed' : 'repeat',
+            data: { count: current + 1 },
+          } as TransitionResult;
+        });
+
+      yield* registry.register('loop-cli', loopAction, { description: 'loop cli' });
+
+      const def: StateMachineDefinition = {
+        id: 'def-cli-visit-index',
+        name: 'Visit index machine',
+        version: 1,
+        inputSchema: {},
+        outputSchema: {},
+        states: {
+          repeat: { name: 'repeat', type: 'action', actionId: 'loop-cli' },
+          completed: { name: 'completed', type: 'terminal' },
+          cancelled: { name: 'cancelled', type: 'terminal' },
+          error: { name: 'error', type: 'terminal' },
+        },
+        initialState: 'repeat',
+        transitions: [
+          { from: 'repeat', to: 'repeat' },
+          { from: 'repeat', to: 'completed' },
+        ],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      };
+
+      const result = yield* runner.run(
+        def,
+        {},
+        {
+          workspaceRoot: tmpDir,
+          runtimeOptions: {
+            cliDirectoryPolicy: {
+              workspaceDirs: [tmpDir],
+              artifactDirs: [tmpDir],
+            },
+            cliOutputCapture: {
+              enabled: true,
+            },
+          },
+        },
+      );
+
+      expect(result.status).toBe('completed');
+
+      const instance = yield* store.getInstance(result.instanceId);
+      expect(fs.existsSync(path.join(instance.artifactsPath, 'repeat/001-echo.txt'))).toBe(true);
+      expect(fs.existsSync(path.join(instance.artifactsPath, 'repeat/002-echo.txt'))).toBe(true);
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+  });
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // §15.6 — Artifact Infrastructure Removal (Task 15)
 // ════════════════════════════════════════════════════════════════════════════

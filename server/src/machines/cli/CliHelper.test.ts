@@ -212,6 +212,93 @@ describe('CliHelper', () => {
     });
   });
 
+  describe('global transcript capture', () => {
+    it('writes transcript and returns metadata when capture is enabled', async () => {
+      const captureCli = makeCliHelper({
+        ...opts,
+        runtimeOptions: {
+          ...opts.runtimeOptions,
+          cliOutputCapture: { enabled: true },
+        },
+        stateName: 'runCli',
+        stateVisitIndex: 1,
+      });
+
+      const result = await run(captureCli.exec({ command: 'echo', args: ['captured-output'] }));
+
+      expect(result.transcript).toBeDefined();
+      expect(result.transcript?.workspace).toBe('artifacts');
+      expect(result.transcript?.path).toBe('runCli/001-echo.txt');
+      expect(result.transcript?.resolvedPath).toBe(path.join(artifactsDir, 'runCli/001-echo.txt'));
+      expect(result.transcript?.label).toBe('echo');
+      expect(result.transcript?.exitCode).toBe(result.exitCode);
+      expect(result.transcript?.durationMs).toBe(result.durationMs);
+
+      const transcript = result.transcript;
+      expect(transcript).toBeDefined();
+      if (!transcript) {
+        throw new Error('Expected transcript metadata when capture is enabled');
+      }
+      const transcriptText = fs.readFileSync(transcript.resolvedPath, 'utf-8');
+      expect(transcriptText).toContain('command: echo');
+      expect(transcriptText).toContain('args: ["captured-output"]');
+      expect(transcriptText).toContain(`cwd: ${tmpDir}`);
+      expect(transcriptText).toContain('stdout:\ncaptured-output\n');
+      expect(transcriptText).toContain('stderr:\n');
+    });
+
+    it('does not write transcript when capture is disabled', async () => {
+      const result = await run(cli.exec({ command: 'echo', args: ['no-capture'] }));
+
+      expect(result.transcript).toBeUndefined();
+      const maybeTranscript = path.join(artifactsDir, 'state', '001-echo.txt');
+      expect(fs.existsSync(maybeTranscript)).toBe(false);
+    });
+
+    it('uses lineage path for nested children', async () => {
+      const captureCli = makeCliHelper({
+        ...opts,
+        runtimeOptions: {
+          ...opts.runtimeOptions,
+          cliOutputCapture: { enabled: true },
+        },
+        stateName: 'runCli',
+        stateVisitIndex: 1,
+        lineageInstanceIds: ['child-1', 'grandchild-1'],
+      });
+
+      const result = await run(captureCli.exec({ command: 'echo', args: ['lineage'] }));
+
+      expect(result.transcript?.path).toBe(
+        'children/child-1/children/grandchild-1/runCli/001-echo.txt',
+      );
+      const transcript = result.transcript;
+      expect(transcript).toBeDefined();
+      if (!transcript) {
+        throw new Error('Expected transcript metadata for lineage assertion');
+      }
+      expect(fs.existsSync(transcript.resolvedPath)).toBe(true);
+    });
+
+    it('appends deterministic suffix when labels collide in one visit', async () => {
+      const captureCli = makeCliHelper({
+        ...opts,
+        runtimeOptions: {
+          ...opts.runtimeOptions,
+          cliOutputCapture: { enabled: true },
+        },
+        stateName: 'runCli',
+        stateVisitIndex: 1,
+      });
+
+      const first = await run(captureCli.exec({ command: 'echo', args: ['one'] }));
+      const second = await run(captureCli.exec({ command: 'echo', args: ['two'] }));
+
+      expect(first.transcript?.path).toBe('runCli/001-echo.txt');
+      expect(second.transcript?.path).toBe('runCli/001-echo-2.txt');
+    });
+  });
+
   describe('fiber interruption', () => {
     it('kills child process when fiber is interrupted', async () => {
       // Start a long-running process, then race it against a short timeout

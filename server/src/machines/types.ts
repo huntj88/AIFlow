@@ -180,7 +180,7 @@ export interface CliExecResult {
   readonly durationMs: number;
   readonly transcript?: {
     readonly workspace: 'workspace' | 'artifacts';
-    readonly relativePath: string;
+    readonly path: string;
     readonly resolvedPath: string;
     readonly label: string;
     readonly exitCode: number;

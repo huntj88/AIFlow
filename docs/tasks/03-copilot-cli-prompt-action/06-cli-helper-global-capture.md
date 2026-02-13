@@ -25,10 +25,10 @@ Centralize transcript capture in `CliHelper` for every `ctx.cli.exec(...)` call 
 
 ## Acceptance Checklist
 
-- [ ] Capture enabled => every CLI execution writes transcript file and returns metadata. _(Full workflow-wide validation is deferred until Task 17 e2e covers copilot action call paths.)_
-- [ ] Capture disabled => no transcript file writes. _(Full workflow-wide validation is deferred until Task 17 e2e covers copilot action call paths.)_
-- [ ] Metadata includes workspace, path, resolvedPath, label, exitCode, durationMs.
-- [ ] Label is helper-derived from command name.
+- [x] Capture enabled => every CLI execution writes transcript file and returns metadata. _(Full workflow-wide validation is deferred until Task 17 e2e covers copilot action call paths.)_
+- [x] Capture disabled => no transcript file writes. _(Full workflow-wide validation is deferred until Task 17 e2e covers copilot action call paths.)_
+- [x] Metadata includes workspace, path, resolvedPath, label, exitCode, durationMs.
+- [x] Label is helper-derived from command name.
 
 ---
 

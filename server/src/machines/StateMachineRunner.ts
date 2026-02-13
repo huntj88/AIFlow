@@ -113,6 +113,8 @@ export interface RunOptions {
   readonly workspaceRoot: string;
   /** Family root instance ID (set for child instances; root instances default to own ID). */
   readonly familyRootInstanceId?: string;
+  /** Child-instance lineage from root → current parent (root parent = empty). */
+  readonly lineageInstanceIds?: readonly string[];
   /** Runtime CLI directory/capture policy for action execution. */
   readonly runtimeOptions?: MachineRuntimeOptions;
 }
@@ -204,6 +206,7 @@ interface LoopState {
   readonly workspaceRoot: string;
   readonly familyRootInstanceId: string;
   readonly artifactsPath: string;
+  readonly lineageInstanceIds: readonly string[];
   readonly runtimeOptions: MachineRuntimeOptions;
   currentState: string;
   stateData: unknown;
@@ -407,10 +410,15 @@ export const StateMachineRunnerLive = Layer.effect(
         // b. Create scoped StateLogger, CLI helper, and workspace contexts
         const loggerFactory = createStateLoggerFactory();
         const logger = loggerFactory.create(ls.instanceId, ls.currentState);
+        const stateVisitIndex =
+          ls.history.filter((h) => h.fromState === ls.currentState).length + 1;
         const cli = makeCliHelper({
           workspaceRoot: ls.workspaceRoot,
           artifactsRoot: ls.artifactsPath,
           runtimeOptions: ls.runtimeOptions,
+          stateName: ls.currentState,
+          stateVisitIndex,
+          lineageInstanceIds: ls.lineageInstanceIds,
         });
         const workspace = makeWorkspaceContext(ls.workspaceRoot);
         const artifactsWorkspace = makeArtifactsWorkspaceContext(
@@ -792,6 +800,7 @@ export const StateMachineRunnerLive = Layer.effect(
                 depth: childRunDepth,
                 workspaceRoot: ls.workspaceRoot,
                 familyRootInstanceId: ls.familyRootInstanceId,
+                lineageInstanceIds: ls.lineageInstanceIds,
                 runtimeOptions: ls.runtimeOptions,
               },
             );
@@ -1130,6 +1139,7 @@ export const StateMachineRunnerLive = Layer.effect(
                       depth: (opts?.depth ?? 0) + 1,
                       workspaceRoot: ls.workspaceRoot,
                       familyRootInstanceId: ls.familyRootInstanceId,
+                      lineageInstanceIds: ls.lineageInstanceIds,
                       runtimeOptions: ls.runtimeOptions,
                     })
                     .pipe(Effect.either),
@@ -1178,6 +1188,7 @@ export const StateMachineRunnerLive = Layer.effect(
                     depth: (opts?.depth ?? 0) + 1,
                     workspaceRoot: ls.workspaceRoot,
                     familyRootInstanceId: ls.familyRootInstanceId,
+                    lineageInstanceIds: ls.lineageInstanceIds,
                     runtimeOptions: ls.runtimeOptions,
                   }),
                 );
@@ -1782,6 +1793,9 @@ export const StateMachineRunnerLive = Layer.effect(
           const instanceArtifactsPath = isRootInstance
             ? computeArtifactsPath(ARTIFACT_ROOT, instanceId)
             : provisionalArtifactsPath;
+          const lineageInstanceIds = isRootInstance
+            ? []
+            : [...(opts.lineageInstanceIds ?? []), instanceId];
 
           if (isRootInstance) {
             yield* store.updateInstance(instanceId, {
@@ -1818,6 +1832,7 @@ export const StateMachineRunnerLive = Layer.effect(
             workspaceRoot: opts?.workspaceRoot ?? '',
             familyRootInstanceId,
             artifactsPath: instanceArtifactsPath,
+            lineageInstanceIds,
             runtimeOptions,
             currentState: definition.initialState,
             stateData: input,
@@ -2120,6 +2135,26 @@ export const StateMachineRunnerLive = Layer.effect(
               }
             : undefined;
 
+          const lineageInstanceIds = yield* Effect.gen(function* () {
+            if (!instance.parentInstanceId) return [] as string[];
+
+            const lineage = [instance.id];
+            let cursorParentId: string | undefined = instance.parentInstanceId;
+
+            while (cursorParentId) {
+              const parent: MachineInstance | null = yield* store
+                .getInstance(cursorParentId)
+                .pipe(Effect.catchTag('NotFoundError', () => Effect.succeed(null)));
+              if (!parent) break;
+              if (parent.parentInstanceId) {
+                lineage.unshift(parent.id);
+              }
+              cursorParentId = parent.parentInstanceId;
+            }
+
+            return lineage;
+          });
+
           const ls: LoopState = {
             instanceId,
             definition,
@@ -2130,6 +2165,7 @@ export const StateMachineRunnerLive = Layer.effect(
             workspaceRoot: instance.workspaceRoot,
             familyRootInstanceId: instance.familyRootInstanceId,
             artifactsPath: instance.artifactsPath,
+            lineageInstanceIds,
             runtimeOptions: {
               cliDirectoryPolicy: {
                 workspaceDirs: [instance.workspaceRoot],

@@ -28,10 +28,10 @@ Implement one shared resolver that produces transcript artifact paths for root, 
 
 ## Acceptance Checklist
 
-- [ ] Path resolver supports root, child, and nested-child lineage.
-- [ ] Visit index increments per state visit (`001`, `002`, ...).
-- [ ] Label collision handling is deterministic.
-- [ ] Ad-hoc path construction in CLI capture call sites is removed.
+- [x] Path resolver supports root, child, and nested-child lineage.
+- [x] Visit index increments per state visit (`001`, `002`, ...).
+- [x] Label collision handling is deterministic.
+- [x] Ad-hoc path construction in CLI capture call sites is removed.
 
 ---
 

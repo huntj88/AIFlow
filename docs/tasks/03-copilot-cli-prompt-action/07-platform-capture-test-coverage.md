@@ -24,10 +24,10 @@ Add blocker-level tests proving runtime-toggle capture and lineage behavior work
 
 ## Acceptance Checklist
 
-- [ ] Capture toggle behavior is tested at unit and integration levels.
-- [ ] Parent-child lineage path correctness is validated.
-- [ ] Transcript metadata assertions match new `CliExecResult` contract.
-- [ ] Tests fail if capture is implemented outside `CliHelper`.
+- [x] Capture toggle behavior is tested at unit and integration levels.
+- [x] Parent-child lineage path correctness is validated.
+- [x] Transcript metadata assertions match new `CliExecResult` contract.
+- [x] Tests fail if capture is implemented outside `CliHelper`.
 
 ---
 
