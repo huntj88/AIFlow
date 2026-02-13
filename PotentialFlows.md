@@ -44,3 +44,8 @@ flow after planning to create questions to ask user for further plan refinement
 AGENTS markdown file could contain: "For tests that expect the server to be running, prompt the user to start if not already running."
 
 "Create a plan to refactor and update to match the requirements specified by 01 feature spec. This is going to be abig refactor. Break the tasks up into separate markdown files in `tasks/01-state-machine-working-dir`. Follow the same pattern as the other task markdown files. Ensure task don't have circular dependencies. Ensure every aspect of the feature spec and behavior spec is taken into account. ultrathink."
+
+// added feature docs to context
+"Create a new document that is a new source of truth. 00 came first, then 01 refactored and added new features.
+
+Don't bother with an implementation plan. Look through the code for any information needed."

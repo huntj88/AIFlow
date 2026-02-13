@@ -14,9 +14,10 @@ The action is designed to chain into later AI actions by returning validated fil
 - Prepend a system directory-guidance prompt before the user prompt.
 - Support optional file-path context forwarded to `copilot` CLI input arguments.
 - Ask a result-reporting system prompt that returns JSON (`data`, `filePaths`, diagnostics).
+- If the model returns invalid JSON, reprompt with a system prompt to wrap/reformat as strict JSON.
 - Reset conversation state to before the system result prompt.
 - Validate JSON shape and required fields before returning state data.
-- Route invalid JSON/shape failures to a dedicated machine error-handling action.
+- Route invalid JSON/shape failures (after reprompt) to a dedicated machine error-handling action.
 - Depend on a system-wide, toggleable CLI transcript capture feature for all `ctx.cli.exec` usage.
 
 ## Non-goals
@@ -61,6 +62,7 @@ The action executes `copilot` CLI with:
 5. Optional context file arguments derived from `contextFilePaths`.
 
 Runtime resolves directory-policy entries to absolute paths before passing them as `--allow-dir` values.
+These flags configure Copilot CLI with the expected state-machine workspaces; the state machine itself does not enforce filesystem access control.
 
 Example command shape (illustrative):
 
@@ -95,12 +97,12 @@ Default file placement guidance (recommendation, not restriction):
 - Put reports, logs, and other non-structural files in the folder associated with the current state machine instance.
 - For child state machines, use nested family-tree folders under children/<childInstanceId>/...
 
-You may still read/write files in other locations when needed.
+You may read/write files anywhere within either workspace root when needed.
 ```
 
 ### Default artifacts placement recommendation
 
-This recommendation is intentionally loose (not enforced), and actions may read/write other locations.
+This recommendation is intentionally loose (not enforced by state-machine access controls), and actions may read/write anywhere within the workspace or artifacts workspace roots.
 `ctx.artifactsWorkspace.root` is already family-root scoped (`<ARTIFACT_ROOT>/<rootInstanceId>/`).
 
 - Family root (plans/high-level docs):
@@ -137,6 +139,48 @@ The following refactors are prerequisites and apply platform-wide (not just `cop
    - Add a shared helper that prepends the directory-guidance system prompt before user prompts for `copilot-cli-prompt`.
    - Inject runtime values (workspace root, artifacts root, lineage path hints) into the prompt template.
 
+7. **Developer curl workflow script (non-test)**
+   - Add a developer script that uses `curl` to create/update a full machine definition using `copilot-cli-prompt`.
+   - The script must start an instance whose prompt requests creating `helloWorld.md`.
+   - The script must poll run status until terminal completion and print progress plus current completion status throughout.
+   - This script is a developer environment/tooling utility (not an e2e test) and is expected to evolve.
+
+## Migration details (breaking migration; no legacy compatibility)
+
+This migration intentionally makes breaking changes to move directly to the target model in this spec.
+
+1. **Replace start-instance contract**
+   - Replace the request contract with required `runtimeOptions` (not optional):
+     - `cliDirectoryPolicy: { workspaceDirs: string[]; artifactDirs: string[] }`
+     - `cliOutputCapture: { enabled: boolean; artifactDir?: string }`
+   - Remove legacy start behavior that runs without runtime CLI policy input.
+
+2. **Update runner/action context to require runtime policy**
+   - Require resolved directory-policy and capture-policy values in runner context for every action execution.
+   - Remove fallback/default branches that assume missing runtime policy.
+
+3. **Centralize capture in `CliHelper` and remove per-action alternatives**
+   - `ctx.cli.exec(...)` becomes the single path for CLI transcript capture and capture metadata return.
+   - Remove/forbid any action-level capture implementations.
+
+4. **Adopt one lineage path resolver**
+   - Use a single instance-lineage resolver for transcript paths across root/child/nested-child execution.
+   - Remove duplicate or ad-hoc path construction logic.
+
+5. **Register and use `copilot-cli-prompt` as the new AI action path**
+   - Implement and register `copilot-cli-prompt` with strict JSON flow, one reprompt-on-invalid, normalization, and explicit transitions.
+   - Treat this action contract as the canonical prompt-action interface for machine workflows in this rollout.
+
+6. **Ship developer curl script as required operational tooling**
+   - Provide a developer script that upserts the machine definition, starts a run with a `helloWorld.md` prompt, polls to terminal state, and prints progress/completion status throughout.
+   - This script is not an e2e test; it is required developer tooling and is expected to evolve.
+
+7. **Cutover sequence**
+   - Land schema/API breaking changes first.
+   - Land runner + `CliHelper` refactor second.
+   - Land `copilot-cli-prompt` action and registry wiring third.
+   - Land developer curl tooling last, targeting only the new contract.
+
 ## System-wide toggleable CLI output capture
 
 When runtime capture is enabled, every CLI command in any action writes a `.txt` transcript artifact that includes:
@@ -147,7 +191,7 @@ When runtime capture is enabled, every CLI command in any action writes a `.txt`
 - stdout
 - stderr
 
-Capture includes all CLI calls in this action flow (initial prompt execution, JSON-result prompt, and reset command) because it applies to all `ctx.cli.exec` usage.
+Capture includes all CLI calls in this action flow (initial prompt execution, JSON-result prompt, optional JSON-repair reprompt, and reset command) because it applies to all `ctx.cli.exec` usage.
 
 ### Artifact path convention
 
@@ -162,18 +206,21 @@ Each transcript is written under an artifacts folder scoped to the machine insta
 
 This keeps command outputs associated with the spawning machine instance while preserving parent/child hierarchy.
 
-## Two-step response capture
+## Response capture with JSON recovery
 
 After the main prompt execution:
 
 1. Send a **system result prompt** in the same conversation asking for strict JSON only.
 2. Parse and validate the JSON.
-3. Reset/restore conversation state to the snapshot from immediately before the system result prompt.
+3. If JSON is invalid, send one **system reprompt** asking the model to wrap/reformat its previous response as strict JSON only.
+4. Parse and validate the reprompt output.
+5. Reset/restore conversation state to the snapshot from immediately before the system result prompt.
 
 ### Required system result prompt behavior
 
 - Must request machine-readable JSON only (no markdown).
 - Must request fields needed for chaining (data + file paths + status + diagnostics).
+- On invalid JSON from the first result prompt, must issue one system reprompt requesting strict JSON wrapping/reformatting.
 - Must be ephemeral from conversation-history perspective (state reset after capture).
 
 ## Required JSON result schema
@@ -233,7 +280,7 @@ Rules:
 - `workspace` selects resolver:
   - `workspace` -> `ctx.workspace.resolve(path)`
   - `artifacts` -> `ctx.artifactsWorkspace.resolve(path)`
-- `path` must be relative (no empty strings).
+- `path` must be relative (no empty strings) and resolve inside the selected workspace root.
 - Reject malformed entries and route to `invalidResultState`.
 
 This ensures downstream AI actions can consume a consistent format without guessing path roots.
@@ -241,6 +288,8 @@ This ensures downstream AI actions can consume a consistent format without guess
 ## Transition behavior
 
 ### Success
+
+Any schema-valid result (including `status = "error"`) transitions to `successState`; downstream states can branch on `copilotResult.status`.
 
 Return:
 
@@ -253,7 +302,7 @@ Return:
     "commandOutputFiles": [
       {
         "workspace": "artifacts",
-        "path": "cli-command-output/<rootId>/runCopilotPrompt/001-main-prompt.txt",
+        "path": "cli-command-output/runCopilotPrompt/001-main-prompt.txt",
         "resolvedPath": "/abs/path/to/artifacts/.../001-main-prompt.txt"
       }
     ]
@@ -263,7 +312,8 @@ Return:
 
 ### Invalid JSON or schema mismatch
 
-Return `nextState = invalidResultState` with error details in `data`:
+If the first JSON response is invalid, reprompt once with the JSON-wrapping system prompt.
+If the reprompt result is still invalid, return `nextState = invalidResultState` with error details in `data`:
 
 ```json
 {
@@ -408,6 +458,15 @@ actionRegistry.register('handle-copilot-exec-error', handleCopilotExecErrorActio
   - `cli-command-output/runCopilotPrompt/001-main-prompt.txt`
 - Child machine command:
   - `cli-command-output/children/<childInstanceId>/runCopilotPrompt/001-main-prompt.txt`
+
+### 7) Developer curl workflow script requirement
+
+- Provide a script (for developers) that uses `curl` to:
+  1. Register/update a full state machine definition that uses `copilot-cli-prompt`.
+  2. Start a machine instance with prompt text requesting creation of `helloWorld.md`.
+  3. Poll instance status until terminal state.
+  4. Print live progress details and final completion status as it runs.
+- This is explicitly not an e2e test; it is a developer setup/runtime tool intended to evolve.
 
 ## Implementation notes (for follow-up)
 
