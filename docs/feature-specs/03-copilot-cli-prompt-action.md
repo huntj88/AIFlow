@@ -54,6 +54,41 @@ This spec adopts the following implementation decisions for this rollout:
 - Client start-instance requests must send the new required `runtimeOptions` contract.
 - No client compatibility mode in this rollout.
 
+5. **Artifact directory policy: base dirs in request**
+
+- `runtimeOptions.cliDirectoryPolicy.artifactDirs` are base artifact directories.
+- Server appends family-root lineage at runtime; clients do not send `<rootInstanceId>`-scoped artifact directories.
+
+6. **JSON recovery retries: bounded**
+
+- Use in-action retries for invalid JSON with `maxFormatRetries = 2` (3 total attempts including initial result prompt).
+
+7. **Schema-valid status routing**
+
+- Any schema-valid result (including `status = "error"`) transitions to `successState`.
+
+8. **CLI transcript labels: helper-derived**
+
+- Transcript labels are derived by the CLI helper from command name (actions do not provide per-call labels).
+
+9. **Conversation reset behavior: strict**
+
+- Conversation reset to pre-result-prompt snapshot is required.
+- If reset fails, the action transitions to `execErrorState`.
+
+10. **`filePaths` handling policy: warn + pass-through**
+
+- Do not fail the action on malformed/unsafe `filePaths` entries.
+- Preserve raw entries and emit warnings in action output.
+
+11. **Rollout sequencing**
+
+- Land platform refactors first (schema/API + runner/context + `CliHelper` capture), then register/use `copilot-cli-prompt`.
+
+12. **Developer workflow script location**
+
+- Required dev curl workflow script lives under `scripts/dev/`.
+
 ## Action Input Contract (`ctx.stateData`)
 
 ```json
@@ -197,6 +232,8 @@ This migration intentionally makes breaking changes to move directly to the targ
      - `cliDirectoryPolicy: { workspaceDirs: string[]; artifactDirs: string[] }`
      - `cliOutputCapture: { enabled: boolean }`
 
+- `artifactDirs` are base artifact roots in request payloads; runtime appends family-root lineage.
+
 - Remove legacy start behavior that runs without runtime CLI policy input.
 - Do not provide compatibility shims or fallback request shapes.
 
@@ -211,6 +248,7 @@ This migration intentionally makes breaking changes to move directly to the targ
 
 - `ctx.cli.exec(...)` becomes the single path for CLI transcript capture and capture metadata return.
 - Return rich capture metadata including workspace, relative path, resolved path, label, exitCode, and durationMs.
+- Derive label from command name within `CliHelper` (no action-level label parameter in this rollout).
 - Remove/forbid any action-level capture implementations.
 
 4. **Adopt one lineage path resolver**
@@ -249,9 +287,9 @@ When capture is enabled, `ctx.cli.exec(...)` also returns rich transcript metada
 ```json
 {
   "workspace": "artifacts",
-  "path": "runCopilotPrompt/001-main-prompt.txt",
-  "resolvedPath": "/abs/path/to/artifacts/.../runCopilotPrompt/001-main-prompt.txt",
-  "label": "main-prompt",
+  "path": "runCopilotPrompt/001-copilot.txt",
+  "resolvedPath": "/abs/path/to/artifacts/.../runCopilotPrompt/001-copilot.txt",
+  "label": "copilot",
   "exitCode": 0,
   "durationMs": 1432
 }
@@ -268,6 +306,8 @@ Each transcript is written under an artifacts folder scoped to the machine insta
 - Nested children:
   - Continue nesting with `/children/<instanceId>/...` for each level.
 - `<visitIndex>` is the 1-based count of how many times that state has been visited for the executing instance (for example: `001`, then `002`).
+- `<label>` is helper-derived from command name.
+- If multiple commands in one state visit share the same derived label, helper appends a deterministic numeric suffix to avoid filename collisions.
 
 This keeps command outputs associated with the spawning machine instance while preserving parent/child hierarchy.
 
@@ -280,6 +320,7 @@ After the main prompt execution:
 3. If JSON is invalid, send a **system reprompt** asking the model to wrap/reformat its previous response as strict JSON only.
 4. Repeat parse/validate for each retry until success or `maxFormatRetries` is reached.
 5. Reset/restore conversation state to the snapshot from immediately before the system result prompt.
+6. If reset fails, transition to `execErrorState` with reset diagnostics.
 
 Recommended default: `maxFormatRetries = 2` (up to 3 total format attempts including the first result prompt).
 
@@ -288,7 +329,7 @@ Recommended default: `maxFormatRetries = 2` (up to 3 total format attempts inclu
 - Must request machine-readable JSON only (no markdown).
 - Must request fields needed for chaining (data + file paths + status + diagnostics).
 - On invalid JSON, must issue system reprompts from within the same action until success or `maxFormatRetries` is exhausted.
-- Must be ephemeral from conversation-history perspective (state reset after capture).
+- Must be ephemeral from conversation-history perspective (state reset after capture), and reset failure is treated as action failure.
 - Must run in the active conversation (newly created or resumed via `conversationId`).
 
 ## Required JSON result schema
@@ -331,9 +372,9 @@ The post-processed JSON must validate against this shape before transition:
 }
 ```
 
-## File path normalization for chaining
+## File path normalization and warnings
 
-Before returning `data`, the action should normalize every `filePaths[]` item into a chaining-safe record:
+Before returning `data`, the action should attempt to normalize each `filePaths[]` item into:
 
 ```json
 {
@@ -348,10 +389,12 @@ Rules:
 - `workspace` selects resolver:
   - `workspace` -> `ctx.workspace.resolve(path)`
   - `artifacts` -> `ctx.artifactsWorkspace.resolve(path)`
-- `path` must be relative (no empty strings) and resolve inside the selected workspace root.
-- Reject malformed entries and route to `execErrorState` with reason `invalid_result_json`.
+- `path` should be relative and ideally resolve inside the selected workspace root.
+- Malformed/unsafe entries do **not** fail the action in this rollout; they are preserved and surfaced as warnings.
+- `normalizedFilePaths` may contain only successfully normalized entries.
+- Add `filePathWarnings` with per-item diagnostics for malformed/unsafe entries.
 
-This ensures downstream AI actions can consume a consistent format without guessing path roots.
+This preserves model output while still providing best-effort normalized references for downstream chaining.
 
 ## Transition behavior
 
@@ -371,11 +414,19 @@ Return:
     "commandOutputFiles": [
       {
         "workspace": "artifacts",
-        "path": "runCopilotPrompt/001-main-prompt.txt",
-        "resolvedPath": "/abs/path/to/artifacts/.../001-main-prompt.txt",
-        "label": "main-prompt",
+        "path": "runCopilotPrompt/001-copilot.txt",
+        "resolvedPath": "/abs/path/to/artifacts/.../001-copilot.txt",
+        "label": "copilot",
         "exitCode": 0,
         "durationMs": 1432
+      }
+    ],
+    "filePathWarnings": [
+      {
+        "index": 1,
+        "workspace": "workspace",
+        "path": "../outside-root.txt",
+        "message": "path resolves outside workspace root"
       }
     ]
   }
@@ -568,7 +619,7 @@ yield * registry.register('handle-copilot-exec-error', handleCopilotExecErrorAct
   "runtimeOptions": {
     "cliDirectoryPolicy": {
       "workspaceDirs": ["/home/user/my-repo"],
-      "artifactDirs": ["/home/user/.aiflow/artifacts/<rootInstanceId>"]
+      "artifactDirs": ["/home/user/.aiflow/artifacts"]
     },
     "cliOutputCapture": {
       "enabled": true
@@ -586,9 +637,9 @@ yield * registry.register('handle-copilot-exec-error', handleCopilotExecErrorAct
 ### 6) Example transcript artifact paths
 
 - Root machine command:
-  - `runCopilotPrompt/001-main-prompt.txt`
+  - `runCopilotPrompt/001-copilot.txt`
 - Child machine command:
-  - `children/<childInstanceId>/runCopilotPrompt/001-main-prompt.txt`
+  - `children/<childInstanceId>/runCopilotPrompt/001-copilot.txt`
 
 ### 7) Developer curl workflow script requirement
 
@@ -597,6 +648,7 @@ yield * registry.register('handle-copilot-exec-error', handleCopilotExecErrorAct
   2. Start a machine instance with prompt text requesting creation of `helloWorld.md`.
   3. Poll instance status until terminal state.
   4. Print live progress details and final completion status as it runs.
+- Place this script under `scripts/dev/`.
 - This is explicitly not an e2e test; it is a developer setup/runtime tool intended to evolve.
 
 ## Implementation notes (for follow-up)

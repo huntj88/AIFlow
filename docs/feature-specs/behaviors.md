@@ -81,7 +81,7 @@
 - [ ] `GET /api/machines/actions/:id` returns metadata for a specific registered action
 - [ ] `GET /api/machines/actions/:id` for a non-existent action ID returns 404
 - [ ] Built-in actions are present on server startup: `http-request`, `delay`, `transform-data`, `log-message`, `conditional-branch`
-- [ ] Copilot rollout actions are registered and discoverable: `copilot-cli-prompt`, `handle-invalid-copilot-result`, `handle-copilot-exec-error`
+- [ ] Copilot rollout actions are registered and discoverable: `copilot-cli-prompt`, `handle-copilot-exec-error`
 
 ---
 
@@ -759,9 +759,11 @@
 - [ ] The action performs strict JSON result capture and validates required schema fields
 - [ ] On schema-valid result (including `status: 'error'`), machine transitions to `successState` and emits `conversationId` + `copilotResult` + `normalizedFilePaths`
 - [ ] Integration run verifies normalized file-path records include `workspace`, `path`, and `resolvedPath`
-- [ ] If first result JSON is invalid, action issues exactly one JSON-repair reprompt
-- [ ] If reprompt output is still invalid, machine transitions to `invalidResultState` with validation details, raw output, and active `conversationId` when available
+- [ ] If result JSON is invalid, action issues in-action JSON-repair reprompts up to `maxFormatRetries = 2` (3 total attempts including initial result prompt)
+- [ ] If final retry output is still invalid, machine transitions to `execErrorState` with validation details, raw output, and active `conversationId` when available
+- [ ] Invalid/unsafe model-returned `filePaths[]` entries do not fail the action by themselves; action preserves raw entries and emits `filePathWarnings`
 - [ ] If Copilot CLI execution fails, machine transitions to `execErrorState` with `stderr`/`exitCode` and active `conversationId` when available
+- [ ] If conversation reset to the pre-result-prompt snapshot fails, machine transitions to `execErrorState`
 - [ ] With output capture enabled, returned data includes `commandOutputFiles` references for all CLI calls in the flow
 - [ ] Chained follow-up states can pass forward returned `conversationId` to resume the same conversation context
 
@@ -825,11 +827,9 @@
 
 ### 22.7 `copilot-cli-prompt` Edge Cases
 
-- [ ] Missing/empty `prompt` in action input routes to the configured invalid-result handling path
-- [ ] Non-relative or root-escaping `contextFilePaths[].path` fails validation and routes to `invalidResultState`
-- [ ] Unknown `contextFilePaths[].workspace` value fails validation and routes to `invalidResultState`
-- [ ] JSON result missing any required key (`schemaVersion`, `status`, `summary`, `data`, `filePaths`, `diagnostics`) routes to `invalidResultState`
-- [ ] JSON result with `additionalProperties` at top-level fails validation and routes to `invalidResultState`
-- [ ] Invalid `filePaths[]` entries in model output fail normalization and route to `invalidResultState`
+- [ ] Missing/empty `prompt` in action input transitions to `execErrorState` with structured diagnostics
+- [ ] JSON result missing any required key (`schemaVersion`, `status`, `summary`, `data`, `filePaths`, `diagnostics`) transitions to `execErrorState` after bounded in-action retry attempts
+- [ ] JSON result with `additionalProperties` at top-level fails validation and transitions to `execErrorState` after bounded in-action retry attempts
+- [ ] Invalid/unsafe model-returned `filePaths[]` entries are preserved as raw output and surfaced via `filePathWarnings` (not a failure by themselves)
 - [ ] If `conversationId` is provided, the initial directory-guidance prelude is not resent on the resumed prompt turn
 - [ ] Conversation state is reset after result-capture prompts so follow-up user prompts do not include the temporary JSON-formatting system prompts
