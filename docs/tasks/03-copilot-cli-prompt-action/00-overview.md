@@ -26,6 +26,37 @@ This plan delivers the `copilot-cli-prompt` rollout as a hard-cut migration:
 | 3     | 10–15 | Copilot action implementation and registry wiring                             |
 | 4     | 16–20 | Verification, e2e workflows, developer script, rollout gates                  |
 
+## Simplified execution slices (draft)
+
+To reduce handoff overhead, implement as larger slices while preserving the same task IDs and acceptance criteria:
+
+1. **Slice A — Runtime hard-cut platform contract**
+   - Bundle Tasks **01–04** as one PR train.
+   - Outcome: `runtimeOptions` required end-to-end (types, schema, API validation, runner context pass-through).
+
+2. **Slice B — CLI capture foundation**
+   - Bundle Tasks **05–07** as one PR train.
+   - Outcome: lineage-aware transcript capture centralized in `CliHelper` with capture metadata + blocker tests.
+
+3. **Slice C — Entry-point call-site cutovers**
+   - Bundle Tasks **08–09**.
+   - Outcome: client and test harness fully on required `runtimeOptions` contract.
+
+4. **Slice D — Copilot action vertical path**
+   - Bundle Tasks **10–15**.
+   - Outcome: one end-to-end action implementation path (prelude/resume, exec, JSON recovery, normalization, registry wiring).
+
+5. **Slice E — Verification + tooling**
+   - Bundle Tasks **16–20**.
+   - Outcome: coverage gates, e2e confirmation, and required `scripts/dev/` curl workflow.
+
+### Simplification guardrails
+
+- Do not alter rollout decisions or behavior-spec expectations.
+- Keep `ctx.cli.exec(...)` as the only capture boundary (no action-level capture forks).
+- Prefer one result-processing pipeline in `copilot-cli-prompt` (parse/repair/validate/normalize/shape), even if internally split into small functions.
+- Preserve strict sequencing guardrail: complete platform dependencies before feature behavior rollout.
+
 ---
 
 ## Dependency Graph (Acyclic)

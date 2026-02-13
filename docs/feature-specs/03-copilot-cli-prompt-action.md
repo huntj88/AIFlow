@@ -89,6 +89,40 @@ This spec adopts the following implementation decisions for this rollout:
 
 - Required dev curl workflow script lives under `scripts/dev/`.
 
+## Implementation simplifications (draft, no behavior/contract changes)
+
+The following simplifications are recommended before implementation. They reduce moving parts while preserving all rollout decisions and behavior-spec obligations.
+
+1. **Single platform cutover slice (`01–04`)**
+
+- Implement runtime policy types, schema, API validation, and runner pass-through in one change train.
+- Avoid intermediate states where one layer expects `runtimeOptions` while another still treats it as optional.
+
+2. **Single CLI capture module boundary (`05–06`)**
+
+- Keep lineage path resolution, transcript writing, and returned capture metadata behind `ctx.cli.exec(...)` in `CliHelper`.
+- Avoid additional action-layer wrappers for capture behavior.
+
+3. **Inline prelude formatter for first rollout (`10`)**
+
+- Implement directory-guidance prelude formatting as a private function in the `copilot-cli-prompt` action module first.
+- Extract to a shared utility only after a second caller exists.
+
+4. **One result pipeline helper (`11–14`)**
+
+- Use one internal helper for: prompt-for-result JSON → retry-on-invalid (`maxFormatRetries = 2`) → schema validation → file-path normalization/warnings.
+- Return a discriminated outcome consumed directly by transition shaping (`successState` vs `execErrorState`).
+
+5. **Stable output shape defaults**
+
+- Always include `commandOutputFiles` and `filePathWarnings` as arrays (empty when none) across both success and exec-error branches.
+- This removes optional-field branching in downstream states and tests.
+
+6. **Thin developer script (`19`)**
+
+- Keep the `scripts/dev/` curl workflow script declarative: static definition payload + start + poll loop.
+- Reuse a single polling/status-printer path for both success and failure terminal outcomes.
+
 ## Action Input Contract (`ctx.stateData`)
 
 ```json
