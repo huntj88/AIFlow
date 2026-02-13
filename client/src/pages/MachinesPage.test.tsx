@@ -87,6 +87,7 @@ vi.mock('@/hooks/useMachineInstances', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockStartInstance.mockResolvedValue(MOCK_INSTANCE);
 });
 
 describe('MachinesPage', () => {
@@ -140,6 +141,53 @@ describe('MachinesPage', () => {
   it('renders Create New button for definitions', () => {
     renderWithProviders(<MachinesPage />);
     expect(screen.getByTestId('create-definition-button')).toBeInTheDocument();
+  });
+
+  it('starts instance with derived runtime options from Quick Start', async () => {
+    renderWithProviders(<MachinesPage />);
+
+    fireEvent.change(screen.getByTestId('definition-select'), { target: { value: 'def-1' } });
+    fireEvent.change(screen.getByTestId('workspace-root-input'), { target: { value: '/tmp/ws' } });
+    fireEvent.click(screen.getByTestId('launch-button'));
+
+    await waitFor(() => {
+      expect(mockStartInstance).toHaveBeenCalledWith(
+        'def-1',
+        {},
+        '/tmp/ws',
+        expect.objectContaining({
+          cliDirectoryPolicy: {
+            workspaceDirs: ['/tmp/ws'],
+            artifactDirs: ['/tmp/ws/artifacts'],
+          },
+          cliOutputCapture: {
+            enabled: false,
+          },
+        }),
+      );
+    });
+  });
+
+  it('passes capture toggle to runtime options', async () => {
+    renderWithProviders(<MachinesPage />);
+
+    fireEvent.change(screen.getByTestId('definition-select'), { target: { value: 'def-1' } });
+    fireEvent.change(screen.getByTestId('workspace-root-input'), { target: { value: '/tmp/ws' } });
+    fireEvent.click(screen.getByTestId('capture-enabled-input'));
+    fireEvent.click(screen.getByTestId('launch-button'));
+
+    await waitFor(() => {
+      expect(mockStartInstance).toHaveBeenCalledWith(
+        'def-1',
+        {},
+        '/tmp/ws',
+        expect.objectContaining({
+          cliOutputCapture: {
+            enabled: true,
+          },
+        }),
+      );
+    });
   });
 
   it('renders filter tabs', () => {

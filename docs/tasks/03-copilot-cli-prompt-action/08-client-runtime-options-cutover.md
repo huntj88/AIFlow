@@ -23,10 +23,10 @@ Update client-side instance start flows to send required `runtimeOptions` with n
 
 ## Acceptance Checklist
 
-- [ ] Client start requests always include `runtimeOptions`.
-- [ ] No client code path emits legacy payload shape.
-- [ ] Runtime option input/derivation behavior is validated by tests.
-- [ ] Errors from runtime option validation surface in UI consistently.
+- [x] Client start requests always include `runtimeOptions`.
+- [x] No client code path emits legacy payload shape.
+- [x] Runtime option input/derivation behavior is validated by tests.
+- [x] Errors from runtime option validation surface in UI consistently.
 
 ---
 

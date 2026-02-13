@@ -26,6 +26,16 @@ import {
   waitForStatusBadge,
 } from '../helpers/machine-helpers';
 
+const E2E_RUNTIME_OPTIONS = {
+  cliDirectoryPolicy: {
+    workspaceDirs: [E2E_TEST_WORKSPACE_ROOT],
+    artifactDirs: [`${E2E_TEST_WORKSPACE_ROOT}/artifacts`],
+  },
+  cliOutputCapture: {
+    enabled: false,
+  },
+};
+
 test.describe('Negative & Edge Cases', () => {
   test('view non-existent instance shows not-found', async ({ page }) => {
     // Navigate to a fake instance ID
@@ -58,7 +68,12 @@ test.describe('Negative & Edge Cases', () => {
 
     // Send a request with malformed body
     const res = await request.post('http://localhost:3001/api/machines/instances', {
-      data: { definitionId: def.id, input: 'not-an-object', workspaceRoot: E2E_TEST_WORKSPACE_ROOT },
+      data: {
+        definitionId: def.id,
+        input: 'not-an-object',
+        workspaceRoot: E2E_TEST_WORKSPACE_ROOT,
+        runtimeOptions: E2E_RUNTIME_OPTIONS,
+      },
     });
 
     // The server should still accept this (input schema is { type: 'object' })
@@ -73,6 +88,7 @@ test.describe('Negative & Edge Cases', () => {
         definitionId: 'non-existent-def-id',
         input: {},
         workspaceRoot: E2E_TEST_WORKSPACE_ROOT,
+        runtimeOptions: E2E_RUNTIME_OPTIONS,
       },
     });
     expect(res.status()).toBe(404);

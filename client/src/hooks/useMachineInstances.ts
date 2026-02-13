@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 
-import type { InstanceFilter, MachineEvent, MachineInstance } from '../types/machines';
+import type {
+  InstanceFilter,
+  MachineEvent,
+  MachineInstance,
+  MachineRuntimeOptions,
+} from '../types/machines';
 import { apiClient } from '../utils/apiClient';
 import { runWithLogging } from '../utils/logger';
 import { machineSocket } from '../utils/machineSocket';
@@ -21,6 +26,7 @@ interface MachineInstancesStore {
     definitionId: string,
     input: unknown,
     workspaceRoot: string,
+    runtimeOptions: MachineRuntimeOptions,
   ): Promise<MachineInstance>;
   cancelInstance(id: string): Promise<void>;
   resumeInstance(id: string): Promise<void>;
@@ -77,11 +83,11 @@ export const useMachineInstances = create<MachineInstancesStore>()((set, get) =>
     }
   },
 
-  async startInstance(definitionId, input, workspaceRoot) {
+  async startInstance(definitionId, input, workspaceRoot, runtimeOptions) {
     set({ isLoading: true, error: null });
     try {
       const instance = await runWithLogging(
-        apiClient.startInstance(definitionId, input, workspaceRoot),
+        apiClient.startInstance(definitionId, input, workspaceRoot, runtimeOptions),
       );
       // Optimistically add the returned instance to the list
       set((state) => ({

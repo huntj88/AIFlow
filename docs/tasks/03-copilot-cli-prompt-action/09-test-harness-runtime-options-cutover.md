@@ -23,9 +23,9 @@ Update shared server and client test helpers so every instance-start call uses t
 
 ## Acceptance Checklist
 
-- [ ] Shared helpers create start payloads with required runtime options.
-- [ ] No e2e suite depends on legacy start payload behavior. _(Final validation is deferred until Tasks 17 and 18 add remaining e2e suites.)_
-- [ ] Runtime-option validation tests remain explicit (not hidden by helper defaults).
+- [x] Shared helpers create start payloads with required runtime options.
+- [x] No e2e suite depends on legacy start payload behavior. _(Final validation is deferred until Tasks 17 and 18 add remaining e2e suites.)_
+- [x] Runtime-option validation tests remain explicit (not hidden by helper defaults).
 
 ---
 

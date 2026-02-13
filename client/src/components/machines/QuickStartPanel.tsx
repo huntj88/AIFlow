@@ -1,12 +1,17 @@
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { StateMachineDefinition } from '@/types/machines';
+import type { MachineRuntimeOptions, StateMachineDefinition } from '@/types/machines';
 
 interface QuickStartPanelProps {
   readonly definitions: StateMachineDefinition[];
   readonly isLoading: boolean;
-  readonly onLaunch: (definitionId: string, input: unknown, workspaceRoot: string) => void;
+  readonly onLaunch: (
+    definitionId: string,
+    input: unknown,
+    workspaceRoot: string,
+    runtimeOptions: MachineRuntimeOptions,
+  ) => void;
 }
 
 export function QuickStartPanel({ definitions, isLoading, onLaunch }: QuickStartPanelProps) {
@@ -16,6 +21,7 @@ export function QuickStartPanel({ definitions, isLoading, onLaunch }: QuickStart
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [workspaceRoot, setWorkspaceRoot] = useState('');
   const [workspaceRootError, setWorkspaceRootError] = useState<string | null>(null);
+  const [captureEnabled, setCaptureEnabled] = useState(false);
 
   const validateJson = useCallback(
     (value: string) => {
@@ -42,7 +48,17 @@ export function QuickStartPanel({ definitions, isLoading, onLaunch }: QuickStart
     setWorkspaceRootError(null);
 
     const parsed = JSON.parse(inputJson) as unknown;
-    onLaunch(selectedDefinitionId, parsed, workspaceRoot);
+    const runtimeOptions: MachineRuntimeOptions = {
+      cliDirectoryPolicy: {
+        workspaceDirs: [workspaceRoot],
+        artifactDirs: [`${workspaceRoot}/artifacts`],
+      },
+      cliOutputCapture: {
+        enabled: captureEnabled,
+      },
+    };
+
+    onLaunch(selectedDefinitionId, parsed, workspaceRoot, runtimeOptions);
   };
 
   return (
@@ -92,6 +108,33 @@ export function QuickStartPanel({ definitions, isLoading, onLaunch }: QuickStart
             {jsonError}
           </p>
         )}
+      </div>
+
+      <div className="mb-3">
+        <label className="mb-1 block text-xs text-[var(--color-text-muted)]">
+          {t('machines.quickstart.artifact_dirs_label')}
+        </label>
+        <input
+          type="text"
+          value={workspaceRoot ? `${workspaceRoot}/artifacts` : ''}
+          readOnly
+          className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-muted)]"
+          data-testid="artifact-dirs-input"
+        />
+      </div>
+
+      <div className="mb-4">
+        <label className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+          <input
+            type="checkbox"
+            checked={captureEnabled}
+            onChange={(e) => {
+              setCaptureEnabled(e.target.checked);
+            }}
+            data-testid="capture-enabled-input"
+          />
+          {t('machines.quickstart.capture_enabled_label')}
+        </label>
       </div>
 
       <div className="mb-3">

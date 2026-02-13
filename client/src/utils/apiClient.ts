@@ -6,6 +6,7 @@ import type {
   InstanceFilter,
   LogEntry,
   MachineInstance,
+  MachineRuntimeOptions,
   StateMachineDefinition,
   TransitionRecord,
 } from '../types/machines';
@@ -131,11 +132,18 @@ export const apiClient = {
   // ── Instances ────────────────────────────────────────────────────────────
 
   /** Start a new machine instance (returns immediately — instance runs in background). */
-  startInstance: (definitionId: string, input: unknown, workspaceRoot: string) =>
-    makePost('/api/machines/instances', { definitionId, input, workspaceRoot }) as Effect.Effect<
-      MachineInstance,
-      Error
-    >,
+  startInstance: (
+    definitionId: string,
+    input: unknown,
+    workspaceRoot: string,
+    runtimeOptions: MachineRuntimeOptions,
+  ) =>
+    makePost('/api/machines/instances', {
+      definitionId,
+      input,
+      workspaceRoot,
+      runtimeOptions,
+    }) as Effect.Effect<MachineInstance, Error>,
 
   /** List machine instances with optional filters. */
   getInstances: (filter?: InstanceFilter) =>

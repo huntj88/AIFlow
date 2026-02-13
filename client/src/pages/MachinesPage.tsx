@@ -10,7 +10,7 @@ import { InstanceRow } from '@/components/machines/InstanceRow';
 import { QuickStartPanel } from '@/components/machines/QuickStartPanel';
 import { useMachineDefinitions } from '@/hooks/useMachineDefinitions';
 import { useMachineInstances } from '@/hooks/useMachineInstances';
-import type { MachineInstance } from '@/types/machines';
+import type { MachineInstance, MachineRuntimeOptions } from '@/types/machines';
 import { machineRoutes } from '@/utils/machineRoutes';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -141,9 +141,19 @@ export function MachinesPage() {
   );
 
   const handleLaunch = useCallback(
-    async (definitionId: string, input: unknown, workspaceRoot: string) => {
+    async (
+      definitionId: string,
+      input: unknown,
+      workspaceRoot: string,
+      runtimeOptions: MachineRuntimeOptions,
+    ) => {
       try {
-        const instance = await instancesStore.startInstance(definitionId, input, workspaceRoot);
+        const instance = await instancesStore.startInstance(
+          definitionId,
+          input,
+          workspaceRoot,
+          runtimeOptions,
+        );
         toast.success(t('machines.toast.instanceStarted'));
         void navigate(machineRoutes.viewInstance(instance.id));
       } catch (err) {
@@ -316,8 +326,8 @@ export function MachinesPage() {
           <QuickStartPanel
             definitions={definitions}
             isLoading={instancesLoading}
-            onLaunch={(defId, input, wsRoot) => {
-              void handleLaunch(defId, input, wsRoot);
+            onLaunch={(defId, input, wsRoot, runtimeOptions) => {
+              void handleLaunch(defId, input, wsRoot, runtimeOptions);
             }}
           />
         </div>

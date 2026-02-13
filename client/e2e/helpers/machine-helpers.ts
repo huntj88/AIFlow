@@ -10,6 +10,16 @@ import { type APIRequestContext, expect, type Page } from '@playwright/test';
 const API_BASE = 'http://localhost:3001/api';
 export const E2E_TEST_WORKSPACE_ROOT = '/tmp/aiflow-e2e-test';
 
+const makeRuntimeOptions = (workspaceRoot: string) => ({
+  cliDirectoryPolicy: {
+    workspaceDirs: [workspaceRoot],
+    artifactDirs: [`${workspaceRoot}/artifacts`],
+  },
+  cliOutputCapture: {
+    enabled: false,
+  },
+});
+
 // ────────────────────────────────────────────────────────────────────────────
 // API helpers (bypass the UI for fast seeding)
 // ────────────────────────────────────────────────────────────────────────────
@@ -52,7 +62,12 @@ export async function apiStartInstance(
   workspaceRoot: string = E2E_TEST_WORKSPACE_ROOT,
 ): Promise<{ id: string; status: string; definitionId: string; [k: string]: unknown }> {
   const res = await request.post(`${API_BASE}/machines/instances`, {
-    data: { definitionId, input, workspaceRoot },
+    data: {
+      definitionId,
+      input,
+      workspaceRoot,
+      runtimeOptions: makeRuntimeOptions(workspaceRoot),
+    },
   });
   expect(res.status()).toBe(201);
   return res.json();

@@ -32,6 +32,8 @@
   "machines.quickstart.workspace_root_label": "Workspace Root",
   "machines.quickstart.workspace_root_placeholder": "/path/to/workspace",
   "machines.quickstart.invalid_workspace_root": "Workspace root must start with /",
+  "machines.quickstart.artifact_dirs_label": "Artifact Directory (derived)",
+  "machines.quickstart.capture_enabled_label": "Capture CLI transcript output",
   "machines.status.running": "Running",
   "machines.status.completed": "Completed",
   "machines.status.cancelled": "Cancelled",
