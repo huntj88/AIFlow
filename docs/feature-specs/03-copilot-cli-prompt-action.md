@@ -16,10 +16,10 @@ The action is designed to chain into later AI actions by returning validated fil
 - Return/pass the active `conversationId` so downstream states can resume the same conversation.
 - Support optional file-path context forwarded to `copilot` CLI input arguments.
 - Ask a result-reporting system prompt that returns JSON (`data`, `filePaths`, diagnostics).
-- If the model returns invalid JSON, reprompt with a system prompt to wrap/reformat as strict JSON.
+- If the model returns invalid JSON, retry in-action with a system prompt to wrap/reformat as strict JSON.
 - Reset conversation state to before the system result prompt.
 - Validate JSON shape and required fields before returning state data.
-- Route invalid JSON/shape failures (after reprompt) to a dedicated machine error-handling action.
+- Route invalid JSON/shape failures (after retries) through the action error transition with structured diagnostics.
 - Depend on a system-wide, toggleable CLI transcript capture feature for all `ctx.cli.exec` usage.
 
 ## Non-goals
@@ -30,6 +30,29 @@ The action is designed to chain into later AI actions by returning validated fil
 ## Proposed Action ID
 
 - `copilot-cli-prompt`
+
+## Rollout decisions (current)
+
+This spec adopts the following implementation decisions for this rollout:
+
+1. **Start-instance contract: hard cutover**
+
+- `runtimeOptions` is required immediately.
+- No legacy request fallback, compatibility shim, or versioned parallel endpoint in this rollout.
+
+2. **Runner runtime policy model: pass-through**
+
+- Runtime CLI policy/capture settings are passed through the run execution path and into action context construction.
+- Runtime policy is **not** persisted on `MachineInstance` as part of this rollout.
+
+3. **CLI capture metadata: rich metadata**
+
+- `ctx.cli.exec(...)` returns structured transcript metadata when capture is enabled (workspace, relative path, resolved path, label, exit code, duration).
+
+4. **Client/API cutover: immediate update**
+
+- Client start-instance requests must send the new required `runtimeOptions` contract.
+- No client compatibility mode in this rollout.
 
 ## Action Input Contract (`ctx.stateData`)
 
@@ -42,7 +65,6 @@ The action is designed to chain into later AI actions by returning validated fil
     { "workspace": "artifacts", "path": "plans/parser-notes.md" }
   ],
   "successState": "runFollowupPrompt",
-  "invalidResultState": "handleInvalidCopilotResult",
   "execErrorState": "handleCopilotExecError"
 }
 ```
@@ -54,7 +76,7 @@ The action is designed to chain into later AI actions by returning validated fil
   - Omitted: start a new conversation and include the directory-guidance prelude.
   - Provided: resume that conversation and do **not** prepend the directory-guidance prelude again.
 - `contextFilePaths` is optional and may include workspace/artifacts-relative paths.
-- `successState`, `invalidResultState`, and `execErrorState` are required transition targets.
+- `successState` and `execErrorState` are required transition targets.
 - Allowed workspace/artifacts directory policy comes from machine/runtime configuration (not action `stateData`).
 
 ## CLI Execution Contract
@@ -174,23 +196,31 @@ This migration intentionally makes breaking changes to move directly to the targ
    - Replace the request contract with required `runtimeOptions` (not optional):
      - `cliDirectoryPolicy: { workspaceDirs: string[]; artifactDirs: string[] }`
      - `cliOutputCapture: { enabled: boolean }`
-   - Remove legacy start behavior that runs without runtime CLI policy input.
+
+- Remove legacy start behavior that runs without runtime CLI policy input.
+- Do not provide compatibility shims or fallback request shapes.
 
 2. **Update runner/action context to require runtime policy**
-   - Require resolved directory-policy and capture-policy values in runner context for every action execution.
-   - Remove fallback/default branches that assume missing runtime policy.
+
+- Require resolved directory-policy and capture-policy values in runner context for every action execution.
+- Use a **pass-through model**: pass runtime policy through run/context wiring and action execution.
+- Do not persist runtime policy on `MachineInstance` in this rollout.
+- Remove fallback/default branches that assume missing runtime policy.
 
 3. **Centralize capture in `CliHelper` and remove per-action alternatives**
-   - `ctx.cli.exec(...)` becomes the single path for CLI transcript capture and capture metadata return.
-   - Remove/forbid any action-level capture implementations.
+
+- `ctx.cli.exec(...)` becomes the single path for CLI transcript capture and capture metadata return.
+- Return rich capture metadata including workspace, relative path, resolved path, label, exitCode, and durationMs.
+- Remove/forbid any action-level capture implementations.
 
 4. **Adopt one lineage path resolver**
    - Use a single instance-lineage resolver for transcript paths across root/child/nested-child execution.
    - Remove duplicate or ad-hoc path construction logic.
 
 5. **Register and use `copilot-cli-prompt` as the new AI action path**
-   - Implement and register `copilot-cli-prompt` with strict JSON flow, one reprompt-on-invalid, normalization, and explicit transitions.
-   - Treat this action contract as the canonical prompt-action interface for machine workflows in this rollout.
+
+- Implement and register `copilot-cli-prompt` with strict JSON flow, in-action retry-on-invalid, normalization, and explicit transitions.
+  - Treat this action contract as the canonical prompt-action interface for machine workflows in this rollout.
 
 6. **Ship developer curl script as required operational tooling**
    - Provide a developer script that upserts the machine definition, starts a run with a `helloWorld.md` prompt, polls to terminal state, and prints progress/completion status throughout.
@@ -214,6 +244,19 @@ When runtime capture is enabled, every CLI command in any action writes a `.txt`
 
 Capture includes all CLI calls in this action flow (initial prompt execution, JSON-result prompt, optional JSON-repair reprompt, and reset command) because it applies to all `ctx.cli.exec` usage.
 
+When capture is enabled, `ctx.cli.exec(...)` also returns rich transcript metadata for each command:
+
+```json
+{
+  "workspace": "artifacts",
+  "path": "runCopilotPrompt/001-main-prompt.txt",
+  "resolvedPath": "/abs/path/to/artifacts/.../runCopilotPrompt/001-main-prompt.txt",
+  "label": "main-prompt",
+  "exitCode": 0,
+  "durationMs": 1432
+}
+```
+
 ### Artifact path convention
 
 Each transcript is written under an artifacts folder scoped to the machine instance that executed the command:
@@ -234,15 +277,17 @@ After the main prompt execution:
 
 1. Send a **system result prompt** in the same conversation asking for strict JSON only.
 2. Parse and validate the JSON.
-3. If JSON is invalid, send one **system reprompt** asking the model to wrap/reformat its previous response as strict JSON only.
-4. Parse and validate the reprompt output.
+3. If JSON is invalid, send a **system reprompt** asking the model to wrap/reformat its previous response as strict JSON only.
+4. Repeat parse/validate for each retry until success or `maxFormatRetries` is reached.
 5. Reset/restore conversation state to the snapshot from immediately before the system result prompt.
+
+Recommended default: `maxFormatRetries = 2` (up to 3 total format attempts including the first result prompt).
 
 ### Required system result prompt behavior
 
 - Must request machine-readable JSON only (no markdown).
 - Must request fields needed for chaining (data + file paths + status + diagnostics).
-- On invalid JSON from the first result prompt, must issue one system reprompt requesting strict JSON wrapping/reformatting.
+- On invalid JSON, must issue system reprompts from within the same action until success or `maxFormatRetries` is exhausted.
 - Must be ephemeral from conversation-history perspective (state reset after capture).
 - Must run in the active conversation (newly created or resumed via `conversationId`).
 
@@ -304,7 +349,7 @@ Rules:
   - `workspace` -> `ctx.workspace.resolve(path)`
   - `artifacts` -> `ctx.artifactsWorkspace.resolve(path)`
 - `path` must be relative (no empty strings) and resolve inside the selected workspace root.
-- Reject malformed entries and route to `invalidResultState`.
+- Reject malformed entries and route to `execErrorState` with reason `invalid_result_json`.
 
 This ensures downstream AI actions can consume a consistent format without guessing path roots.
 
@@ -327,7 +372,10 @@ Return:
       {
         "workspace": "artifacts",
         "path": "runCopilotPrompt/001-main-prompt.txt",
-        "resolvedPath": "/abs/path/to/artifacts/.../001-main-prompt.txt"
+        "resolvedPath": "/abs/path/to/artifacts/.../001-main-prompt.txt",
+        "label": "main-prompt",
+        "exitCode": 0,
+        "durationMs": 1432
       }
     ]
   }
@@ -336,13 +384,14 @@ Return:
 
 ### Invalid JSON or schema mismatch
 
-If the first JSON response is invalid, reprompt once with the JSON-wrapping system prompt.
-If the reprompt result is still invalid, return `nextState = invalidResultState` with error details in `data`:
+If a JSON response is invalid, retry in-action with the JSON-wrapping system prompt.
+If the final retry result is still invalid, return `nextState = execErrorState` with error details in `data`:
 
 ```json
 {
   "conversationId": "<activeConversationId>",
   "reason": "invalid_result_json",
+  "attemptCount": 3,
   "validationErrors": [
     { "path": "/filePaths/0/path", "message": "must NOT be shorter than 1 characters" }
   ],
@@ -379,11 +428,6 @@ Include `conversationId` in returned data when available so downstream states ca
       "type": "action",
       "actionId": "copilot-cli-prompt"
     },
-    "handleInvalidCopilotResult": {
-      "name": "handleInvalidCopilotResult",
-      "type": "action",
-      "actionId": "handle-invalid-copilot-result"
-    },
     "handleCopilotExecError": {
       "name": "handleCopilotExecError",
       "type": "action",
@@ -395,12 +439,9 @@ Include `conversationId` in returned data when available so downstream states ca
   },
   "transitions": [
     { "from": "runCopilotPrompt", "to": "runFollowupPrompt" },
-    { "from": "runCopilotPrompt", "to": "handleInvalidCopilotResult" },
     { "from": "runCopilotPrompt", "to": "handleCopilotExecError" },
     { "from": "runFollowupPrompt", "to": "completed" },
-    { "from": "runFollowupPrompt", "to": "handleInvalidCopilotResult" },
     { "from": "runFollowupPrompt", "to": "handleCopilotExecError" },
-    { "from": "handleInvalidCopilotResult", "to": "completed" },
     { "from": "handleCopilotExecError", "to": "completed" }
   ]
 }
@@ -417,7 +458,6 @@ Include `conversationId` in returned data when available so downstream states ca
     { "workspace": "workspace", "path": "server/src/config/parser.test.ts" }
   ],
   "successState": "runFollowupPrompt",
-  "invalidResultState": "handleInvalidCopilotResult",
   "execErrorState": "handleCopilotExecError"
 }
 ```
@@ -442,7 +482,6 @@ Example resulting state input:
     { "workspace": "workspace", "path": "server/src/config/parser.test.ts" }
   ],
   "successState": "completed",
-  "invalidResultState": "handleInvalidCopilotResult",
   "execErrorState": "handleCopilotExecError"
 }
 ```
@@ -451,11 +490,12 @@ Example resulting state input:
 
 ```typescript
 actionRegistry.register('copilot-cli-prompt', copilotCliPromptAction);
-actionRegistry.register('handle-invalid-copilot-result', handleInvalidCopilotResultAction);
 actionRegistry.register('handle-copilot-exec-error', handleCopilotExecErrorAction);
 ```
 
 ### 5) Start-instance request (system data included)
+
+`runtimeOptions` is required in this rollout (no legacy request shape supported).
 
 ```json
 {
@@ -474,7 +514,6 @@ actionRegistry.register('handle-copilot-exec-error', handleCopilotExecErrorActio
     "prompt": "Create a typed parser and update tests.",
     "contextFilePaths": [{ "workspace": "workspace", "path": "server/src/config/parser.ts" }],
     "successState": "runFollowupPrompt",
-    "invalidResultState": "handleInvalidCopilotResult",
     "execErrorState": "handleCopilotExecError"
   }
 }
