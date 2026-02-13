@@ -25,10 +25,10 @@ Finalize action return payload semantics: normalized file paths, warnings, comma
 
 ## Acceptance Checklist
 
-- [ ] Unsafe path entries do not fail action by themselves.
-- [ ] `filePathWarnings` include index/workspace/path/message diagnostics.
-- [ ] Success branch always uses `successState` for schema-valid results.
-- [ ] Error branches include structured diagnostics and raw output when required.
+- [x] Unsafe path entries do not fail action by themselves.
+- [x] `filePathWarnings` include index/workspace/path/message diagnostics.
+- [x] Success branch always uses `successState` for schema-valid results.
+- [x] Error branches include structured diagnostics and raw output when required.
 
 ---
 

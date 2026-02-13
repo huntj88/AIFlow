@@ -25,10 +25,10 @@ Add shared prompt-template utilities for directory guidance and result-capture s
 
 ## Acceptance Checklist
 
-- [ ] Utility emits first-turn prompt with both workspace descriptions.
-- [ ] Utility emits strict JSON-only result and repair prompts.
-- [ ] Conversation-resume path suppresses prelude.
-- [ ] Prompt text aligns with artifacts placement recommendation rules.
+- [x] Utility emits first-turn prompt with both workspace descriptions.
+- [x] Utility emits strict JSON-only result and repair prompts.
+- [x] Conversation-resume path suppresses prelude.
+- [x] Prompt text aligns with artifacts placement recommendation rules.
 
 ---
 

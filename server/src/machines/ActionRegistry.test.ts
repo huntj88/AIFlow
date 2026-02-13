@@ -128,9 +128,11 @@ describe('ActionRegistryLive (pre-loaded)', () => {
     'transform-data',
     'log-message',
     'conditional-branch',
+    'copilot-cli-prompt',
+    'handle-copilot-exec-error',
   ];
 
-  it('contains all 5 built-in actions', async () => {
+  it('contains all 7 built-in actions', async () => {
     const list = await runLive(
       Effect.gen(function* () {
         const registry = yield* ActionRegistry;
@@ -142,7 +144,7 @@ describe('ActionRegistryLive (pre-loaded)', () => {
     for (const id of BUILTIN_IDS) {
       expect(ids).toContain(id);
     }
-    expect(list.length).toBeGreaterThanOrEqual(5);
+    expect(list.length).toBeGreaterThanOrEqual(7);
   });
 
   it.each(BUILTIN_IDS)('has("%s") returns true', async (id) => {

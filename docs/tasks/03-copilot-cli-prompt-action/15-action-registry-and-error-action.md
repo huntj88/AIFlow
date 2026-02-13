@@ -23,10 +23,10 @@ Register rollout actions as discoverable built-ins and provide the `handle-copil
 
 ## Acceptance Checklist
 
-- [ ] Both rollout actions are registered on startup.
-- [ ] Action list/get APIs return metadata for both actions.
-- [ ] Non-existent action behavior remains unchanged.
-- [ ] Canonical AI prompt-action path is `copilot-cli-prompt`.
+- [x] Both rollout actions are registered on startup.
+- [x] Action list/get APIs return metadata for both actions.
+- [x] Non-existent action behavior remains unchanged.
+- [x] Canonical AI prompt-action path is `copilot-cli-prompt`.
 
 ---
 

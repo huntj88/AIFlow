@@ -24,10 +24,10 @@ Implement in-action strict JSON capture retries and mandatory conversation reset
 
 ## Acceptance Checklist
 
-- [ ] Retry loop is bounded exactly per spec.
-- [ ] Invalid JSON/schema after final retry routes to `execErrorState`.
-- [ ] Reset executes on success and invalid-json branches.
-- [ ] Reset failure is treated as execution failure.
+- [x] Retry loop is bounded exactly per spec.
+- [x] Invalid JSON/schema after final retry routes to `execErrorState`.
+- [x] Reset executes on success and invalid-json branches.
+- [x] Reset failure is treated as execution failure.
 
 ---
 

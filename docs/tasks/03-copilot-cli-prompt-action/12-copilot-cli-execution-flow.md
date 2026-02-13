@@ -27,10 +27,10 @@ Implement command orchestration for `copilot-cli-prompt` (new conversation + res
 
 ## Acceptance Checklist
 
-- [ ] New conversation path includes directory prelude and user prompt.
-- [ ] Resume path includes conversation ID and omits prelude.
-- [ ] Context file paths are transformed into CLI context args.
-- [ ] Runtime policy directories are passed through as allow-dir args.
+- [x] New conversation path includes directory prelude and user prompt.
+- [x] Resume path includes conversation ID and omits prelude.
+- [x] Context file paths are transformed into CLI context args.
+- [x] Runtime policy directories are passed through as allow-dir args.
 
 ---
 

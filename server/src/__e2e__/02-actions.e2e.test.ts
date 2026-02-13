@@ -23,6 +23,8 @@ const BUILT_IN_IDS = [
   'transform-data',
   'log-message',
   'conditional-branch',
+  'copilot-cli-prompt',
+  'handle-copilot-exec-error',
 ] as const;
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -59,9 +61,9 @@ describe('§3 — Action Registry', () => {
     }
   });
 
-  // ── §3.2 All 5 built-in actions present ───────────────────────────────
+  // ── §3.2 All built-in actions present ──────────────────────────────────
 
-  it('all 5 built-in actions are present on server startup', async () => {
+  it('all built-in actions are present on server startup', async () => {
     const res = await api.getActions();
     const list = (await res.json()) as { id: string }[];
     const ids = list.map((a) => a.id);

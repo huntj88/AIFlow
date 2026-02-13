@@ -25,10 +25,10 @@ Implement strict validation contracts for `copilot-cli-prompt` input and require
 
 ## Acceptance Checklist
 
-- [ ] Empty/missing prompt fails with structured diagnostics.
-- [ ] Required result keys and enums are strictly enforced.
-- [ ] Top-level `additionalProperties` rejection is covered.
-- [ ] Validation errors include machine-usable path/message entries.
+- [x] Empty/missing prompt fails with structured diagnostics.
+- [x] Required result keys and enums are strictly enforced.
+- [x] Top-level `additionalProperties` rejection is covered.
+- [x] Validation errors include machine-usable path/message entries.
 
 ---
 

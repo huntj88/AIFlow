@@ -55,6 +55,8 @@ const BUILT_IN_ACTION_IDS = [
   'transform-data',
   'log-message',
   'conditional-branch',
+  'copilot-cli-prompt',
+  'handle-copilot-exec-error',
 ];
 
 describe('ActionsRouter', () => {
@@ -66,13 +68,13 @@ describe('ActionsRouter', () => {
 
   const get = (path = '') => handler(new Request(`http://localhost/api/machines/actions${path}`));
 
-  it('GET list returns all 5 built-in actions with metadata', async () => {
+  it('GET list returns all 7 built-in actions with metadata', async () => {
     const res = await get();
     expect(res.status).toBe(200);
 
     const list = (await res.json()) as { id: string; description?: string }[];
     expect(Array.isArray(list)).toBe(true);
-    expect(list.length).toBe(5);
+    expect(list.length).toBe(7);
 
     const ids = list.map((a) => a.id);
     for (const expected of BUILT_IN_ACTION_IDS) {
