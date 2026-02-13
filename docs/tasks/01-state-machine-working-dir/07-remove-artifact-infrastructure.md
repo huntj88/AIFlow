@@ -133,5 +133,4 @@ store/metadata code.
 - [x] No imports of `FsArtifactStore` or `ArtifactTreeBuilder` remain
 - [x] Artifact types (`ArtifactStore`, `ArtifactRecord`, `ArtifactMetadata`, `ArtifactTree`)
       removed from `types.ts`
-- [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes
-      <!-- Blocked: route handler instances.ts still imports from deleted artifacts — fixed in Task 08 -->
+- [x] `pnpm --filter @aiflow/server exec tsc --noEmit` passes

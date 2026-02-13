@@ -163,4 +163,4 @@ are identical to the parent's.
 - [x] Child's `ctx.workspace.root` equals parent's workspace root
 - [x] Child's `ctx.artifactsWorkspace.root` equals parent's artifacts workspace root
 - [x] Resume uses persisted workspace fields from child's own instance
-- [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes <!-- Blocked: downstream route consumers (instances.ts, artifacts.ts) not yet updated — fixed in Tasks 07-10 -->
+- [x] `pnpm --filter @aiflow/server exec tsc --noEmit` passes

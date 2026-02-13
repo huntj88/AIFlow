@@ -121,5 +121,4 @@ correct inherited workspace fields.
 - [x] Child instances have correct `familyRootInstanceId` (parent's root, not own ID)
 - [x] Child instances have correct `artifactsPath` (shared family root)
 - [x] `InMemoryMachineStore` correctly persists and returns new fields
-- [ ] `pnpm --filter @aiflow/server run test` passes
-      <!-- Blocked: StateMachineRunner.test.ts, suspend-resume.test.ts still have pre-existing artifact/opts errors — fixed in Tasks 15-16 -->
+- [x] `pnpm --filter @aiflow/server run test` passes

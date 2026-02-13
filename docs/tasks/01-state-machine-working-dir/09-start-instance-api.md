@@ -139,5 +139,4 @@ This is handled by the runner (Task 05) and the instance payload (Task 10).
 - [x] Non-directory path returns 400
 - [x] Valid `workspaceRoot` is passed to `runner.run()` via `RunOptions`
 - [x] Returned instance includes `workspaceRoot`, `familyRootInstanceId`, `artifactsPath`
-- [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes
-      <!-- Blocked: StateMachineRunner.test.ts, suspend-resume.test.ts, types.test.ts, etc. still have pre-existing artifact/opts errors — fixed in Tasks 15-16 -->
+- [x] `pnpm --filter @aiflow/server exec tsc --noEmit` passes

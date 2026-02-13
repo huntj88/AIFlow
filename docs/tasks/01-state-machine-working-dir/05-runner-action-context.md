@@ -227,4 +227,4 @@ const ARTIFACT_ROOT = yield * ArtifactRootConfig;
 - [x] Root instance creation sets `familyRootInstanceId = id`
 - [x] Artifacts directory created on disk for root instances
 - [x] Resume loads workspace fields from persisted instance
-- [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes <!-- Blocked: downstream route consumers (instances.ts, artifacts.ts) not yet updated — fixed in Tasks 07-10 -->
+- [x] `pnpm --filter @aiflow/server exec tsc --noEmit` passes

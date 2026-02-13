@@ -112,5 +112,5 @@ must be deleted and replaced with the new workspace/CLI tests in Task 16.
 - [x] `artifact_created` not referenced anywhere in server code
 - [x] No middleware references to artifact events
 - [x] Artifact-related API tests removed
-- [ ] `pnpm --filter @aiflow/server exec tsc --noEmit` passes <!-- Blocked: StateMachineRunner.test.ts still has ctx.artifacts refs — fixed in Tasks 15-16 -->
-- [ ] `pnpm --filter @aiflow/server run test` passes <!-- Blocked: runner.run() calls missing workspaceRoot — fixed in Tasks 09-10, 15-16 -->
+- [x] `pnpm --filter @aiflow/server exec tsc --noEmit` passes
+- [x] `pnpm --filter @aiflow/server run test` passes
