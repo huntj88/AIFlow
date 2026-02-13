@@ -11,7 +11,9 @@ The action is designed to chain into later AI actions by returning validated fil
 - Accept a `prompt` string as action input.
 - Run `copilot` CLI in YOLO mode.
 - Use system/runtime-provided allowed workspace and artifacts directory policy for CLI execution.
-- Prepend a system directory-guidance prompt before the user prompt.
+- Prepend a system directory-guidance prompt only when starting a new Copilot conversation.
+- Reuse an existing conversation when `conversationId` is provided.
+- Return/pass the active `conversationId` so downstream states can resume the same conversation.
 - Support optional file-path context forwarded to `copilot` CLI input arguments.
 - Ask a result-reporting system prompt that returns JSON (`data`, `filePaths`, diagnostics).
 - If the model returns invalid JSON, reprompt with a system prompt to wrap/reformat as strict JSON.
@@ -34,6 +36,7 @@ The action is designed to chain into later AI actions by returning validated fil
 ```json
 {
   "prompt": "Implement a parser for config files",
+  "conversationId": "copilot-conv-123",
   "contextFilePaths": [
     { "workspace": "workspace", "path": "server/src/config/types.ts" },
     { "workspace": "artifacts", "path": "plans/parser-notes.md" }
@@ -47,6 +50,9 @@ The action is designed to chain into later AI actions by returning validated fil
 ### Input notes
 
 - `prompt` is required and non-empty.
+- `conversationId` is optional:
+  - Omitted: start a new conversation and include the directory-guidance prelude.
+  - Provided: resume that conversation and do **not** prepend the directory-guidance prelude again.
 - `contextFilePaths` is optional and may include workspace/artifacts-relative paths.
 - `successState`, `invalidResultState`, and `execErrorState` are required transition targets.
 - Allowed workspace/artifacts directory policy comes from machine/runtime configuration (not action `stateData`).
@@ -55,11 +61,12 @@ The action is designed to chain into later AI actions by returning validated fil
 
 The action executes `copilot` CLI with:
 
-1. A system directory-guidance prompt prepended before the user prompt.
+1. A system directory-guidance prompt prepended before the user prompt **only when starting a new conversation**.
 2. User prompt as the main task prompt.
 3. YOLO mode enabled.
 4. Allowed directories passed as CLI arguments from machine/runtime directory policy.
 5. Optional context file arguments derived from `contextFilePaths`.
+6. Optional conversation resume using `conversationId` when provided.
 
 Runtime resolves directory-policy entries to absolute paths before passing them as `--allow-dir` values.
 These flags configure Copilot CLI with the expected state-machine workspaces; the state machine itself does not enforce filesystem access control.
@@ -76,7 +83,20 @@ copilot chat \
   --context "<resolved-context-file-2>"
 ```
 
-## System directory-guidance prompt (prepended)
+Resume command shape (illustrative):
+
+```bash
+copilot chat \
+  --conversation-id "<conversationId>" \
+  --prompt "<prompt>" \
+  --yolo \
+  --allow-dir "<resolved-workspace-dir>" \
+  --allow-dir "<resolved-artifacts-dir>" \
+  --context "<resolved-context-file-1>" \
+  --context "<resolved-context-file-2>"
+```
+
+## System directory-guidance prompt (prepended on first conversation turn only)
 
 The action prepends a system prompt to guide file placement across the two working directories:
 
@@ -99,6 +119,8 @@ Default file placement guidance (recommendation, not restriction):
 
 You may read/write files anywhere within either workspace root when needed.
 ```
+
+When `conversationId` is provided, this prelude is not sent again; the action resumes the existing conversation with the new user prompt.
 
 ### Default artifacts placement recommendation
 
@@ -222,6 +244,7 @@ After the main prompt execution:
 - Must request fields needed for chaining (data + file paths + status + diagnostics).
 - On invalid JSON from the first result prompt, must issue one system reprompt requesting strict JSON wrapping/reformatting.
 - Must be ephemeral from conversation-history perspective (state reset after capture).
+- Must run in the active conversation (newly created or resumed via `conversationId`).
 
 ## Required JSON result schema
 
@@ -297,6 +320,7 @@ Return:
 {
   "nextState": "<successState>",
   "data": {
+    "conversationId": "<activeConversationId>",
     "copilotResult": { "...validated-json..." },
     "normalizedFilePaths": [{ "...normalized-path-record..." }],
     "commandOutputFiles": [
@@ -317,6 +341,7 @@ If the reprompt result is still invalid, return `nextState = invalidResultState`
 
 ```json
 {
+  "conversationId": "<activeConversationId>",
   "reason": "invalid_result_json",
   "validationErrors": [
     { "path": "/filePaths/0/path", "message": "must NOT be shorter than 1 characters" }
@@ -329,6 +354,7 @@ If the reprompt result is still invalid, return `nextState = invalidResultState`
 
 Return `nextState = execErrorState` with `stderr`/`exitCode` data.
 If runtime CLI capture is enabled, return any collected `commandOutputFiles` references in this branch as well.
+Include `conversationId` in returned data when available so downstream states can decide whether to resume or restart.
 
 ## Full setup example
 
@@ -385,6 +411,7 @@ If runtime CLI capture is enabled, return any collected `commandOutputFiles` ref
 ```json
 {
   "prompt": "Create a typed parser and update tests.",
+  "conversationId": "copilot-conv-123",
   "contextFilePaths": [
     { "workspace": "workspace", "path": "server/src/config/parser.ts" },
     { "workspace": "workspace", "path": "server/src/config/parser.test.ts" }
@@ -397,10 +424,11 @@ If runtime CLI capture is enabled, return any collected `commandOutputFiles` ref
 
 ### 3) Example state input for second AI action (chained paths)
 
-Build `contextFilePaths` from the previous action's `normalizedFilePaths`:
+Build `contextFilePaths` and `conversationId` from the previous action output:
 
 ```typescript
 const contextFilePaths = normalizedFilePaths.map(({ workspace, path }) => ({ workspace, path }));
+const conversationId = previousStateData.conversationId;
 ```
 
 Example resulting state input:
@@ -408,6 +436,7 @@ Example resulting state input:
 ```json
 {
   "prompt": "Review generated files and produce a concise summary.",
+  "conversationId": "copilot-conv-123",
   "contextFilePaths": [
     { "workspace": "workspace", "path": "server/src/config/parser.ts" },
     { "workspace": "workspace", "path": "server/src/config/parser.test.ts" }
@@ -474,3 +503,4 @@ actionRegistry.register('handle-copilot-exec-error', handleCopilotExecErrorActio
 - Keep JSON validation strict (`additionalProperties: false` where practical).
 - Emit raw outputs only in error branches to simplify debugging.
 - Preserve source-of-truth semantics for `stateData`, `machineInput`, `workspace`, and `artifactsWorkspace`.
+- Propagate active `conversationId` in action outputs so follow-up states can resume conversation context when desired.

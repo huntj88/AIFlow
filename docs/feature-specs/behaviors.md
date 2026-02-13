@@ -752,21 +752,24 @@
 ### 21.9 Copilot CLI Prompt Action Workflow
 
 - [ ] User launches a machine whose action is `copilot-cli-prompt` with valid `prompt`, transition targets, and runtime CLI options
-- [ ] The action prepends system directory-guidance text before the user prompt sent to Copilot CLI
+- [ ] When `conversationId` is not provided, the action starts a new Copilot conversation and prepends system directory-guidance text before the user prompt
+- [ ] When `conversationId` is provided, the action resumes that conversation and does **not** prepend the directory-guidance prelude again
 - [ ] The Copilot CLI call runs in YOLO mode and includes runtime-policy `--allow-dir` arguments
 - [ ] Optional `contextFilePaths` are forwarded as CLI context arguments after resolution
 - [ ] The action performs strict JSON result capture and validates required schema fields
-- [ ] On schema-valid result (including `status: 'error'`), machine transitions to `successState` and emits `copilotResult` + `normalizedFilePaths`
+- [ ] On schema-valid result (including `status: 'error'`), machine transitions to `successState` and emits `conversationId` + `copilotResult` + `normalizedFilePaths`
 - [ ] Integration run verifies normalized file-path records include `workspace`, `path`, and `resolvedPath`
 - [ ] If first result JSON is invalid, action issues exactly one JSON-repair reprompt
-- [ ] If reprompt output is still invalid, machine transitions to `invalidResultState` with validation details and raw output
-- [ ] If Copilot CLI execution fails, machine transitions to `execErrorState` with `stderr`/`exitCode`
+- [ ] If reprompt output is still invalid, machine transitions to `invalidResultState` with validation details, raw output, and active `conversationId` when available
+- [ ] If Copilot CLI execution fails, machine transitions to `execErrorState` with `stderr`/`exitCode` and active `conversationId` when available
 - [ ] With output capture enabled, returned data includes `commandOutputFiles` references for all CLI calls in the flow
+- [ ] Chained follow-up states can pass forward returned `conversationId` to resume the same conversation context
 
 ### 21.10 Developer Curl Workflow Script
 
 - [ ] Developer script upserts a full machine definition that uses `copilot-cli-prompt`
 - [ ] Script starts an instance with prompt text requesting creation of `helloWorld.md`
+- [ ] Script workflow demonstrates conversation chaining by forwarding `conversationId` into a follow-up `copilot-cli-prompt` state input
 - [ ] Script polls instance status until a terminal state is reached
 - [ ] Script prints live progress updates plus final completion status
 - [ ] Script is provided as developer tooling (not an e2e test) and can be run repeatedly
@@ -828,4 +831,5 @@
 - [ ] JSON result missing any required key (`schemaVersion`, `status`, `summary`, `data`, `filePaths`, `diagnostics`) routes to `invalidResultState`
 - [ ] JSON result with `additionalProperties` at top-level fails validation and routes to `invalidResultState`
 - [ ] Invalid `filePaths[]` entries in model output fail normalization and route to `invalidResultState`
+- [ ] If `conversationId` is provided, the initial directory-guidance prelude is not resent on the resumed prompt turn
 - [ ] Conversation state is reset after result-capture prompts so follow-up user prompts do not include the temporary JSON-formatting system prompts
