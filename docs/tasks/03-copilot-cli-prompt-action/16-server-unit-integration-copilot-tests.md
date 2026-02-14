@@ -1,5 +1,7 @@
 # Task 16 — Server Unit/Integration Copilot Tests
 
+> **Status note**: Reset-failure branch coverage in this task is superseded by Task 21 (`21-remove-conversation-reset-step.md`).
+
 > **Phase**: 4 (Verification & tooling)
 > **Depends on**: Task 15
 > **Blocks**: Tasks 17, 20

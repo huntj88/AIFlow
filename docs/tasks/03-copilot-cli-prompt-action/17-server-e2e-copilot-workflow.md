@@ -1,5 +1,7 @@
 # Task 17 — Server E2E Copilot Workflow
 
+> **Status note**: Reset-failure e2e branch expectations in this task are superseded by Task 21 (`21-remove-conversation-reset-step.md`).
+
 > **Phase**: 4 (Verification & tooling)
 > **Depends on**: Tasks 16, 09
 > **Blocks**: Tasks 18, 20

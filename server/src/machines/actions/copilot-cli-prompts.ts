@@ -77,10 +77,3 @@ export const buildJsonRepairPrompt = (input: JsonRepairPromptInput): string => {
     compact,
   ].join('\n');
 };
-
-export const buildConversationResetPrompt = (): string =>
-  [
-    'System maintenance instruction: discard this result-formatting exchange from future context.',
-    'Continue the conversation as if only user task prompts were added.',
-    'Reply with exactly: OK',
-  ].join('\n');

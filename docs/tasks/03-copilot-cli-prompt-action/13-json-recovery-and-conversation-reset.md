@@ -1,5 +1,7 @@
 # Task 13 — JSON Recovery & Conversation Reset
 
+> **Status note**: Conversation-reset requirements in this task are superseded by Task 21 (`21-remove-conversation-reset-step.md`).
+
 > **Phase**: 3 (Copilot action implementation)
 > **Depends on**: Task 12
 > **Blocks**: Task 14

@@ -20,7 +20,6 @@ import {
   parseCopilotCliPromptInput,
 } from './copilot-cli-prompt-contracts.js';
 import {
-  buildConversationResetPrompt,
   buildFirstTurnPrompt,
   buildJsonRepairPrompt,
   buildStrictJsonResultPrompt,
@@ -279,31 +278,6 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
       }
 
       validationErrors = parsedResult.errors;
-    }
-
-    const resetExec = yield* ctx.cli.exec({
-      command: 'copilot',
-      args: buildCopilotArgs({
-        prompt: buildConversationResetPrompt(),
-        allowDirs,
-        contextPaths: [],
-        conversationId: activeConversationId,
-      }),
-    });
-
-    if (resetExec.transcript) {
-      commandOutputFiles.push(resetExec.transcript);
-    }
-
-    if (resetExec.exitCode !== 0) {
-      return toExecError(input, {
-        reason: 'conversation_reset_failed',
-        exitCode: resetExec.exitCode,
-        stderr: resetExec.stderr,
-        stdout: resetExec.stdout,
-        commandOutputFiles,
-        conversationId: activeConversationId,
-      });
     }
 
     if (!validatedResult) {

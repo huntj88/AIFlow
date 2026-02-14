@@ -12,8 +12,9 @@ This plan delivers the `copilot-cli-prompt` rollout as a hard-cut migration:
 
 1. Break start-instance contract to require `runtimeOptions` (no compatibility mode).
 2. Refactor runner + `CliHelper` for system-wide, toggleable transcript capture with lineage paths.
-3. Implement `copilot-cli-prompt` + `handle-copilot-exec-error` with strict JSON recovery, reset behavior, and structured output shaping.
+3. Implement `copilot-cli-prompt` + `handle-copilot-exec-error` with strict JSON recovery and structured output shaping.
 4. Ship full verification (unit/integration/e2e/client) and required developer curl workflow tooling.
+5. Apply post-rollout follow-up to remove conversation reset semantics from the prompt-action flow.
 
 ---
 
@@ -25,6 +26,7 @@ This plan delivers the `copilot-cli-prompt` rollout as a hard-cut migration:
 | 2     | 05–09 | Capture infrastructure + lineage + client/test harness cutover                |
 | 3     | 10–15 | Copilot action implementation and registry wiring                             |
 | 4     | 16–20 | Verification, e2e workflows, developer script, rollout gates                  |
+| 5     | 21    | Follow-up contract change: remove conversation reset behavior                 |
 
 ## Simplified execution slices (draft)
 
@@ -49,6 +51,10 @@ To reduce handoff overhead, implement as larger slices while preserving the same
 5. **Slice E — Verification + tooling**
    - Bundle Tasks **16–20**.
    - Outcome: coverage gates, e2e confirmation, and required `scripts/dev/` curl workflow.
+
+6. **Slice F — Reset removal follow-up**
+   - Task **21**.
+   - Outcome: remove conversation reset step from spec + behavior expectations and implementation/tests.
 
 ### Simplification guardrails
 
@@ -75,7 +81,7 @@ To reduce handoff overhead, implement as larger slices while preserving the same
 07 ──→ 10 Directory Guidance Prompt Utility
 10 ──→ 11 Copilot Action Contract Schemas
 11 ──→ 12 Copilot CLI Execution Flow
-12 ──→ 13 JSON Recovery + Conversation Reset
+12 ──→ 13 JSON Recovery (bounded retries)
 13 ──→ 14 Result Normalization + Transition Shaping
 14 ──→ 15 Action Registry + Error Action Wiring
 
@@ -84,6 +90,7 @@ To reduce handoff overhead, implement as larger slices while preserving the same
 17 + 08 ──→ 18 Client Flow & E2E Updates
 15 + 09 ──→ 19 Developer Curl Workflow Script
 17 + 18 + 19 ──→ 20 Quality Gates & Rollout
+20 ──→ 21 Remove Conversation Reset Step
 ```
 
 No task points back to an upstream dependency, so the graph has no circular edges.
@@ -101,7 +108,7 @@ No task points back to an upstream dependency, so the graph has no circular edge
 | Rollout decision 6 (`maxFormatRetries = 2`)                                 | 13, 17             |
 | Rollout decision 7 (schema-valid `status:error` still goes to successState) | 14, 16, 17         |
 | Rollout decision 8 (helper-derived transcript labels)                       | 06, 07             |
-| Rollout decision 9 (reset failure -> `execErrorState`)                      | 13, 17             |
+| Rollout decision 9 (no conversation reset step)                             | 21                 |
 | Rollout decision 10 (`filePaths` warn + pass-through)                       | 14, 17             |
 | Required system refactors section                                           | 01–07              |
 | Action input/CLI execution/prelude contracts                                | 10–12              |
@@ -123,7 +130,7 @@ No task points back to an upstream dependency, so the graph has no circular edge
 | §21.9 Copilot CLI Prompt Action Workflow                    | 10–18              |
 | §21.10 Developer Curl Workflow Script                       | 19                 |
 | §22.1 API Error Responses (missing runtimeOptions branches) | 03, 09, 17         |
-| §22.7 `copilot-cli-prompt` Edge Cases                       | 11, 13, 14, 17     |
+| §22.7 `copilot-cli-prompt` Edge Cases                       | 11, 13, 14, 17, 21 |
 
 ---
 
@@ -133,3 +140,4 @@ No task points back to an upstream dependency, so the graph has no circular edge
 - This plan intentionally omits compatibility shims for legacy start payloads.
 - Tests for transcript capture and lineage are treated as rollout blockers, not follow-up cleanup.
 - Copilot CLI parameter compatibility must track installed CLI behavior (`--add-dir` / `--resume`) when implementing command construction and workflow tooling.
+- Task 21 is an explicit follow-up contract adjustment and should be landed with matching spec + behavior updates.

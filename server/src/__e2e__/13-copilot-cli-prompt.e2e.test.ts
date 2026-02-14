@@ -146,7 +146,6 @@ const extractScenario = (text) => {
 
 const strictJsonPrompt = prompt.includes('Return STRICT JSON only');
 const repairPrompt = prompt.includes('Reformat ONLY the previous response as STRICT JSON');
-const resetPrompt = prompt.includes('System maintenance instruction: discard this result-formatting exchange');
 
 const printResultJson = (json) => {
   process.stdout.write(JSON.stringify(json));
@@ -165,21 +164,11 @@ if (!conversationIdArg) {
 
 if (!db.conversations[conversationIdArg]) {
   db.conversations[conversationIdArg] = {
-    scenario: strictJsonPrompt || repairPrompt || resetPrompt ? 'DEFAULT_OK' : extractScenario(prompt),
+    scenario: strictJsonPrompt || repairPrompt ? 'DEFAULT_OK' : extractScenario(prompt),
     resultCalls: 0,
   };
 }
 const conv = db.conversations[conversationIdArg];
-
-if (resetPrompt) {
-  if (conv.scenario === 'RESET_FAILURE') {
-    process.stderr.write('reset failed');
-    process.exit(9);
-  }
-  process.stdout.write('OK');
-  writeDb(db);
-  process.exit(0);
-}
 
 if (strictJsonPrompt || repairPrompt) {
   conv.resultCalls += 1;
@@ -323,7 +312,7 @@ describe('copilot-cli-prompt workflow e2e', () => {
     expect(instance.stateData.filePathWarnings).toHaveLength(1);
     expect(instance.stateData.filePathWarnings[0]?.path).toBe('../outside.md');
 
-    expect(instance.stateData.commandOutputFiles).toHaveLength(3);
+    expect(instance.stateData.commandOutputFiles).toHaveLength(2);
     for (const ref of instance.stateData.commandOutputFiles) {
       expect(ref.label).toBe('copilot');
       expect(ref.path.startsWith('runCopilot/001-copilot')).toBe(true);
@@ -376,30 +365,6 @@ describe('copilot-cli-prompt workflow e2e', () => {
 
     expect(instance.stateData.reason).toBe('invalid_result_json');
     expect(instance.stateData.attemptCount).toBe(3);
-    expect(instance.stateData.conversationId).toMatch(/\S+/);
-  });
-
-  it('routes reset failures to execErrorState', async () => {
-    const def = await api.createDef(buildSingleCopilotDefinition('copilot-reset-failure-e2e'));
-
-    const start = await api.startInst(def.id, {
-      prompt: 'SCENARIO:RESET_FAILURE trigger reset failure',
-      successState: 'completed',
-      execErrorState: 'error',
-    });
-
-    const final = await api.pollStatus(start.id, ['completed', 'error'], 15_000);
-    expect(final.status).toBe('error');
-
-    const instanceRes = await api.getInstance(start.id);
-    const instance = (await instanceRes.json()) as {
-      stateData: {
-        reason: string;
-        conversationId?: string;
-      };
-    };
-
-    expect(instance.stateData.reason).toBe('conversation_reset_failed');
     expect(instance.stateData.conversationId).toMatch(/\S+/);
   });
 

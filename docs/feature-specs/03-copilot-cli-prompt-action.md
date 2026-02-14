@@ -17,7 +17,6 @@ The action is designed to chain into later AI actions by returning validated fil
 - Support optional file-path context forwarded to `copilot` CLI input arguments.
 - Ask a result-reporting system prompt that returns JSON (`data`, `filePaths`, diagnostics).
 - If the model returns invalid JSON, retry in-action with a system prompt to wrap/reformat as strict JSON.
-- Reset conversation state to before the system result prompt.
 - Validate JSON shape and required fields before returning state data.
 - Route invalid JSON/shape failures (after retries) through the action error transition with structured diagnostics.
 - Depend on a system-wide, toggleable CLI transcript capture feature for all `ctx.cli.exec` usage.
@@ -71,10 +70,10 @@ This spec adopts the following implementation decisions for this rollout:
 
 - Transcript labels are derived by the CLI helper from command name (actions do not provide per-call labels).
 
-9. **Conversation reset behavior: strict**
+9. **Conversation reset behavior: removed**
 
-- Conversation reset to pre-result-prompt snapshot is required.
-- If reset fails, the action transitions to `execErrorState`.
+- Do not execute a conversation reset command after result capture.
+- Result-formatting prompt turns may remain in conversation history for resumed sessions.
 
 10. **`filePaths` handling policy: warn + pass-through**
 
@@ -317,7 +316,7 @@ When runtime capture is enabled, every CLI command in any action writes a `.txt`
 - stdout
 - stderr
 
-Capture includes all CLI calls in this action flow (initial prompt execution, JSON-result prompt, optional JSON-repair reprompt, and reset command) because it applies to all `ctx.cli.exec` usage.
+Capture includes all CLI calls in this action flow (initial prompt execution, JSON-result prompt, optional JSON-repair reprompt) because it applies to all `ctx.cli.exec` usage.
 
 When capture is enabled, `ctx.cli.exec(...)` also returns rich transcript metadata for each command:
 
@@ -356,8 +355,6 @@ After the main prompt execution:
 2. Parse and validate the JSON.
 3. If JSON is invalid, send a **system reprompt** asking the model to wrap/reformat its previous response as strict JSON only.
 4. Repeat parse/validate for each retry until success or `maxFormatRetries` is reached.
-5. Reset/restore conversation state to the snapshot from immediately before the system result prompt.
-6. If reset fails, transition to `execErrorState` with reset diagnostics.
 
 Recommended default: `maxFormatRetries = 2` (up to 3 total format attempts including the first result prompt).
 
@@ -366,7 +363,6 @@ Recommended default: `maxFormatRetries = 2` (up to 3 total format attempts inclu
 - Must request machine-readable JSON only (no markdown).
 - Must request fields needed for chaining (data + file paths + status + diagnostics).
 - On invalid JSON, must issue system reprompts from within the same action until success or `maxFormatRetries` is exhausted.
-- Must be ephemeral from conversation-history perspective (state reset after capture), and reset failure is treated as action failure.
 - Must run in the active conversation (newly created or resumed via `conversationId`).
 
 ## Required JSON result schema

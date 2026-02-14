@@ -763,7 +763,7 @@
 - [ ] If final retry output is still invalid, machine transitions to `execErrorState` with validation details, raw output, and active `conversationId` when available
 - [ ] Invalid/unsafe model-returned `filePaths[]` entries do not fail the action by themselves; action preserves raw entries and emits `filePathWarnings`
 - [ ] If Copilot CLI execution fails, machine transitions to `execErrorState` with `stderr`/`exitCode` and active `conversationId` when available
-- [ ] If conversation reset to the pre-result-prompt snapshot fails, machine transitions to `execErrorState`
+- [ ] Action does not execute a conversation reset step after result-capture prompts
 - [ ] With output capture enabled, returned data includes `commandOutputFiles` references for all CLI calls in the flow
 - [ ] Chained follow-up states can pass forward returned `conversationId` to resume the same conversation context
 
@@ -832,4 +832,4 @@
 - [ ] JSON result with `additionalProperties` at top-level fails validation and transitions to `execErrorState` after bounded in-action retry attempts
 - [ ] Invalid/unsafe model-returned `filePaths[]` entries are preserved as raw output and surfaced via `filePathWarnings` (not a failure by themselves)
 - [ ] If `conversationId` is provided, the initial directory-guidance prelude is not resent on the resumed prompt turn
-- [ ] Conversation state is reset after result-capture prompts so follow-up user prompts do not include the temporary JSON-formatting system prompts
+- [ ] Result-formatting prompt turns may remain in conversation history for resumed prompt turns

@@ -86,12 +86,6 @@ describe('copilot-cli-prompt action', () => {
           stderr: '',
           durationMs: 5,
         },
-        {
-          exitCode: 0,
-          stdout: 'OK',
-          stderr: '',
-          durationMs: 2,
-        },
       ],
     );
 
@@ -139,7 +133,6 @@ describe('copilot-cli-prompt action', () => {
         { exitCode: 0, stdout: 'not json', stderr: '', durationMs: 5 },
         { exitCode: 0, stdout: '{"bad":true}', stderr: '', durationMs: 5 },
         { exitCode: 0, stdout: '[]', stderr: '', durationMs: 5 },
-        { exitCode: 0, stdout: 'OK', stderr: '', durationMs: 2 },
       ],
     );
 
@@ -149,6 +142,7 @@ describe('copilot-cli-prompt action', () => {
     const data = result.data as { reason: string; attemptCount: number };
     expect(data.reason).toBe('invalid_result_json');
     expect(data.attemptCount).toBe(3);
+    expect(ctx.cliCalls).toHaveLength(4);
 
     const firstCallArgs = ctx.cliCalls[0]?.args ?? [];
     const promptIndex = firstCallArgs.indexOf('--prompt');
@@ -156,6 +150,18 @@ describe('copilot-cli-prompt action', () => {
     expect(promptValue).toBe('Follow up');
     expect(firstCallArgs).toContain('--resume');
     expect(firstCallArgs).toContain('conv-existing');
+
+    const allPrompts = ctx.cliCalls
+      .map((call) => call.args ?? [])
+      .map((args) => {
+        const idx = args.indexOf('--prompt');
+        return idx >= 0 ? args[idx + 1] : '';
+      });
+    expect(
+      allPrompts.some((prompt) =>
+        prompt.includes('System maintenance instruction: discard this result-formatting exchange'),
+      ),
+    ).toBe(false);
   });
 
   it('routes schema-valid status:error payloads to successState', () => {
@@ -185,12 +191,6 @@ describe('copilot-cli-prompt action', () => {
           stderr: '',
           durationMs: 5,
         },
-        {
-          exitCode: 0,
-          stdout: 'OK',
-          stderr: '',
-          durationMs: 2,
-        },
       ],
     );
 
@@ -206,58 +206,6 @@ describe('copilot-cli-prompt action', () => {
     );
     expect(data.copilotResult.status).toBe('error');
     expect(data.copilotResult.summary).toContain('structured');
-  });
-
-  it('routes reset failures to execErrorState with reset diagnostics', () => {
-    const ctx = makeCtx(
-      {
-        prompt: 'Cause reset failure',
-        successState: 'next',
-        execErrorState: 'handleErr',
-      },
-      [
-        {
-          exitCode: 0,
-          stdout: 'Conversation ID: conv-reset-fail',
-          stderr: '',
-          durationMs: 10,
-        },
-        {
-          exitCode: 0,
-          stdout: JSON.stringify({
-            schemaVersion: 'copilot-action-result.v1',
-            status: 'ok',
-            summary: 'json done',
-            data: {},
-            filePaths: [],
-            diagnostics: { exitCode: 0, durationMs: 10 },
-          }),
-          stderr: '',
-          durationMs: 5,
-        },
-        {
-          exitCode: 9,
-          stdout: '',
-          stderr: 'reset failed',
-          durationMs: 2,
-        },
-      ],
-    );
-
-    const result = Effect.runSync(copilotCliPromptAction(ctx));
-
-    expect(result.nextState).toBe('handleErr');
-    const data = result.data as {
-      reason: string;
-      exitCode: number;
-      stderr: string;
-      conversationId: string;
-    };
-    expect(data.reason).toBe('conversation_reset_failed');
-    expect(data.exitCode).toBe(9);
-    expect(data.stderr).toContain('reset failed');
-    expect(data.conversationId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    );
+    expect(ctx.cliCalls).toHaveLength(2);
   });
 });
