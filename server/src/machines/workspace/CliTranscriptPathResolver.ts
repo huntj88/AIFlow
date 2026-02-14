@@ -18,7 +18,7 @@ export interface CliTranscriptPathResolverOptions {
   readonly visitIndex: number;
 }
 
-/** Resolver function that returns a collision-safe path for the given command label. */
+/** Resolver function that returns a transcript path for the given label. */
 export type CliTranscriptPathResolver = (label: string) => CliTranscriptPath;
 
 const sanitizeSegment = (value: string, fallback: string): string => {
@@ -43,8 +43,8 @@ const padVisitIndex = (visitIndex: number): string =>
  * Create a transcript path resolver for one state visit.
  *
  * Path format:
- * - root: `<stateName>/<visitIndex>-<label>.txt`
- * - child: `children/<childInstanceId>/<stateName>/<visitIndex>-<label>.txt`
+ * - root: `<stateName>/<visitIndex>-<label>-log.txt`
+ * - child: `children/<childInstanceId>/<stateName>/<visitIndex>-<label>-log.txt`
  * - nested child: recursive `children/<instanceId>/...`
  */
 export const makeCliTranscriptPathResolver = (
@@ -56,16 +56,10 @@ export const makeCliTranscriptPathResolver = (
     sanitizeSegment(instanceId, 'instance'),
   ]);
   const visit = padVisitIndex(opts.visitIndex);
-  const collisionCounts = new Map<string, number>();
 
   return (label: string) => {
     const safeLabel = sanitizeSegment(label, 'command').toLowerCase();
-    const seen = collisionCounts.get(safeLabel) ?? 0;
-    const nextCount = seen + 1;
-    collisionCounts.set(safeLabel, nextCount);
-
-    const collisionSuffix = nextCount > 1 ? `-${String(nextCount)}` : '';
-    const fileName = `${visit}-${safeLabel}${collisionSuffix}.txt`;
+    const fileName = `${visit}-${safeLabel}-log.txt`;
     const relativePath = path.posix.join(...lineageSegments, safeStateName, fileName);
 
     return {

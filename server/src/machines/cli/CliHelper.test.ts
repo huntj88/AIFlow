@@ -227,8 +227,10 @@ describe('CliHelper', () => {
 
       expect(result.transcript).toBeDefined();
       expect(result.transcript?.workspace).toBe('artifacts');
-      expect(result.transcript?.path).toBe('runCli/001-echo.txt');
-      expect(result.transcript?.resolvedPath).toBe(path.join(artifactsDir, 'runCli/001-echo.txt'));
+      expect(result.transcript?.path).toBe('runCli/001-echo-log.txt');
+      expect(result.transcript?.resolvedPath).toBe(
+        path.join(artifactsDir, 'runCli/001-echo-log.txt'),
+      );
       expect(result.transcript?.label).toBe('echo');
       expect(result.transcript?.exitCode).toBe(result.exitCode);
       expect(result.transcript?.durationMs).toBe(result.durationMs);
@@ -239,6 +241,8 @@ describe('CliHelper', () => {
         throw new Error('Expected transcript metadata when capture is enabled');
       }
       const transcriptText = fs.readFileSync(transcript.resolvedPath, 'utf-8');
+      expect(transcriptText).toContain('===== CLI INVOCATION START =====');
+      expect(transcriptText).toContain('invocationIndex: 1');
       expect(transcriptText).toContain('command: echo');
       expect(transcriptText).toContain('args: ["captured-output"]');
       expect(transcriptText).toContain(`cwd: ${tmpDir}`);
@@ -253,7 +257,7 @@ describe('CliHelper', () => {
       const result = await run(cli.exec({ command: 'echo', args: ['no-capture'] }));
 
       expect(result.transcript).toBeUndefined();
-      const maybeTranscript = path.join(artifactsDir, 'state', '001-echo.txt');
+      const maybeTranscript = path.join(artifactsDir, 'state', '001-echo-log.txt');
       expect(fs.existsSync(maybeTranscript)).toBe(false);
     });
 
@@ -272,7 +276,7 @@ describe('CliHelper', () => {
       const result = await run(captureCli.exec({ command: 'echo', args: ['lineage'] }));
 
       expect(result.transcript?.path).toBe(
-        'children/child-1/children/grandchild-1/runCli/001-echo.txt',
+        'children/child-1/children/grandchild-1/runCli/001-echo-log.txt',
       );
       const transcript = result.transcript;
       expect(transcript).toBeDefined();
@@ -282,7 +286,7 @@ describe('CliHelper', () => {
       expect(fs.existsSync(transcript.resolvedPath)).toBe(true);
     });
 
-    it('appends deterministic suffix when labels collide in one visit', async () => {
+    it('appends repeated invocations to one state-scoped log file', async () => {
       const captureCli = makeCliHelper({
         ...opts,
         runtimeOptions: {
@@ -296,8 +300,17 @@ describe('CliHelper', () => {
       const first = await run(captureCli.exec({ command: 'echo', args: ['one'] }));
       const second = await run(captureCli.exec({ command: 'echo', args: ['two'] }));
 
-      expect(first.transcript?.path).toBe('runCli/001-echo.txt');
-      expect(second.transcript?.path).toBe('runCli/001-echo-2.txt');
+      expect(first.transcript?.path).toBe('runCli/001-echo-log.txt');
+      expect(second.transcript?.path).toBe('runCli/001-echo-log.txt');
+
+      const transcript = fs.readFileSync(
+        path.join(artifactsDir, 'runCli/001-echo-log.txt'),
+        'utf-8',
+      );
+      expect(transcript).toContain('invocationIndex: 1');
+      expect(transcript).toContain('invocationIndex: 2');
+      expect(transcript).toContain('args: ["one"]');
+      expect(transcript).toContain('args: ["two"]');
     });
 
     it('streams transcript chunks while command is still running', async () => {
@@ -311,7 +324,7 @@ describe('CliHelper', () => {
         stateVisitIndex: 1,
       });
 
-      const transcriptPath = path.join(artifactsDir, 'runCli/001-bash.txt');
+      const transcriptPath = path.join(artifactsDir, 'runCli/001-bash-log.txt');
 
       const result = await Effect.runPromise(
         Effect.gen(function* () {

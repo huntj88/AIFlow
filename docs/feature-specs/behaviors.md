@@ -529,8 +529,8 @@
 
 ### 16.8 Transcript Lineage Paths
 
-- [ ] Root-instance CLI transcripts are written under `<stateName>/<visitIndex>-<label>.txt` in the family artifacts root
-- [ ] Child-instance CLI transcripts are written under `children/<childInstanceId>/<stateName>/<visitIndex>-<label>.txt`
+- [ ] Root-instance CLI transcripts are written under `<stateName>/<visitIndex>-<label>-log.txt` in the family artifacts root
+- [ ] Child-instance CLI transcripts are written under `children/<childInstanceId>/<stateName>/<visitIndex>-<label>-log.txt`
 - [ ] Deeply nested children continue lineage nesting as `children/<instanceId>/...`
 - [ ] Re-visiting the same state increments `<visitIndex>` (`001`, `002`, ...)
 - [ ] Re-visiting the same state creates a new state-visit log file (new `<visitIndex>`)

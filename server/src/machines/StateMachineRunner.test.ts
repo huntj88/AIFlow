@@ -3482,17 +3482,19 @@ describe('CLI transcript capture lineage', () => {
       expect(grandchildren).toHaveLength(1);
       const grandchild = grandchildren[0];
 
-      expect(fs.existsSync(path.join(parent.artifactsPath, 'runParent/001-echo.txt'))).toBe(true);
+      expect(fs.existsSync(path.join(parent.artifactsPath, 'runParent/001-echo-log.txt'))).toBe(
+        true,
+      );
       expect(
         fs.existsSync(
-          path.join(parent.artifactsPath, `children/${child.id}/runChild/001-echo.txt`),
+          path.join(parent.artifactsPath, `children/${child.id}/runChild/001-echo-log.txt`),
         ),
       ).toBe(true);
       expect(
         fs.existsSync(
           path.join(
             parent.artifactsPath,
-            `children/${child.id}/children/${grandchild.id}/runGrand/001-echo.txt`,
+            `children/${child.id}/children/${grandchild.id}/runGrand/001-echo-log.txt`,
           ),
         ),
       ).toBe(true);
@@ -3562,8 +3564,12 @@ describe('CLI transcript capture lineage', () => {
       expect(result.status).toBe('completed');
 
       const instance = yield* store.getInstance(result.instanceId);
-      expect(fs.existsSync(path.join(instance.artifactsPath, 'repeat/001-echo.txt'))).toBe(true);
-      expect(fs.existsSync(path.join(instance.artifactsPath, 'repeat/002-echo.txt'))).toBe(true);
+      expect(fs.existsSync(path.join(instance.artifactsPath, 'repeat/001-echo-log.txt'))).toBe(
+        true,
+      );
+      expect(fs.existsSync(path.join(instance.artifactsPath, 'repeat/002-echo-log.txt'))).toBe(
+        true,
+      );
     }).pipe(Effect.provide(layer), Effect.runPromise);
   });
 });

@@ -355,8 +355,8 @@ When capture is enabled, `ctx.cli.exec(...)` also returns rich transcript metada
 ```json
 {
   "workspace": "artifacts",
-  "path": "runCopilotPrompt/001-copilot.txt",
-  "resolvedPath": "/abs/path/to/artifacts/.../runCopilotPrompt/001-copilot.txt",
+  "path": "runCopilotPrompt/001-copilot-log.txt",
+  "resolvedPath": "/abs/path/to/artifacts/.../runCopilotPrompt/001-copilot-log.txt",
   "label": "copilot",
   "exitCode": 0,
   "durationMs": 1432
@@ -368,13 +368,13 @@ When capture is enabled, `ctx.cli.exec(...)` also returns rich transcript metada
 Each transcript is written under an artifacts folder scoped to the machine instance that executed the command:
 
 - Root instance:
-  - `ctx.artifactsWorkspace.resolve("<stateName>/<visitIndex>-<label>.txt")`
+  - `ctx.artifactsWorkspace.resolve("<stateName>/<visitIndex>-<label>-log.txt")`
 - Child instance:
-  - `ctx.artifactsWorkspace.resolve("children/<childInstanceId>/<stateName>/<visitIndex>-<label>.txt")`
+  - `ctx.artifactsWorkspace.resolve("children/<childInstanceId>/<stateName>/<visitIndex>-<label>-log.txt")`
 - Nested children:
   - Continue nesting with `/children/<instanceId>/...` for each level.
 - `<visitIndex>` is the 1-based count of how many times that state has been visited for the executing instance (for example: `001`, then `002`).
-- The transcript filename for a state visit uses a `-log` suffix (for example `001-log.txt`).
+- Transcript filenames use a `-log` suffix (for example `001-copilot-log.txt`).
 - Multiple CLI invocations in one state visit append to that same state-visit log file.
 - Delimiter blocks are written between invocations to preserve command boundaries.
 

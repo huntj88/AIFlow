@@ -671,12 +671,12 @@ describe('§16 — CLI Helper via Action', () => {
       };
     };
 
-    expect(data.stateData.transcript?.path).toBe('run_cli/001-echo.txt');
+    expect(data.stateData.transcript?.path).toBe('run_cli/001-echo-log.txt');
     expect(data.stateData.transcript?.label).toBe('echo');
     expect(data.stateData.transcript?.resolvedPath).toBe(
-      path.join(data.artifactsPath, 'run_cli/001-echo.txt'),
+      path.join(data.artifactsPath, 'run_cli/001-echo-log.txt'),
     );
-    expect(fs.existsSync(path.join(data.artifactsPath, 'run_cli/001-echo.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(data.artifactsPath, 'run_cli/001-echo-log.txt'))).toBe(true);
   });
 
   it('child instance transcript path includes children/<childInstanceId> lineage', async () => {
@@ -711,7 +711,7 @@ describe('§16 — CLI Helper via Action', () => {
 
     const childTranscript = path.join(
       parentData.artifactsPath,
-      `children/${children[0].id}/run_cli/001-echo.txt`,
+      `children/${children[0].id}/run_cli/001-echo-log.txt`,
     );
     expect(fs.existsSync(childTranscript)).toBe(true);
   });
