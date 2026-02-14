@@ -17,7 +17,7 @@ The action is designed to chain into later AI actions by returning validated fil
 - Support optional file-path context forwarded to `copilot` CLI input arguments.
 - Ask a result-reporting system prompt that returns JSON (`data`, `filePaths`, diagnostics).
 - If the model returns invalid JSON, retry in-action with a system prompt to wrap/reformat as strict JSON.
-- Stream result-prompt outputs to a state-scoped log artifact while each CLI attempt is running (not end-of-attempt or end-of-action flush).
+- Stream CLI transcript outputs for all `ctx.cli.exec(...)` calls while each command is running (not end-of-command or end-of-action flush).
 - Use `gpt-5.1-codex-mini` for result-formatting prompt turns and `gpt-5.3-codex` for all other prompt turns.
 - Validate JSON shape and required fields before returning state data.
 - Route invalid JSON/shape failures (after retries) through the action error transition with structured diagnostics.
@@ -90,10 +90,10 @@ This spec adopts the following implementation decisions for this rollout:
 
 - Required dev curl workflow script lives under `scripts/dev/`.
 
-13. **Result-log write mode: streamed append**
+13. **CLI transcript write mode: streamed append**
 
-- Result prompt attempts stream stdout/stderr chunks into a single state-visit log file while each attempt executes.
-- Do not defer writes to end-of-attempt or end-of-action flushes.
+- All `ctx.cli.exec(...)` calls stream stdout/stderr chunks into transcript files while commands execute.
+- Do not defer transcript writes to end-of-command or end-of-action flushes.
 
 14. **Copilot model routing policy**
 
@@ -134,10 +134,10 @@ The following simplifications are recommended before implementation. They reduce
 - Keep the `scripts/dev/` curl workflow script declarative: static definition payload + start + poll loop.
 - Reuse a single polling/status-printer path for both success and failure terminal outcomes.
 
-7. **Single append-only streamed result log (`23`)**
+7. **Single streamed transcript boundary (`23`)**
 
-- Keep one append-only file per state visit for result prompt attempts.
-- Stream-write each attempt as chunks arrive from CLI stdout/stderr.
+- Keep streamed transcript writing centralized in `CliHelper` for all CLI commands.
+- Do not create action-specific stream-log implementations.
 
 ## Action Input Contract (`ctx.stateData`)
 
@@ -330,7 +330,7 @@ This migration intentionally makes breaking changes to move directly to the targ
 
 8. **Post-rollout follow-up**
 
-- Land streamed result-log writes + model-routing hardening as a follow-up task.
+- Land system-wide streamed CLI transcript writes + model-routing hardening as a follow-up task.
 
 ## System-wide toggleable CLI output capture
 
@@ -342,7 +342,7 @@ When runtime capture is enabled, every CLI command in any action writes a `.txt`
 - stdout
 - stderr
 
-Capture includes all CLI calls in this action flow (initial prompt execution, JSON-result prompt, optional JSON-repair reprompt) because it applies to all `ctx.cli.exec` usage.
+Capture includes all CLI calls in this action flow (initial prompt execution, JSON-result prompt, optional JSON-repair reprompt) and in every other action flow, because it applies to all `ctx.cli.exec` usage platform-wide.
 
 When capture is enabled, `ctx.cli.exec(...)` also returns rich transcript metadata for each command:
 
@@ -384,16 +384,14 @@ After the main prompt execution:
 
 Recommended default: `maxFormatRetries = 2` (up to 3 total format attempts including the first result prompt).
 
-### Streamed result-log behavior
+### System-wide streamed CLI transcript behavior
 
-Each result-formatting attempt (initial result prompt + each JSON-repair retry) writes to a single state-visit log file in artifacts as CLI output arrives.
+Every `ctx.cli.exec(...)` call writes to its transcript artifact as CLI output arrives.
 
-- Recommended path shape:
-  - Root instance: `ctx.artifactsWorkspace.resolve("<stateName>/<visitIndex>-copilot-result-log.txt")`
-  - Child instance: `ctx.artifactsWorkspace.resolve("children/<childInstanceId>/<stateName>/<visitIndex>-copilot-result-log.txt")`
-- Each log entry should include at least: `attempt`, `promptType` (`result` or `repair`), `model`, timestamp, and stream source (`stdout`/`stderr`).
-- Writes preserve prior entries in arrival order.
-- If a stream write fails, action execution continues and returns a warning diagnostic.
+This includes Copilot prompt flow commands (initial prompt execution, result prompt, JSON-repair retries) and all non-Copilot action commands that use `ctx.cli.exec(...)`.
+
+- Streamed transcript content should retain command context and include stream source markers (`stdout`/`stderr`) in arrival order.
+- If a transcript stream write fails, action execution continues and returns a warning diagnostic.
 
 ### Required system result prompt behavior
 

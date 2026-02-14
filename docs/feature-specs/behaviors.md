@@ -520,6 +520,7 @@
 - [ ] With `runtimeOptions.cliOutputCapture.enabled = true`, every `ctx.cli.exec(...)` call in any action writes a `.txt` transcript artifact
 - [ ] With `runtimeOptions.cliOutputCapture.enabled = false`, no transcript artifacts are written
 - [ ] Transcript content includes command/args, cwd, exit code, stdout, stderr, and duration
+- [ ] Transcript writes stream while command output is produced (no deferred end-of-command or end-of-action flush)
 - [ ] `ctx.cli.exec(...)` returns capture metadata (transcript file reference) when capture is enabled
 - [ ] Capture behavior is centralized in the CLI helper (actions do not implement custom capture logic)
 
@@ -530,6 +531,7 @@
 - [ ] Deeply nested children continue lineage nesting as `children/<instanceId>/...`
 - [ ] Re-visiting the same state increments `<visitIndex>` (`001`, `002`, ...)
 - [ ] Parent/child integration tests verify transcript paths are associated with the instance that executed each command
+- [ ] If transcript stream-write fails for a command, the action does not fail for that reason alone and warning diagnostics are surfaced
 
 ---
 
@@ -758,7 +760,7 @@
 - [ ] Main task prompt turns use `gpt-5.3-codex`
 - [ ] The action performs strict JSON result capture and validates required schema fields
 - [ ] Result prompt + JSON-repair prompt turns use `gpt-5.1-codex-mini`
-- [ ] Result prompt attempts stream stdout/stderr to a single state-visit result log file while CLI is running (no deferred end-of-attempt or end-of-action flush)
+- [ ] Copilot CLI calls follow the same global streamed transcript policy applied to all `ctx.cli.exec(...)` usage
 - [ ] On schema-valid result (including `status: 'error'`), machine transitions to `successState` and emits `conversationId` + `copilotResult` + `normalizedFilePaths`
 - [ ] Integration run verifies normalized file-path records include `workspace`, `path`, and `resolvedPath`
 - [ ] If result JSON is invalid, action issues in-action JSON-repair reprompts up to `maxFormatRetries = 2` (3 total attempts including initial result prompt)
@@ -835,4 +837,4 @@
 - [ ] Invalid/unsafe model-returned `filePaths[]` entries are preserved as raw output and surfaced via `filePathWarnings` (not a failure by themselves)
 - [ ] If `conversationId` is provided, the initial directory-guidance prelude is not resent on the resumed prompt turn
 - [ ] Result-formatting prompt turns may remain in conversation history for resumed prompt turns
-- [ ] If result-log stream-write fails, action does not fail for that reason alone and emits warning diagnostics
+- [ ] If Copilot-flow transcript stream-write fails, action does not fail for that reason alone and emits warning diagnostics
