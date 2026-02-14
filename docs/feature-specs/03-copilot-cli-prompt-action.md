@@ -17,6 +17,8 @@ The action is designed to chain into later AI actions by returning validated fil
 - Support optional file-path context forwarded to `copilot` CLI input arguments.
 - Ask a result-reporting system prompt that returns JSON (`data`, `filePaths`, diagnostics).
 - If the model returns invalid JSON, retry in-action with a system prompt to wrap/reformat as strict JSON.
+- Stream result-prompt outputs to a state-scoped log artifact while each CLI attempt is running (not end-of-attempt or end-of-action flush).
+- Use `gpt-5.1-codex-mini` for result-formatting prompt turns and `gpt-5.3-codex` for all other prompt turns.
 - Validate JSON shape and required fields before returning state data.
 - Route invalid JSON/shape failures (after retries) through the action error transition with structured diagnostics.
 - Depend on a system-wide, toggleable CLI transcript capture feature for all `ctx.cli.exec` usage.
@@ -88,6 +90,16 @@ This spec adopts the following implementation decisions for this rollout:
 
 - Required dev curl workflow script lives under `scripts/dev/`.
 
+13. **Result-log write mode: streamed append**
+
+- Result prompt attempts stream stdout/stderr chunks into a single state-visit log file while each attempt executes.
+- Do not defer writes to end-of-attempt or end-of-action flushes.
+
+14. **Copilot model routing policy**
+
+- Use `gpt-5.3-codex` for main task turns (new and resumed conversations).
+- Use `gpt-5.1-codex-mini` for strict-JSON result prompt turns (initial + repair retries).
+
 ## Implementation simplifications (draft, no behavior/contract changes)
 
 The following simplifications are recommended before implementation. They reduce moving parts while preserving all rollout decisions and behavior-spec obligations.
@@ -121,6 +133,11 @@ The following simplifications are recommended before implementation. They reduce
 
 - Keep the `scripts/dev/` curl workflow script declarative: static definition payload + start + poll loop.
 - Reuse a single polling/status-printer path for both success and failure terminal outcomes.
+
+7. **Single append-only streamed result log (`23`)**
+
+- Keep one append-only file per state visit for result prompt attempts.
+- Stream-write each attempt as chunks arrive from CLI stdout/stderr.
 
 ## Action Input Contract (`ctx.stateData`)
 
@@ -158,6 +175,11 @@ The action executes `copilot` CLI with:
 5. Optional context file arguments derived from `contextFilePaths`.
 6. Optional conversation resume using `conversationId` when provided.
 
+Model policy for this action:
+
+- Main prompt execution uses `gpt-5.3-codex`.
+- Result-formatting and JSON-repair prompt executions use `gpt-5.1-codex-mini`.
+
 Runtime resolves `workspaceDirs` entries to absolute paths before passing them as `--add-dir` values, and always appends `ctx.artifactsWorkspace.root` as the artifacts allow-dir.
 These flags configure Copilot CLI with the expected state-machine workspaces; the state machine itself does not enforce filesystem access control.
 
@@ -169,6 +191,7 @@ Example command shape (illustrative):
 ```bash
 copilot \
   --prompt "<system-directory-guidance>\n\nUser task:\n<prompt>" \
+  --model "gpt-5.3-codex" \
   --yolo \
   --add-dir "<resolved-workspace-dir>" \
   --add-dir "<resolved-artifacts-dir>" \
@@ -182,6 +205,7 @@ Resume command shape (illustrative):
 copilot \
   --resume "<conversationId>" \
   --prompt "<prompt>" \
+  --model "gpt-5.3-codex" \
   --yolo \
   --add-dir "<resolved-workspace-dir>" \
   --add-dir "<resolved-artifacts-dir>" \
@@ -304,6 +328,10 @@ This migration intentionally makes breaking changes to move directly to the targ
    - Land `copilot-cli-prompt` action and registry wiring third.
    - Land developer curl tooling last, targeting only the new contract.
 
+8. **Post-rollout follow-up**
+
+- Land streamed result-log writes + model-routing hardening as a follow-up task.
+
 ## System-wide toggleable CLI output capture
 
 When runtime capture is enabled, every CLI command in any action writes a `.txt` transcript artifact that includes:
@@ -356,12 +384,24 @@ After the main prompt execution:
 
 Recommended default: `maxFormatRetries = 2` (up to 3 total format attempts including the first result prompt).
 
+### Streamed result-log behavior
+
+Each result-formatting attempt (initial result prompt + each JSON-repair retry) writes to a single state-visit log file in artifacts as CLI output arrives.
+
+- Recommended path shape:
+  - Root instance: `ctx.artifactsWorkspace.resolve("<stateName>/<visitIndex>-copilot-result-log.txt")`
+  - Child instance: `ctx.artifactsWorkspace.resolve("children/<childInstanceId>/<stateName>/<visitIndex>-copilot-result-log.txt")`
+- Each log entry should include at least: `attempt`, `promptType` (`result` or `repair`), `model`, timestamp, and stream source (`stdout`/`stderr`).
+- Writes preserve prior entries in arrival order.
+- If a stream write fails, action execution continues and returns a warning diagnostic.
+
 ### Required system result prompt behavior
 
 - Must request machine-readable JSON only (no markdown).
 - Must request fields needed for chaining (data + file paths + status + diagnostics).
 - On invalid JSON, must issue system reprompts from within the same action until success or `maxFormatRetries` is exhausted.
 - Must run in the active conversation (newly created or resumed via `conversationId`).
+- Must use `gpt-5.1-codex-mini` for result prompt and repair turns.
 
 ## Required JSON result schema
 

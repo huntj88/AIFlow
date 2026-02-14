@@ -755,7 +755,10 @@
 - [ ] When `conversationId` is provided, the action resumes that conversation and does **not** prepend the directory-guidance prelude again
 - [ ] The Copilot CLI call runs in YOLO mode and includes `--add-dir` values from runtime `workspaceDirs` plus `ctx.artifactsWorkspace.root`
 - [ ] Optional `contextFilePaths` are forwarded as CLI context arguments after resolution
+- [ ] Main task prompt turns use `gpt-5.3-codex`
 - [ ] The action performs strict JSON result capture and validates required schema fields
+- [ ] Result prompt + JSON-repair prompt turns use `gpt-5.1-codex-mini`
+- [ ] Result prompt attempts stream stdout/stderr to a single state-visit result log file while CLI is running (no deferred end-of-attempt or end-of-action flush)
 - [ ] On schema-valid result (including `status: 'error'`), machine transitions to `successState` and emits `conversationId` + `copilotResult` + `normalizedFilePaths`
 - [ ] Integration run verifies normalized file-path records include `workspace`, `path`, and `resolvedPath`
 - [ ] If result JSON is invalid, action issues in-action JSON-repair reprompts up to `maxFormatRetries = 2` (3 total attempts including initial result prompt)
@@ -832,3 +835,4 @@
 - [ ] Invalid/unsafe model-returned `filePaths[]` entries are preserved as raw output and surfaced via `filePathWarnings` (not a failure by themselves)
 - [ ] If `conversationId` is provided, the initial directory-guidance prelude is not resent on the resumed prompt turn
 - [ ] Result-formatting prompt turns may remain in conversation history for resumed prompt turns
+- [ ] If result-log stream-write fails, action does not fail for that reason alone and emits warning diagnostics

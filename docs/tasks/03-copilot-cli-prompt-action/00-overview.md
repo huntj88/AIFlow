@@ -15,6 +15,7 @@ This plan delivers the `copilot-cli-prompt` rollout as a hard-cut migration:
 3. Implement `copilot-cli-prompt` + `handle-copilot-exec-error` with strict JSON recovery and structured output shaping.
 4. Ship full verification (unit/integration/e2e/client) and required developer curl workflow tooling.
 5. Apply post-rollout follow-ups to remove conversation reset semantics and drop `artifactDirs` from runtime policy.
+6. Add streamed result-log behavior and enforce prompt-model routing for result formatting.
 
 ---
 
@@ -27,6 +28,7 @@ This plan delivers the `copilot-cli-prompt` rollout as a hard-cut migration:
 | 3     | 10–15 | Copilot action implementation and registry wiring                             |
 | 4     | 16–20 | Verification, e2e workflows, developer script, rollout gates                  |
 | 5     | 21–22 | Follow-up contract changes: reset removal + artifact policy simplification    |
+| 6     | 23    | Follow-up behavior hardening: streamed result logs + model routing policy     |
 
 ## Simplified execution slices (draft)
 
@@ -59,6 +61,10 @@ To reduce handoff overhead, implement as larger slices while preserving the same
 7. **Slice G — Artifact policy simplification follow-up**
    - Task **22**.
    - Outcome: remove `cliDirectoryPolicy.artifactDirs`; always derive artifacts allow-dir from `ctx.artifactsWorkspace.root`.
+
+8. **Slice H — Result-log/model-routing follow-up**
+   - Task **23**.
+   - Outcome: stream result-attempt logs while CLI runs and enforce model split (`gpt-5.1-codex-mini` for result prompts, `gpt-5.3-codex` otherwise).
 
 ### Simplification guardrails
 
@@ -96,6 +102,7 @@ To reduce handoff overhead, implement as larger slices while preserving the same
 17 + 18 + 19 ──→ 20 Quality Gates & Rollout
 20 ──→ 21 Remove Conversation Reset Step
 21 ──→ 22 Remove artifactDirs from Runtime Policy
+22 ──→ 23 Incremental Result Log + Model Routing
 ```
 
 No task points back to an upstream dependency, so the graph has no circular edges.
@@ -115,6 +122,8 @@ No task points back to an upstream dependency, so the graph has no circular edge
 | Rollout decision 8 (helper-derived transcript labels)                           | 06, 07             |
 | Rollout decision 9 (no conversation reset step)                                 | 21                 |
 | Rollout decision 10 (`filePaths` warn + pass-through)                           | 14, 17             |
+| Rollout decision 13 (streamed result-log writes)                                | 23                 |
+| Rollout decision 14 (model routing policy)                                      | 12, 13, 23         |
 | Required system refactors section                                               | 01–07              |
 | Action input/CLI execution/prelude contracts                                    | 10–12              |
 | JSON recovery + required result schema                                          | 11, 13             |
@@ -125,17 +134,17 @@ No task points back to an upstream dependency, so the graph has no circular edge
 
 ## Behavior Spec Traceability
 
-| Behavior section                                            | Implementing tasks |
-| ----------------------------------------------------------- | ------------------ |
-| §3 Action Registry (copilot actions discoverable)           | 15, 17             |
-| §4.1 Start & Complete (runtimeOptions on start payload)     | 02, 03, 08, 09, 17 |
-| §4.5 Runtime CLI Options Validation                         | 02, 03, 09, 17     |
-| §16.7 Global Transcript Capture (runtime toggle)            | 06, 07, 17         |
-| §16.8 Transcript Lineage Paths                              | 05, 06, 07, 17     |
-| §21.9 Copilot CLI Prompt Action Workflow                    | 10–18              |
-| §21.10 Developer Curl Workflow Script                       | 19                 |
-| §22.1 API Error Responses (missing runtimeOptions branches) | 03, 09, 17         |
-| §22.7 `copilot-cli-prompt` Edge Cases                       | 11, 13, 14, 17, 21 |
+| Behavior section                                            | Implementing tasks     |
+| ----------------------------------------------------------- | ---------------------- |
+| §3 Action Registry (copilot actions discoverable)           | 15, 17                 |
+| §4.1 Start & Complete (runtimeOptions on start payload)     | 02, 03, 08, 09, 17     |
+| §4.5 Runtime CLI Options Validation                         | 02, 03, 09, 17         |
+| §16.7 Global Transcript Capture (runtime toggle)            | 06, 07, 17             |
+| §16.8 Transcript Lineage Paths                              | 05, 06, 07, 17         |
+| §21.9 Copilot CLI Prompt Action Workflow                    | 10–18, 23              |
+| §21.10 Developer Curl Workflow Script                       | 19                     |
+| §22.1 API Error Responses (missing runtimeOptions branches) | 03, 09, 17             |
+| §22.7 `copilot-cli-prompt` Edge Cases                       | 11, 13, 14, 17, 21, 23 |
 
 ---
 
@@ -145,4 +154,4 @@ No task points back to an upstream dependency, so the graph has no circular edge
 - This plan intentionally omits compatibility shims for legacy start payloads.
 - Tests for transcript capture and lineage are treated as rollout blockers, not follow-up cleanup.
 - Copilot CLI parameter compatibility must track installed CLI behavior (`--add-dir` / `--resume`) when implementing command construction and workflow tooling.
-- Tasks 21–22 are explicit follow-up contract adjustments and should be landed with matching spec + behavior updates.
+- Tasks 21–23 are explicit follow-up adjustments and should be landed with matching spec + behavior updates.
