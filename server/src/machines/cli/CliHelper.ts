@@ -12,6 +12,7 @@ import { Effect } from 'effect';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 
 import type {
   CliCaptureWarning,
@@ -73,6 +74,8 @@ const createCaptureWarning = (input: {
   transcriptResolvedPath: input.transcriptResolvedPath,
 });
 
+const sanitizeStreamChunk = (raw: string): string => stripVTControlCharacters(raw);
+
 interface TranscriptCapture {
   readonly appendChunk: (source: 'stdout' | 'stderr', chunk: Buffer) => void;
   readonly finalize: (result: Omit<CliExecResult, 'transcript' | 'captureWarnings'>) => Promise<{
@@ -114,6 +117,7 @@ export function makeCliHelper(opts: MakeCliHelperOptions): CliHelper {
     const warnings: CliCaptureWarning[] = [];
     let initSucceeded = false;
     let hasCapturedFailure = false;
+    let activeSource: 'stdout' | 'stderr' | null = null;
 
     let writeQueue: Promise<void> = fs
       .mkdir(path.dirname(transcriptPath.resolvedPath), { recursive: true })
@@ -164,7 +168,17 @@ export function makeCliHelper(opts: MakeCliHelperOptions): CliHelper {
 
     return {
       appendChunk: (source, chunk) => {
-        enqueue(`[${source}]\n${chunk.toString('utf-8')}\n`);
+        const chunkText = sanitizeStreamChunk(chunk.toString('utf-8'));
+        if (chunkText.length === 0) {
+          return;
+        }
+
+        if (activeSource !== source) {
+          enqueue(`\n[${source}]\n`);
+          activeSource = source;
+        }
+
+        enqueue(chunkText);
       },
       finalize: async (result) => {
         enqueue(formatTranscriptSummary(result));
