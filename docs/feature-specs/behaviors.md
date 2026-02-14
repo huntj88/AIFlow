@@ -769,6 +769,7 @@
 - [ ] If Copilot CLI execution fails, machine transitions to `execErrorState` with `stderr`/`exitCode` and active `conversationId` when available
 - [ ] Action does not execute a conversation reset step after result-capture prompts
 - [ ] With output capture enabled, returned data includes `commandOutputFiles` references for all CLI calls in the flow
+- [ ] Transcript stream-write warnings are surfaced in returned `commandOutputWarnings` without forcing `execErrorState`
 - [ ] Chained follow-up states can pass forward returned `conversationId` to resume the same conversation context
 
 ### 21.10 Developer Curl Workflow Script
@@ -837,4 +838,4 @@
 - [ ] Invalid/unsafe model-returned `filePaths[]` entries are preserved as raw output and surfaced via `filePathWarnings` (not a failure by themselves)
 - [ ] If `conversationId` is provided, the initial directory-guidance prelude is not resent on the resumed prompt turn
 - [ ] Result-formatting prompt turns may remain in conversation history for resumed prompt turns
-- [ ] If Copilot-flow transcript stream-write fails, action does not fail for that reason alone and emits warning diagnostics
+- [ ] If Copilot-flow transcript stream-write fails, action does not fail for that reason alone and emits warning diagnostics via `commandOutputWarnings`

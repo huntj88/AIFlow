@@ -28,12 +28,12 @@ Harden runtime CLI capture by streaming transcript writes for all `ctx.cli.exec(
 
 ## Acceptance Checklist
 
-- [ ] All CLI transcript files grow while commands are still running (not only after command completion or at action end).
-- [ ] Copilot result/repair turns participate in the same streamed transcript behavior as other CLI calls.
-- [ ] Main prompt turns use `gpt-5.3-codex`.
-- [ ] Result/repair prompt turns use `gpt-5.1-codex-mini`.
-- [ ] Transcript stream-write failures surface warnings and do not independently force `execErrorState`.
-- [ ] Spec + behavior docs reflect this policy and tests cover regressions.
+- [x] All CLI transcript files grow while commands are still running (not only after command completion or at action end).
+- [x] Copilot result/repair turns participate in the same streamed transcript behavior as other CLI calls.
+- [x] Main prompt turns use `gpt-5.3-codex`.
+- [x] Result/repair prompt turns use `gpt-5.1-codex-mini`.
+- [x] Transcript stream-write failures surface warnings and do not independently force `execErrorState`.
+- [x] Spec + behavior docs reflect this policy and tests cover regressions.
 
 ---
 

@@ -121,6 +121,7 @@ const valueAfter = (flag) => {
 };
 
 const prompt = valueAfter('--prompt') || '';
+const model = valueAfter('--model') || '';
 const conversationIdArg = valueAfter('--resume') || valueAfter('--conversation-id');
 
 const dbPath = process.env.COPILOT_FAKE_DB || path.join(os.tmpdir(), 'aiflow-fake-copilot-db.json');
@@ -145,6 +146,12 @@ const extractScenario = (text) => {
 
 const strictJsonPrompt = prompt.includes('Return STRICT JSON only');
 const repairPrompt = prompt.includes('Reformat ONLY the previous response as STRICT JSON');
+
+const expectModel = strictJsonPrompt || repairPrompt ? 'gpt-5.1-codex-mini' : 'gpt-5.3-codex';
+if (model !== expectModel) {
+  process.stderr.write('unexpected model: expected ' + expectModel + ', got ' + model);
+  process.exit(64);
+}
 
 const printResultJson = (json) => {
   process.stdout.write(JSON.stringify(json));

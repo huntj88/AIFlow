@@ -172,6 +172,14 @@ export interface StartInstanceRequest {
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Result of executing a CLI command. */
+export interface CliCaptureWarning {
+  readonly code: 'transcript_stream_write_failed';
+  readonly message: string;
+  readonly transcriptPath?: string;
+  readonly transcriptResolvedPath?: string;
+}
+
+/** Result of executing a CLI command. */
 export interface CliExecResult {
   readonly exitCode: number; // -1 = spawn failure
   readonly stdout: string;
@@ -185,6 +193,7 @@ export interface CliExecResult {
     readonly exitCode: number;
     readonly durationMs: number;
   };
+  readonly captureWarnings?: readonly CliCaptureWarning[];
 }
 
 /** Helper for executing CLI commands within an action. */

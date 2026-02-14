@@ -242,6 +242,9 @@ describe('CliHelper', () => {
       expect(transcriptText).toContain('command: echo');
       expect(transcriptText).toContain('args: ["captured-output"]');
       expect(transcriptText).toContain(`cwd: ${tmpDir}`);
+      expect(transcriptText).toContain('stream:');
+      expect(transcriptText).toContain('[stdout]');
+      expect(transcriptText).toContain('captured-output');
       expect(transcriptText).toContain('stdout:\ncaptured-output\n');
       expect(transcriptText).toContain('stderr:\n');
     });
@@ -295,6 +298,73 @@ describe('CliHelper', () => {
 
       expect(first.transcript?.path).toBe('runCli/001-echo.txt');
       expect(second.transcript?.path).toBe('runCli/001-echo-2.txt');
+    });
+
+    it('streams transcript chunks while command is still running', async () => {
+      const captureCli = makeCliHelper({
+        ...opts,
+        runtimeOptions: {
+          ...opts.runtimeOptions,
+          cliOutputCapture: { enabled: true },
+        },
+        stateName: 'runCli',
+        stateVisitIndex: 1,
+      });
+
+      const transcriptPath = path.join(artifactsDir, 'runCli/001-bash.txt');
+
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const fiber = yield* Effect.fork(
+            captureCli.exec({
+              command: 'bash',
+              args: ['-c', 'for i in 1 2 3 4 5; do echo chunk-$i; sleep 0.2; done'],
+            }),
+          );
+
+          yield* Effect.sleep('120 millis');
+
+          expect(fs.existsSync(transcriptPath)).toBe(true);
+          const firstSize = fs.statSync(transcriptPath).size;
+          const firstPartial = fs.readFileSync(transcriptPath, 'utf-8');
+          expect(firstPartial).toContain('[stdout]');
+          expect(firstPartial).toContain('chunk-1');
+
+          yield* Effect.sleep('260 millis');
+          const secondSize = fs.statSync(transcriptPath).size;
+          expect(secondSize).toBeGreaterThan(firstSize);
+
+          return yield* Fiber.join(fiber);
+        }),
+      );
+
+      const finalText = fs.readFileSync(transcriptPath, 'utf-8');
+      expect(result.exitCode).toBe(0);
+      expect(finalText).toContain('chunk-5');
+    });
+
+    it('returns capture warnings and does not fail command when transcript write fails', async () => {
+      const invalidArtifactsRoot = path.join(tmpDir, 'artifacts-file');
+      fs.writeFileSync(invalidArtifactsRoot, 'not-a-directory', 'utf-8');
+
+      const captureCli = makeCliHelper({
+        ...opts,
+        artifactsRoot: invalidArtifactsRoot,
+        runtimeOptions: {
+          ...opts.runtimeOptions,
+          cliOutputCapture: { enabled: true },
+        },
+        stateName: 'runCli',
+        stateVisitIndex: 1,
+      });
+
+      const result = await run(captureCli.exec({ command: 'echo', args: ['safe-run'] }));
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.trim()).toBe('safe-run');
+      expect(result.transcript).toBeUndefined();
+      expect(result.captureWarnings?.length).toBeGreaterThan(0);
+      expect(result.captureWarnings?.[0]?.code).toBe('transcript_stream_write_failed');
     });
   });
 

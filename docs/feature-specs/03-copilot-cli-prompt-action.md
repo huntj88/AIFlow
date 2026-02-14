@@ -126,7 +126,7 @@ The following simplifications are recommended before implementation. They reduce
 
 5. **Stable output shape defaults**
 
-- Always include `commandOutputFiles` and `filePathWarnings` as arrays (empty when none) across both success and exec-error branches.
+- Always include `commandOutputFiles`, `commandOutputWarnings`, and `filePathWarnings` as arrays (empty when none) across both success and exec-error branches.
 - This removes optional-field branching in downstream states and tests.
 
 6. **Thin developer script (`19`)**
@@ -391,7 +391,7 @@ Every `ctx.cli.exec(...)` call writes to its transcript artifact as CLI output a
 This includes Copilot prompt flow commands (initial prompt execution, result prompt, JSON-repair retries) and all non-Copilot action commands that use `ctx.cli.exec(...)`.
 
 - Streamed transcript content should retain command context and include stream source markers (`stdout`/`stderr`) in arrival order.
-- If a transcript stream write fails, action execution continues and returns a warning diagnostic.
+- If a transcript stream write fails, action execution continues and returns a warning diagnostic in `commandOutputWarnings`.
 
 ### Required system result prompt behavior
 

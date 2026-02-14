@@ -117,6 +117,13 @@ describe('copilot-cli-prompt action', () => {
     const resumeIndex = firstCallArgs.indexOf('--resume');
     expect(resumeIndex).toBeGreaterThanOrEqual(0);
     expect(firstCallArgs[resumeIndex + 1]).toBe(conversationId);
+
+    const modelIndex = firstCallArgs.indexOf('--model');
+    expect(modelIndex).toBeGreaterThanOrEqual(0);
+    expect(firstCallArgs[modelIndex + 1]).toBe('gpt-5.3-codex');
+
+    const secondCallArgs = ctx.cliCalls[1]?.args ?? [];
+    expect(secondCallArgs[secondCallArgs.indexOf('--model') + 1]).toBe('gpt-5.1-codex-mini');
   });
 
   it('omits prelude on resume and bounds invalid-json retries to 3 total attempts', () => {
@@ -161,6 +168,19 @@ describe('copilot-cli-prompt action', () => {
         prompt.includes('System maintenance instruction: discard this result-formatting exchange'),
       ),
     ).toBe(false);
+
+    const allModels = ctx.cliCalls.map((call) => {
+      const args = call.args ?? [];
+      const idx = args.indexOf('--model');
+      return idx >= 0 ? args[idx + 1] : undefined;
+    });
+
+    expect(allModels[0]).toBe('gpt-5.3-codex');
+    expect(allModels.slice(1)).toEqual([
+      'gpt-5.1-codex-mini',
+      'gpt-5.1-codex-mini',
+      'gpt-5.1-codex-mini',
+    ]);
   });
 
   it('routes schema-valid status:error payloads to successState', () => {
@@ -206,5 +226,60 @@ describe('copilot-cli-prompt action', () => {
     expect(data.copilotResult.status).toBe('error');
     expect(data.copilotResult.summary).toContain('structured');
     expect(ctx.cliCalls).toHaveLength(2);
+
+    const firstArgs = ctx.cliCalls[0]?.args ?? [];
+    const secondArgs = ctx.cliCalls[1]?.args ?? [];
+    expect(firstArgs[firstArgs.indexOf('--model') + 1]).toBe('gpt-5.3-codex');
+    expect(secondArgs[secondArgs.indexOf('--model') + 1]).toBe('gpt-5.1-codex-mini');
+  });
+
+  it('surfaces transcript capture warnings without failing successful action', () => {
+    const warning = {
+      code: 'transcript_stream_write_failed' as const,
+      message: 'Failed to write transcript stream: denied',
+      transcriptPath: 'runCopilot/001-copilot.txt',
+    };
+
+    const ctx = makeCtx(
+      {
+        prompt: 'Create parser',
+        successState: 'next',
+        execErrorState: 'handleErr',
+      },
+      [
+        {
+          exitCode: 0,
+          stdout: 'Conversation ID: conv-warning',
+          stderr: '',
+          durationMs: 10,
+          captureWarnings: [warning],
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            schemaVersion: 'copilot-action-result.v1',
+            status: 'ok',
+            summary: 'done',
+            data: {},
+            filePaths: [],
+            diagnostics: { exitCode: 0 },
+          }),
+          stderr: '',
+          durationMs: 5,
+          captureWarnings: [warning],
+        },
+      ],
+    );
+
+    const result = Effect.runSync(copilotCliPromptAction(ctx));
+    expect(result.nextState).toBe('next');
+
+    const data = result.data as {
+      commandOutputWarnings?: { code: string; message: string }[];
+    };
+    expect(data.commandOutputWarnings).toHaveLength(2);
+    expect(
+      data.commandOutputWarnings?.every((w) => w.code === 'transcript_stream_write_failed'),
+    ).toBe(true);
   });
 });

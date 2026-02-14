@@ -26,6 +26,8 @@ import {
 } from './copilot-cli-prompts.js';
 
 const MAX_FORMAT_RETRIES = 2;
+const MAIN_PROMPT_MODEL = 'gpt-5.3-codex';
+const RESULT_PROMPT_MODEL = 'gpt-5.1-codex-mini';
 
 interface FilePathWarning {
   readonly index: number;
@@ -68,6 +70,7 @@ const extractConversationId = (output: string): string | undefined => {
 
 const buildCopilotArgs = (input: {
   readonly prompt: string;
+  readonly model: string;
   readonly allowDirs: readonly string[];
   readonly contextPaths: readonly string[];
   readonly conversationId?: string;
@@ -79,6 +82,7 @@ const buildCopilotArgs = (input: {
   }
 
   args.push('--prompt', input.prompt);
+  args.push('--model', input.model);
 
   for (const allowDir of input.allowDirs) {
     args.push('--add-dir', allowDir);
@@ -166,6 +170,7 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
 
     const input = parsedInput.value;
     const commandOutputFiles: CliExecResult['transcript'][] = [];
+    const commandOutputWarnings: NonNullable<CliExecResult['captureWarnings']>[number][] = [];
 
     const allowDirs = [
       ...inputFromRuntimeDirs(ctx.runtimeOptions.cliDirectoryPolicy.workspaceDirs, (p) =>
@@ -196,6 +201,7 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
       command: 'copilot',
       args: buildCopilotArgs({
         prompt: initialPrompt,
+        model: MAIN_PROMPT_MODEL,
         allowDirs,
         contextPaths,
         conversationId,
@@ -205,6 +211,13 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
     if (mainExec.transcript) {
       commandOutputFiles.push(mainExec.transcript);
     }
+    if (mainExec.captureWarnings && mainExec.captureWarnings.length > 0) {
+      commandOutputWarnings.push(...mainExec.captureWarnings);
+      yield* ctx.logger.warn('CLI transcript capture warning', {
+        command: 'copilot',
+        warnings: mainExec.captureWarnings,
+      });
+    }
 
     if (mainExec.exitCode !== 0) {
       return toExecError(input, {
@@ -213,6 +226,7 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
         stderr: mainExec.stderr,
         stdout: mainExec.stdout,
         commandOutputFiles,
+        commandOutputWarnings,
         conversationId,
       });
     }
@@ -225,6 +239,7 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
         reason: 'missing_conversation_id',
         message: 'Unable to determine conversation ID from copilot output',
         commandOutputFiles,
+        commandOutputWarnings,
       });
     }
 
@@ -244,6 +259,7 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
         command: 'copilot',
         args: buildCopilotArgs({
           prompt: resultPrompt,
+          model: RESULT_PROMPT_MODEL,
           allowDirs,
           contextPaths,
           conversationId: activeConversationId,
@@ -253,6 +269,13 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
       if (resultExec.transcript) {
         commandOutputFiles.push(resultExec.transcript);
       }
+      if (resultExec.captureWarnings && resultExec.captureWarnings.length > 0) {
+        commandOutputWarnings.push(...resultExec.captureWarnings);
+        yield* ctx.logger.warn('CLI transcript capture warning', {
+          command: 'copilot',
+          warnings: resultExec.captureWarnings,
+        });
+      }
 
       if (resultExec.exitCode !== 0) {
         return toExecError(input, {
@@ -261,6 +284,7 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
           stderr: resultExec.stderr,
           stdout: resultExec.stdout,
           commandOutputFiles,
+          commandOutputWarnings,
           conversationId: activeConversationId,
           attemptCount: attemptCount + 1,
         });
@@ -285,6 +309,7 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
         validationErrors,
         rawResult: lastRawResult,
         commandOutputFiles,
+        commandOutputWarnings,
         conversationId: activeConversationId,
       });
     }
@@ -298,6 +323,7 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
         copilotResult: validatedResult,
         normalizedFilePaths,
         commandOutputFiles,
+        commandOutputWarnings,
         filePathWarnings,
       },
     };

@@ -13,8 +13,12 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-import type { CliExecResult, CliHelper } from '../types.js';
-import type { MachineRuntimeOptions } from '../types.js';
+import type {
+  CliCaptureWarning,
+  CliExecResult,
+  CliHelper,
+  MachineRuntimeOptions,
+} from '../types.js';
 import {
   deriveCliTranscriptLabel,
   makeCliTranscriptPathResolver,
@@ -37,19 +41,14 @@ export interface MakeCliHelperOptions {
   readonly lineageInstanceIds?: readonly string[];
 }
 
-const formatTranscriptContent = (input: {
-  readonly command: string;
-  readonly args: readonly string[];
-  readonly cwd: string;
+const formatTranscriptSummary = (input: {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
   readonly durationMs: number;
 }) =>
   [
-    `command: ${input.command}`,
-    `args: ${JSON.stringify(input.args)}`,
-    `cwd: ${input.cwd}`,
+    '',
     `exitCode: ${String(input.exitCode)}`,
     `durationMs: ${String(input.durationMs)}`,
     '',
@@ -60,6 +59,27 @@ const formatTranscriptContent = (input: {
     input.stderr,
     '',
   ].join('\n');
+
+const createCaptureWarning = (input: {
+  readonly err: unknown;
+  readonly transcriptPath?: string;
+  readonly transcriptResolvedPath?: string;
+}): CliCaptureWarning => ({
+  code: 'transcript_stream_write_failed',
+  message: `Failed to write transcript stream: ${
+    input.err instanceof Error ? input.err.message : String(input.err)
+  }`,
+  transcriptPath: input.transcriptPath,
+  transcriptResolvedPath: input.transcriptResolvedPath,
+});
+
+interface TranscriptCapture {
+  readonly appendChunk: (source: 'stdout' | 'stderr', chunk: Buffer) => void;
+  readonly finalize: (result: Omit<CliExecResult, 'transcript' | 'captureWarnings'>) => Promise<{
+    readonly transcript?: CliExecResult['transcript'];
+    readonly captureWarnings?: readonly CliCaptureWarning[];
+  }>;
+}
 
 /**
  * Construct a `CliHelper` bound to the given workspace and artifacts root.
@@ -82,33 +102,89 @@ export function makeCliHelper(opts: MakeCliHelperOptions): CliHelper {
       })
     : null;
 
-  const writeTranscript = (input: {
+  const makeTranscriptCapture = (input: {
     readonly command: string;
     readonly args: readonly string[];
     readonly cwd: string;
-    readonly exitCode: number;
-    readonly stdout: string;
-    readonly stderr: string;
-    readonly durationMs: number;
-  }): Promise<CliExecResult['transcript'] | undefined> => {
-    if (!resolveTranscriptPath) return Promise.resolve(undefined);
+  }): TranscriptCapture | null => {
+    if (!resolveTranscriptPath) return null;
 
     const label = deriveCliTranscriptLabel(input.command);
     const transcriptPath = resolveTranscriptPath(label);
-    const content = formatTranscriptContent(input);
+    const warnings: CliCaptureWarning[] = [];
+    let initSucceeded = false;
+    let hasCapturedFailure = false;
 
-    return fs
+    let writeQueue: Promise<void> = fs
       .mkdir(path.dirname(transcriptPath.resolvedPath), { recursive: true })
-      .then(() => fs.writeFile(transcriptPath.resolvedPath, content, 'utf-8'))
-      .then(() => ({
-        workspace: transcriptPath.workspace,
-        path: transcriptPath.path,
-        resolvedPath: transcriptPath.resolvedPath,
-        label: transcriptPath.label,
-        exitCode: input.exitCode,
-        durationMs: input.durationMs,
-      }))
-      .catch(() => undefined);
+      .then(() =>
+        fs.writeFile(
+          transcriptPath.resolvedPath,
+          [
+            `command: ${input.command}`,
+            `args: ${JSON.stringify(input.args)}`,
+            `cwd: ${input.cwd}`,
+            '',
+            'stream:',
+            '',
+          ].join('\n'),
+          'utf-8',
+        ),
+      )
+      .then(() => {
+        initSucceeded = true;
+      })
+      .catch((err: unknown) => {
+        hasCapturedFailure = true;
+        warnings.push(
+          createCaptureWarning({
+            err,
+            transcriptPath: transcriptPath.path,
+            transcriptResolvedPath: transcriptPath.resolvedPath,
+          }),
+        );
+      });
+
+    const enqueue = (content: string) => {
+      writeQueue = writeQueue
+        .then(() => fs.appendFile(transcriptPath.resolvedPath, content, 'utf-8'))
+        .catch((err: unknown) => {
+          if (!hasCapturedFailure) {
+            warnings.push(
+              createCaptureWarning({
+                err,
+                transcriptPath: transcriptPath.path,
+                transcriptResolvedPath: transcriptPath.resolvedPath,
+              }),
+            );
+            hasCapturedFailure = true;
+          }
+        });
+    };
+
+    return {
+      appendChunk: (source, chunk) => {
+        enqueue(`[${source}]\n${chunk.toString('utf-8')}\n`);
+      },
+      finalize: async (result) => {
+        enqueue(formatTranscriptSummary(result));
+        await writeQueue;
+
+        return {
+          transcript: initSucceeded
+            ? {
+                workspace: transcriptPath.workspace,
+                path: transcriptPath.path,
+                resolvedPath: transcriptPath.resolvedPath,
+                label: transcriptPath.label,
+                exitCode: result.exitCode,
+                durationMs: result.durationMs,
+              }
+            : undefined,
+          captureWarnings: warnings.length > 0 ? warnings : undefined,
+        };
+      },
+    };
   };
 
   return {
@@ -117,6 +193,7 @@ export function makeCliHelper(opts: MakeCliHelperOptions): CliHelper {
         const startTime = Date.now();
         const cwd = input.cwd ?? opts.workspaceRoot;
         const args = input.args ?? [];
+        const capture = makeTranscriptCapture({ command: input.command, args, cwd });
         let settled = false;
 
         const finish = (result: CliExecResult) => {
@@ -125,24 +202,22 @@ export function makeCliHelper(opts: MakeCliHelperOptions): CliHelper {
           resume(Effect.succeed(result));
         };
 
-        const finishWithCapture = (baseResult: Omit<CliExecResult, 'transcript'>) => {
-          void writeTranscript({
-            command: input.command,
-            args,
-            cwd,
-            exitCode: baseResult.exitCode,
-            stdout: baseResult.stdout,
-            stderr: baseResult.stderr,
-            durationMs: baseResult.durationMs,
-          }).then((transcript) => {
-            finish(
-              transcript
-                ? {
-                    ...baseResult,
-                    transcript,
-                  }
-                : baseResult,
-            );
+        const finishWithCapture = (
+          baseResult: Omit<CliExecResult, 'transcript' | 'captureWarnings'>,
+        ) => {
+          if (!capture) {
+            finish(baseResult);
+            return;
+          }
+
+          void capture.finalize(baseResult).then((captureResult) => {
+            finish({
+              ...baseResult,
+              ...(captureResult.transcript ? { transcript: captureResult.transcript } : {}),
+              ...(captureResult.captureWarnings
+                ? { captureWarnings: captureResult.captureWarnings }
+                : {}),
+            });
           });
         };
 
@@ -169,6 +244,7 @@ export function makeCliHelper(opts: MakeCliHelperOptions): CliHelper {
           let stderrTruncated = false;
 
           child.stdout.on('data', (chunk: Buffer) => {
+            capture?.appendChunk('stdout', chunk);
             if (!stdoutTruncated) {
               stdoutBytes += chunk.length;
               if (stdoutBytes > MAX_OUTPUT_BYTES) {
@@ -180,6 +256,7 @@ export function makeCliHelper(opts: MakeCliHelperOptions): CliHelper {
           });
 
           child.stderr.on('data', (chunk: Buffer) => {
+            capture?.appendChunk('stderr', chunk);
             if (!stderrTruncated) {
               stderrBytes += chunk.length;
               if (stderrBytes > MAX_OUTPUT_BYTES) {
