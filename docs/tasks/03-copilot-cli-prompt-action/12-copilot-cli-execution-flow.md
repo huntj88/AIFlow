@@ -16,10 +16,10 @@ Implement command orchestration for `copilot-cli-prompt` (new conversation + res
 
 - Add `copilot-cli-prompt` action module under `server/src/machines/actions/`.
 - Build command execution flow:
-  - `copilot chat --yolo`
-  - `--allow-dir` from runtime policy (resolved)
+  - `copilot --yolo`
+  - `--add-dir` from runtime policy (resolved)
   - optional `--context` from `contextFilePaths`
-  - `--conversation-id` when provided
+  - `--resume` when provided
   - prompt composition using utility from Task 10
 - Resolve context paths against `workspace`/`artifactsWorkspace` resolvers.
 
@@ -30,7 +30,7 @@ Implement command orchestration for `copilot-cli-prompt` (new conversation + res
 - [x] New conversation path includes directory prelude and user prompt.
 - [x] Resume path includes conversation ID and omits prelude.
 - [x] Context file paths are transformed into CLI context args.
-- [x] Runtime policy directories are passed through as allow-dir args.
+- [x] Runtime policy directories are passed through as add-dir args.
 
 ---
 

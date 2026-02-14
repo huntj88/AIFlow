@@ -122,7 +122,7 @@ const valueAfter = (flag) => {
 };
 
 const prompt = valueAfter('--prompt') || '';
-const conversationIdArg = valueAfter('--conversation-id');
+const conversationIdArg = valueAfter('--resume') || valueAfter('--conversation-id');
 
 const dbPath = process.env.COPILOT_FAKE_DB || path.join(os.tmpdir(), 'aiflow-fake-copilot-db.json');
 
@@ -163,10 +163,13 @@ if (!conversationIdArg) {
   process.exit(0);
 }
 
-const conv = db.conversations[conversationIdArg] || { scenario: 'DEFAULT_OK', resultCalls: 0 };
 if (!db.conversations[conversationIdArg]) {
-  db.conversations[conversationIdArg] = conv;
+  db.conversations[conversationIdArg] = {
+    scenario: strictJsonPrompt || repairPrompt || resetPrompt ? 'DEFAULT_OK' : extractScenario(prompt),
+    resultCalls: 0,
+  };
 }
+const conv = db.conversations[conversationIdArg];
 
 if (resetPrompt) {
   if (conv.scenario === 'RESET_FAILURE') {
@@ -373,7 +376,7 @@ describe('copilot-cli-prompt workflow e2e', () => {
 
     expect(instance.stateData.reason).toBe('invalid_result_json');
     expect(instance.stateData.attemptCount).toBe(3);
-    expect(instance.stateData.conversationId).toMatch(/^conv-/);
+    expect(instance.stateData.conversationId).toMatch(/\S+/);
   });
 
   it('routes reset failures to execErrorState', async () => {
@@ -397,7 +400,7 @@ describe('copilot-cli-prompt workflow e2e', () => {
     };
 
     expect(instance.stateData.reason).toBe('conversation_reset_failed');
-    expect(instance.stateData.conversationId).toMatch(/^conv-/);
+    expect(instance.stateData.conversationId).toMatch(/\S+/);
   });
 
   it('propagates conversationId through chained follow-up state', async () => {
@@ -426,7 +429,7 @@ describe('copilot-cli-prompt workflow e2e', () => {
     const firstRun = instance.history.find((h) => h.fromState === 'runInitial');
     const followupRun = instance.history.find((h) => h.fromState === 'runFollowup');
 
-    expect(firstRun?.data?.conversationId).toMatch(/^conv-/);
+    expect(firstRun?.data?.conversationId).toMatch(/\S+/);
     expect(followupRun?.data?.conversationId).toBe(firstRun?.data?.conversationId);
     expect(instance.stateData.conversationId).toBe(firstRun?.data?.conversationId);
     expect(instance.stateData.copilotResult.data.phase).toBe('followup');

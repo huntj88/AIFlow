@@ -269,7 +269,7 @@ poll_instance_to_terminal() {
     status="$(node -e 'const v=JSON.parse(process.argv[1]); process.stdout.write(v.status);' "$fields")"
     current_state="$(node -e 'const v=JSON.parse(process.argv[1]); process.stdout.write(v.currentState);' "$fields")"
 
-    echo "[$(date -Iseconds)] instance=$instance_id status=$status currentState=$current_state"
+    echo "[$(date -Iseconds)] instance=$instance_id status=$status currentState=$current_state" >&2
 
     if [[ "$status" == "completed" || "$status" == "error" || "$status" == "cancelled" ]]; then
       echo "$RESPONSE_BODY"
@@ -294,6 +294,11 @@ echo "[3/5] first instance id=$first_instance_id"
 
 first_final="$(poll_instance_to_terminal "$first_instance_id")"
 first_status="$(node -e 'const v=JSON.parse(process.argv[1]); process.stdout.write(v.status);' "$first_final")"
+first_reason="$(node -e '
+const v=JSON.parse(process.argv[1]);
+const reason = v && v.stateData && typeof v.stateData.reason === "string" ? v.stateData.reason : "";
+process.stdout.write(reason);
+' "$first_final")"
 first_conversation_id="$(node -e '
 const v=JSON.parse(process.argv[1]);
 const cid = v && v.stateData && typeof v.stateData.conversationId === "string" ? v.stateData.conversationId : "";
@@ -304,6 +309,10 @@ echo "[4/5] First run terminal status=$first_status"
 
 if [[ -z "$first_conversation_id" ]]; then
   echo "error: first run did not return stateData.conversationId; cannot demonstrate chaining" >&2
+  if [[ "$first_reason" == "missing_conversation_id" ]]; then
+    echo "hint: your installed Copilot CLI may not support the flags expected by the server action (e.g. --allow-dir / --conversation-id)." >&2
+    echo "hint: current Copilot CLI versions commonly use --add-dir and --resume <sessionId>." >&2
+  fi
   echo "$first_final" >&2
   exit 9
 fi

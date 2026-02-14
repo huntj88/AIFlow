@@ -566,6 +566,7 @@ describe('§16 — CLI Helper via Action', () => {
     const { handler, runtime } = await makeTestHandler({
       registerActions: (registry) =>
         Effect.gen(function* () {
+          yield* registerForwardAction(registry);
           yield* registerCliTestActions(registry);
         }),
     });

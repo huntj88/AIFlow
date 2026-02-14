@@ -98,7 +98,10 @@ describe('copilot-cli-prompt action', () => {
     const result = Effect.runSync(copilotCliPromptAction(ctx));
 
     expect(result.nextState).toBe('next');
-    expect((result.data as { conversationId?: string }).conversationId).toBe('conv-123');
+    const conversationId = (result.data as { conversationId?: string }).conversationId;
+    expect(conversationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
 
     const data = result.data as {
       normalizedFilePaths: { path: string; resolvedPath: string }[];
@@ -112,11 +115,15 @@ describe('copilot-cli-prompt action', () => {
     const promptIndex = firstCallArgs.indexOf('--prompt');
     const promptValue = promptIndex >= 0 ? firstCallArgs[promptIndex + 1] : '';
     expect(promptValue).toContain('You have access to two working directories');
-    expect(firstCallArgs).toContain('--allow-dir');
+    expect(firstCallArgs).toContain('--add-dir');
     expect(firstCallArgs).toContain('/workspace/project');
     expect(firstCallArgs).toContain('/workspace/artifacts');
     expect(firstCallArgs).toContain('--context');
     expect(firstCallArgs).toContain('/workspace/project/src/a.ts');
+
+    const resumeIndex = firstCallArgs.indexOf('--resume');
+    expect(resumeIndex).toBeGreaterThanOrEqual(0);
+    expect(firstCallArgs[resumeIndex + 1]).toBe(conversationId);
   });
 
   it('omits prelude on resume and bounds invalid-json retries to 3 total attempts', () => {
@@ -147,7 +154,7 @@ describe('copilot-cli-prompt action', () => {
     const promptIndex = firstCallArgs.indexOf('--prompt');
     const promptValue = promptIndex >= 0 ? firstCallArgs[promptIndex + 1] : '';
     expect(promptValue).toBe('Follow up');
-    expect(firstCallArgs).toContain('--conversation-id');
+    expect(firstCallArgs).toContain('--resume');
     expect(firstCallArgs).toContain('conv-existing');
   });
 
@@ -194,7 +201,9 @@ describe('copilot-cli-prompt action', () => {
       conversationId: string;
       copilotResult: { status: 'ok' | 'error'; summary: string };
     };
-    expect(data.conversationId).toBe('conv-error-ok');
+    expect(data.conversationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
     expect(data.copilotResult.status).toBe('error');
     expect(data.copilotResult.summary).toContain('structured');
   });
@@ -247,6 +256,8 @@ describe('copilot-cli-prompt action', () => {
     expect(data.reason).toBe('conversation_reset_failed');
     expect(data.exitCode).toBe(9);
     expect(data.stderr).toContain('reset failed');
-    expect(data.conversationId).toBe('conv-reset-fail');
+    expect(data.conversationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
   });
 });

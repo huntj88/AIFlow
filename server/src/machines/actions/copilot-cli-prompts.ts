@@ -41,6 +41,7 @@ export const buildFirstTurnPrompt = (input: FirstTurnPromptInput): string =>
 
 export const buildStrictJsonResultPrompt = (): string =>
   [
+    'Format the results of the conversation so far into the expected JSON object below.',
     'Return STRICT JSON only. No markdown, no code fences, no prose.',
     'Output must validate against exactly this schema:',
     '{',

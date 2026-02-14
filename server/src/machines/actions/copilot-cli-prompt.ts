@@ -1,7 +1,7 @@
 /**
  * Built-in action: copilot-cli-prompt
  *
- * Runs `copilot chat` with runtime allow-dir policy, supports new+resume
+ * Runs `copilot chat` with runtime add-dir policy, supports new+resume
  * conversation modes, performs strict JSON capture/recovery, and shapes
  * success/exec-error transitions.
  *
@@ -9,6 +9,7 @@
  */
 
 import { Effect } from 'effect';
+import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 
 import type { ActionFunction, CliExecResult, TransitionResult } from '../types.js';
@@ -72,16 +73,16 @@ const buildCopilotArgs = (input: {
   readonly contextPaths: readonly string[];
   readonly conversationId?: string;
 }): string[] => {
-  const args: string[] = ['chat', '--yolo'];
+  const args: string[] = ['--yolo'];
 
   if (input.conversationId) {
-    args.push('--conversation-id', input.conversationId);
+    args.push('--resume', input.conversationId);
   }
 
   args.push('--prompt', input.prompt);
 
   for (const allowDir of input.allowDirs) {
-    args.push('--allow-dir', allowDir);
+    args.push('--add-dir', allowDir);
   }
 
   for (const contextPath of input.contextPaths) {
@@ -182,6 +183,8 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
         : resolveAsAbsolute(ctx.artifactsWorkspace, entry.path),
     );
 
+    const conversationId = input.conversationId ?? randomUUID();
+
     const initialPrompt = input.conversationId
       ? input.prompt
       : buildFirstTurnPrompt({
@@ -198,7 +201,7 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
         prompt: initialPrompt,
         allowDirs,
         contextPaths,
-        conversationId: input.conversationId,
+        conversationId,
       }),
     });
 
@@ -213,12 +216,12 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
         stderr: mainExec.stderr,
         stdout: mainExec.stdout,
         commandOutputFiles,
-        conversationId: input.conversationId,
+        conversationId,
       });
     }
 
     const activeConversationId =
-      input.conversationId ?? extractConversationId(`${mainExec.stdout}\n${mainExec.stderr}`);
+      conversationId || extractConversationId(`${mainExec.stdout}\n${mainExec.stderr}`);
 
     if (!activeConversationId) {
       return toExecError(input, {

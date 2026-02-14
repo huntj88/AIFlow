@@ -132,3 +132,4 @@ No task points back to an upstream dependency, so the graph has no circular edge
 - Tasks 01–09 are platform dependencies and must be completed before introducing `copilot-cli-prompt` behavior.
 - This plan intentionally omits compatibility shims for legacy start payloads.
 - Tests for transcript capture and lineage are treated as rollout blockers, not follow-up cleanup.
+- Copilot CLI parameter compatibility must track installed CLI behavior (`--add-dir` / `--resume`) when implementing command construction and workflow tooling.

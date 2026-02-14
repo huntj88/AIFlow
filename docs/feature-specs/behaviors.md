@@ -754,7 +754,7 @@
 - [ ] User launches a machine whose action is `copilot-cli-prompt` with valid `prompt`, transition targets, and runtime CLI options
 - [ ] When `conversationId` is not provided, the action starts a new Copilot conversation and prepends system directory-guidance text before the user prompt
 - [ ] When `conversationId` is provided, the action resumes that conversation and does **not** prepend the directory-guidance prelude again
-- [ ] The Copilot CLI call runs in YOLO mode and includes runtime-policy `--allow-dir` arguments
+- [ ] The Copilot CLI call runs in YOLO mode and includes runtime-policy `--add-dir` arguments
 - [ ] Optional `contextFilePaths` are forwarded as CLI context arguments after resolution
 - [ ] The action performs strict JSON result capture and validates required schema fields
 - [ ] On schema-valid result (including `status: 'error'`), machine transitions to `successState` and emits `conversationId` + `copilotResult` + `normalizedFilePaths`

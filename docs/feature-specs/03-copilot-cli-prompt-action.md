@@ -159,17 +159,20 @@ The action executes `copilot` CLI with:
 5. Optional context file arguments derived from `contextFilePaths`.
 6. Optional conversation resume using `conversationId` when provided.
 
-Runtime resolves directory-policy entries to absolute paths before passing them as `--allow-dir` values.
+Runtime resolves directory-policy entries to absolute paths before passing them as `--add-dir` values.
 These flags configure Copilot CLI with the expected state-machine workspaces; the state machine itself does not enforce filesystem access control.
+
+> CLI compatibility note: current Copilot CLI builds expose `--add-dir` (not `--allow-dir`) and session resume via `--resume` (not `--conversation-id`).
+> In this spec, `conversationId` refers to that resumable session identifier.
 
 Example command shape (illustrative):
 
 ```bash
-copilot chat \
+copilot \
   --prompt "<system-directory-guidance>\n\nUser task:\n<prompt>" \
   --yolo \
-  --allow-dir "<resolved-workspace-dir>" \
-  --allow-dir "<resolved-artifacts-dir>" \
+  --add-dir "<resolved-workspace-dir>" \
+  --add-dir "<resolved-artifacts-dir>" \
   --context "<resolved-context-file-1>" \
   --context "<resolved-context-file-2>"
 ```
@@ -177,12 +180,12 @@ copilot chat \
 Resume command shape (illustrative):
 
 ```bash
-copilot chat \
-  --conversation-id "<conversationId>" \
+copilot \
+  --resume "<conversationId>" \
   --prompt "<prompt>" \
   --yolo \
-  --allow-dir "<resolved-workspace-dir>" \
-  --allow-dir "<resolved-artifacts-dir>" \
+  --add-dir "<resolved-workspace-dir>" \
+  --add-dir "<resolved-artifacts-dir>" \
   --context "<resolved-context-file-1>" \
   --context "<resolved-context-file-2>"
 ```

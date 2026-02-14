@@ -64,4 +64,36 @@ describe('copilot-cli-prompt contracts', () => {
       expect(parsed.errors.some((e) => e.path === '/')).toBe(true);
     }
   });
+
+  it('parses JSON when stdout has trailing assistant chatter', () => {
+    const parsed = parseAndValidateCopilotActionResult(
+      [
+        JSON.stringify({
+          schemaVersion: 'copilot-action-result.v1',
+          status: 'ok',
+          summary: 'done',
+          data: {},
+          filePaths: [],
+          diagnostics: { exitCode: 0 },
+        }),
+        '',
+        '● Continuing autonomously (1 premium request)',
+        'Completed: marked task complete.',
+      ].join('\n'),
+    );
+
+    expect(parsed.ok).toBe(true);
+  });
+
+  it('parses first balanced JSON object from mixed output', () => {
+    const parsed = parseAndValidateCopilotActionResult(
+      [
+        'non-json prefix',
+        '{"schemaVersion":"copilot-action-result.v1","status":"ok","summary":"done","data":{},"filePaths":[],"diagnostics":{"exitCode":0}}',
+        'extra trailing details',
+      ].join('\n'),
+    );
+
+    expect(parsed.ok).toBe(true);
+  });
 });

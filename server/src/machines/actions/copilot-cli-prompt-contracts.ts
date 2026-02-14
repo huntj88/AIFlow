@@ -117,6 +117,116 @@ export const copilotActionResultSchema: JsonSchema = {
 const validateInput = ajv.compile(copilotCliPromptInputSchema);
 const validateResult = ajv.compile(copilotActionResultSchema);
 
+const parseJsonCandidate = (
+  candidate: string,
+): { readonly ok: true; readonly value: unknown } | { readonly ok: false } => {
+  try {
+    return { ok: true, value: JSON.parse(candidate) };
+  } catch {
+    return { ok: false };
+  }
+};
+
+const looksLikeJsonStart = (ch: string): boolean => ch === '{' || ch === '[';
+
+const extractBalancedJsonFragment = (rawOutput: string): string | undefined => {
+  const source = rawOutput.trim();
+  if (source.length === 0) {
+    return undefined;
+  }
+
+  for (let i = 0; i < source.length; i += 1) {
+    const start = source[i];
+    if (!start || !looksLikeJsonStart(start)) {
+      continue;
+    }
+
+    const stack: string[] = [start];
+    let inString = false;
+    let escaped = false;
+
+    for (let j = i + 1; j < source.length; j += 1) {
+      const ch = source[j];
+      if (!ch) {
+        continue;
+      }
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === '\\') {
+          escaped = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+
+      if (ch === '{' || ch === '[') {
+        stack.push(ch);
+        continue;
+      }
+
+      if (ch === '}' || ch === ']') {
+        const open = stack.at(-1);
+        const isMatch = (open === '{' && ch === '}') || (open === '[' && ch === ']');
+        if (!isMatch) {
+          break;
+        }
+
+        stack.pop();
+        if (stack.length === 0) {
+          return source.slice(i, j + 1);
+        }
+      }
+    }
+  }
+
+  return undefined;
+};
+
+const parseCopilotResultJson = (
+  rawOutput: string,
+): { readonly ok: true; readonly value: unknown } | { readonly ok: false } => {
+  const trimmed = rawOutput.trim();
+  if (trimmed.length === 0) {
+    return { ok: false };
+  }
+
+  const direct = parseJsonCandidate(trimmed);
+  if (direct.ok) {
+    return direct;
+  }
+
+  const lines = trimmed
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  for (const line of lines) {
+    if (!looksLikeJsonStart(line[0])) {
+      continue;
+    }
+
+    const parsedLine = parseJsonCandidate(line);
+    if (parsedLine.ok) {
+      return parsedLine;
+    }
+  }
+
+  const fragment = extractBalancedJsonFragment(trimmed);
+  if (!fragment) {
+    return { ok: false };
+  }
+
+  return parseJsonCandidate(fragment);
+};
+
 const toDiagnostics = (errors: readonly ErrorObject[] | null | undefined): ValidationDiagnostic[] =>
   (errors ?? []).map((err) => ({
     path: err.instancePath.length > 0 ? err.instancePath : '/',
@@ -147,17 +257,15 @@ export const parseAndValidateCopilotActionResult = (
 ):
   | { readonly ok: true; readonly value: CopilotActionResult }
   | { readonly ok: false; readonly errors: readonly ValidationDiagnostic[] } => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawOutput);
-  } catch {
+  const parsed = parseCopilotResultJson(rawOutput);
+  if (!parsed.ok) {
     return {
       ok: false,
       errors: [{ path: '/', message: 'invalid JSON: unable to parse output' }],
     };
   }
 
-  const isValid = validateResult(parsed);
+  const isValid = validateResult(parsed.value);
   if (!isValid) {
     return {
       ok: false,
@@ -167,6 +275,6 @@ export const parseAndValidateCopilotActionResult = (
 
   return {
     ok: true,
-    value: parsed as CopilotActionResult,
+    value: parsed.value as CopilotActionResult,
   };
 };
