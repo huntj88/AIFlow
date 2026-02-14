@@ -230,8 +230,7 @@ start_instance() {
   "workspaceRoot": "$WORKSPACE_ROOT",
   "runtimeOptions": {
     "cliDirectoryPolicy": {
-      "workspaceDirs": ["$WORKSPACE_ROOT"],
-      "artifactDirs": ["$ARTIFACT_DIR"]
+      "workspaceDirs": ["$WORKSPACE_ROOT"]
     },
     "cliOutputCapture": { "enabled": true }
   }

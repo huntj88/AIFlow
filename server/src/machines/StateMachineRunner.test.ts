@@ -3463,7 +3463,6 @@ describe('CLI transcript capture lineage', () => {
           runtimeOptions: {
             cliDirectoryPolicy: {
               workspaceDirs: [tmpDir],
-              artifactDirs: [tmpDir],
             },
             cliOutputCapture: {
               enabled: true,
@@ -3552,7 +3551,6 @@ describe('CLI transcript capture lineage', () => {
           runtimeOptions: {
             cliDirectoryPolicy: {
               workspaceDirs: [tmpDir],
-              artifactDirs: [tmpDir],
             },
             cliOutputCapture: {
               enabled: true,
@@ -3675,7 +3673,6 @@ describe('runtimeOptions pass-through integration', () => {
       const runtimeOptions = {
         cliDirectoryPolicy: {
           workspaceDirs: [tmpDir],
-          artifactDirs: [tmpDir],
         },
         cliOutputCapture: {
           enabled: true,

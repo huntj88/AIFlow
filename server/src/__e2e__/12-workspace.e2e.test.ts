@@ -651,7 +651,6 @@ describe('§16 — CLI Helper via Action', () => {
       runtimeOptions: {
         cliDirectoryPolicy: {
           workspaceDirs: [testWorkspaceRoot],
-          artifactDirs: [path.join(testWorkspaceRoot, 'artifacts-base')],
         },
         cliOutputCapture: {
           enabled: true,
@@ -691,7 +690,6 @@ describe('§16 — CLI Helper via Action', () => {
       runtimeOptions: {
         cliDirectoryPolicy: {
           workspaceDirs: [testWorkspaceRoot],
-          artifactDirs: [path.join(testWorkspaceRoot, 'artifacts-base')],
         },
         cliOutputCapture: {
           enabled: true,

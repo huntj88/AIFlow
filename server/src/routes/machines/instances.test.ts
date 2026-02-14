@@ -133,7 +133,6 @@ describe('InstancesRouter', () => {
   const makeRuntimeOptions = (workspaceRoot: string) => ({
     cliDirectoryPolicy: {
       workspaceDirs: [workspaceRoot],
-      artifactDirs: [path.join(workspaceRoot, 'artifacts')],
     },
     cliOutputCapture: {
       enabled: false,
@@ -287,7 +286,7 @@ describe('InstancesRouter', () => {
       expect(res.status).toBe(400);
     });
 
-    it('POST with missing runtimeOptions nested keys → 400', async () => {
+    it('POST with missing required runtimeOptions nested keys → 400', async () => {
       const defId = await createDefinition();
       const res = await postInstance({
         definitionId: defId,
@@ -302,6 +301,24 @@ describe('InstancesRouter', () => {
       expect(res.status).toBe(400);
     });
 
+    it('POST accepts runtimeOptions with cliDirectoryPolicy.workspaceDirs only', async () => {
+      const defId = await createDefinition();
+      const res = await postInstance({
+        definitionId: defId,
+        input: { message: 'hello', nextState: 'completed' },
+        workspaceRoot: TEST_WORKSPACE,
+        runtimeOptions: {
+          cliDirectoryPolicy: {
+            workspaceDirs: [TEST_WORKSPACE],
+          },
+          cliOutputCapture: {
+            enabled: false,
+          },
+        },
+      });
+      expect(res.status).toBe(201);
+    });
+
     it('POST with relative runtimeOptions directories → 400', async () => {
       const defId = await createDefinition();
       const res = await postInstance({
@@ -311,7 +328,6 @@ describe('InstancesRouter', () => {
         runtimeOptions: {
           cliDirectoryPolicy: {
             workspaceDirs: ['relative/workspace'],
-            artifactDirs: [path.join(TEST_WORKSPACE, 'artifacts')],
           },
           cliOutputCapture: {
             enabled: false,

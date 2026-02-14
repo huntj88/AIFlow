@@ -171,9 +171,7 @@ export const copilotCliPromptAction: ActionFunction = (ctx) =>
       ...inputFromRuntimeDirs(ctx.runtimeOptions.cliDirectoryPolicy.workspaceDirs, (p) =>
         resolveAsAbsolute(ctx.workspace, p),
       ),
-      ...inputFromRuntimeDirs(ctx.runtimeOptions.cliDirectoryPolicy.artifactDirs, (p) =>
-        resolveAsAbsolute(ctx.artifactsWorkspace, p),
-      ),
+      ctx.artifactsWorkspace.root,
     ];
 
     const contextPaths = (input.contextFilePaths ?? []).map((entry) =>

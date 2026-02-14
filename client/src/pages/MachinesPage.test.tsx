@@ -158,7 +158,6 @@ describe('MachinesPage', () => {
         expect.objectContaining({
           cliDirectoryPolicy: {
             workspaceDirs: ['/tmp/ws'],
-            artifactDirs: ['/tmp/ws/artifacts'],
           },
           cliOutputCapture: {
             enabled: false,

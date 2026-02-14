@@ -19,7 +19,6 @@ import { makeTestHandler } from './helpers/test-handler.js';
 const makeRuntimeOptions = (workspaceRoot: string, captureEnabled: boolean) => ({
   cliDirectoryPolicy: {
     workspaceDirs: [workspaceRoot],
-    artifactDirs: [path.join(workspaceRoot, 'artifacts')],
   },
   cliOutputCapture: {
     enabled: captureEnabled,

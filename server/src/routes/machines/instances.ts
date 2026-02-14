@@ -98,17 +98,12 @@ const validateAbsolutePolicyPaths = (paths: readonly string[], fieldPath: string
 const validateRuntimeDirectoryPolicy = (runtimeOptions: {
   readonly cliDirectoryPolicy: {
     readonly workspaceDirs: readonly string[];
-    readonly artifactDirs: readonly string[];
   };
 }) =>
   Effect.gen(function* () {
     yield* validateAbsolutePolicyPaths(
       runtimeOptions.cliDirectoryPolicy.workspaceDirs,
       'runtimeOptions.cliDirectoryPolicy.workspaceDirs',
-    );
-    yield* validateAbsolutePolicyPaths(
-      runtimeOptions.cliDirectoryPolicy.artifactDirs,
-      'runtimeOptions.cliDirectoryPolicy.artifactDirs',
     );
   });
 

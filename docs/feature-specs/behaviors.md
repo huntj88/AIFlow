@@ -124,7 +124,6 @@
 
 - [ ] Starting an instance without `runtimeOptions` returns 400 Bad Request
 - [ ] Starting an instance without `runtimeOptions.cliDirectoryPolicy.workspaceDirs` returns 400 Bad Request
-- [ ] Starting an instance without `runtimeOptions.cliDirectoryPolicy.artifactDirs` returns 400 Bad Request
 - [ ] Starting an instance without `runtimeOptions.cliOutputCapture.enabled` returns 400 Bad Request
 - [ ] Starting an instance with relative paths in runtime CLI directory policy returns a validation error
 - [ ] Starting an instance with valid runtime CLI options proceeds normally
@@ -754,7 +753,7 @@
 - [ ] User launches a machine whose action is `copilot-cli-prompt` with valid `prompt`, transition targets, and runtime CLI options
 - [ ] When `conversationId` is not provided, the action starts a new Copilot conversation and prepends system directory-guidance text before the user prompt
 - [ ] When `conversationId` is provided, the action resumes that conversation and does **not** prepend the directory-guidance prelude again
-- [ ] The Copilot CLI call runs in YOLO mode and includes runtime-policy `--add-dir` arguments
+- [ ] The Copilot CLI call runs in YOLO mode and includes `--add-dir` values from runtime `workspaceDirs` plus `ctx.artifactsWorkspace.root`
 - [ ] Optional `contextFilePaths` are forwarded as CLI context arguments after resolution
 - [ ] The action performs strict JSON result capture and validates required schema fields
 - [ ] On schema-valid result (including `status: 'error'`), machine transitions to `successState` and emits `conversationId` + `copilotResult` + `normalizedFilePaths`

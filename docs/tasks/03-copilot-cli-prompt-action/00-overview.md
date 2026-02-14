@@ -14,7 +14,7 @@ This plan delivers the `copilot-cli-prompt` rollout as a hard-cut migration:
 2. Refactor runner + `CliHelper` for system-wide, toggleable transcript capture with lineage paths.
 3. Implement `copilot-cli-prompt` + `handle-copilot-exec-error` with strict JSON recovery and structured output shaping.
 4. Ship full verification (unit/integration/e2e/client) and required developer curl workflow tooling.
-5. Apply post-rollout follow-up to remove conversation reset semantics from the prompt-action flow.
+5. Apply post-rollout follow-ups to remove conversation reset semantics and drop `artifactDirs` from runtime policy.
 
 ---
 
@@ -26,7 +26,7 @@ This plan delivers the `copilot-cli-prompt` rollout as a hard-cut migration:
 | 2     | 05–09 | Capture infrastructure + lineage + client/test harness cutover                |
 | 3     | 10–15 | Copilot action implementation and registry wiring                             |
 | 4     | 16–20 | Verification, e2e workflows, developer script, rollout gates                  |
-| 5     | 21    | Follow-up contract change: remove conversation reset behavior                 |
+| 5     | 21–22 | Follow-up contract changes: reset removal + artifact policy simplification    |
 
 ## Simplified execution slices (draft)
 
@@ -55,6 +55,10 @@ To reduce handoff overhead, implement as larger slices while preserving the same
 6. **Slice F — Reset removal follow-up**
    - Task **21**.
    - Outcome: remove conversation reset step from spec + behavior expectations and implementation/tests.
+
+7. **Slice G — Artifact policy simplification follow-up**
+   - Task **22**.
+   - Outcome: remove `cliDirectoryPolicy.artifactDirs`; always derive artifacts allow-dir from `ctx.artifactsWorkspace.root`.
 
 ### Simplification guardrails
 
@@ -91,6 +95,7 @@ To reduce handoff overhead, implement as larger slices while preserving the same
 15 + 09 ──→ 19 Developer Curl Workflow Script
 17 + 18 + 19 ──→ 20 Quality Gates & Rollout
 20 ──→ 21 Remove Conversation Reset Step
+21 ──→ 22 Remove artifactDirs from Runtime Policy
 ```
 
 No task points back to an upstream dependency, so the graph has no circular edges.
@@ -99,22 +104,22 @@ No task points back to an upstream dependency, so the graph has no circular edge
 
 ## Feature Spec Traceability
 
-| Feature spec area                                                           | Implementing tasks |
-| --------------------------------------------------------------------------- | ------------------ |
-| Rollout decisions 1/4 (hard cutover + immediate client update)              | 02, 03, 08, 09     |
-| Rollout decision 2 (runner pass-through; no persistence on instance)        | 04, 16             |
-| Rollout decision 3 (rich CLI capture metadata)                              | 06, 07, 14         |
-| Rollout decision 5 (`artifactDirs` are base dirs, runtime appends lineage)  | 02, 03, 05, 12     |
-| Rollout decision 6 (`maxFormatRetries = 2`)                                 | 13, 17             |
-| Rollout decision 7 (schema-valid `status:error` still goes to successState) | 14, 16, 17         |
-| Rollout decision 8 (helper-derived transcript labels)                       | 06, 07             |
-| Rollout decision 9 (no conversation reset step)                             | 21                 |
-| Rollout decision 10 (`filePaths` warn + pass-through)                       | 14, 17             |
-| Required system refactors section                                           | 01–07              |
-| Action input/CLI execution/prelude contracts                                | 10–12              |
-| JSON recovery + required result schema                                      | 11, 13             |
-| Transition behavior and output shape                                        | 14, 16, 17         |
-| Developer curl workflow script requirement                                  | 19                 |
+| Feature spec area                                                               | Implementing tasks |
+| ------------------------------------------------------------------------------- | ------------------ |
+| Rollout decisions 1/4 (hard cutover + immediate client update)                  | 02, 03, 08, 09     |
+| Rollout decision 2 (runner pass-through; no persistence on instance)            | 04, 16             |
+| Rollout decision 3 (rich CLI capture metadata)                                  | 06, 07, 14         |
+| Rollout decision 5 (no `artifactDirs` input; use `ctx.artifactsWorkspace.root`) | 02, 03, 12, 22     |
+| Rollout decision 6 (`maxFormatRetries = 2`)                                     | 13, 17             |
+| Rollout decision 7 (schema-valid `status:error` still goes to successState)     | 14, 16, 17         |
+| Rollout decision 8 (helper-derived transcript labels)                           | 06, 07             |
+| Rollout decision 9 (no conversation reset step)                                 | 21                 |
+| Rollout decision 10 (`filePaths` warn + pass-through)                           | 14, 17             |
+| Required system refactors section                                               | 01–07              |
+| Action input/CLI execution/prelude contracts                                    | 10–12              |
+| JSON recovery + required result schema                                          | 11, 13             |
+| Transition behavior and output shape                                            | 14, 16, 17         |
+| Developer curl workflow script requirement                                      | 19                 |
 
 ---
 
@@ -140,4 +145,4 @@ No task points back to an upstream dependency, so the graph has no circular edge
 - This plan intentionally omits compatibility shims for legacy start payloads.
 - Tests for transcript capture and lineage are treated as rollout blockers, not follow-up cleanup.
 - Copilot CLI parameter compatibility must track installed CLI behavior (`--add-dir` / `--resume`) when implementing command construction and workflow tooling.
-- Task 21 is an explicit follow-up contract adjustment and should be landed with matching spec + behavior updates.
+- Tasks 21–22 are explicit follow-up contract adjustments and should be landed with matching spec + behavior updates.

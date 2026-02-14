@@ -1727,7 +1727,6 @@ export const StateMachineRunnerLive = Layer.effect(
           const runtimeOptions: MachineRuntimeOptions = opts?.runtimeOptions ?? {
             cliDirectoryPolicy: {
               workspaceDirs: opts?.workspaceRoot ? [opts.workspaceRoot] : [],
-              artifactDirs: [ARTIFACT_ROOT],
             },
             cliOutputCapture: { enabled: false },
           };
@@ -2169,7 +2168,6 @@ export const StateMachineRunnerLive = Layer.effect(
             runtimeOptions: {
               cliDirectoryPolicy: {
                 workspaceDirs: [instance.workspaceRoot],
-                artifactDirs: [instance.artifactsPath],
               },
               cliOutputCapture: { enabled: false },
             },

@@ -56,7 +56,6 @@ const validStartPayload = () => ({
   runtimeOptions: {
     cliDirectoryPolicy: {
       workspaceDirs: ['/tmp/test-workspace'],
-      artifactDirs: ['/tmp/data/artifacts'],
     },
     cliOutputCapture: {
       enabled: false,
@@ -234,7 +233,6 @@ describe('StartInstanceRequestSchema', () => {
       runtimeOptions: {
         cliDirectoryPolicy: {
           workspaceDirs: ['/tmp/ws'],
-          artifactDirs: ['/tmp/artifacts'],
         },
         cliOutputCapture: { enabled: false },
       },
@@ -250,7 +248,6 @@ describe('StartInstanceRequestSchema', () => {
       runtimeOptions: {
         cliDirectoryPolicy: {
           workspaceDirs: ['/tmp/ws'],
-          artifactDirs: ['/tmp/artifacts'],
         },
         cliOutputCapture: { enabled: true },
       },
@@ -269,23 +266,7 @@ describe('StartInstanceRequestSchema', () => {
       ...validStartPayload(),
       runtimeOptions: {
         ...validStartPayload().runtimeOptions,
-        cliDirectoryPolicy: {
-          artifactDirs: ['/tmp/data/artifacts'],
-        },
-      },
-    };
-    const result = decodeStartInstance(payload);
-    expect(Either.isLeft(result)).toBe(true);
-  });
-
-  it('requires runtimeOptions.cliDirectoryPolicy.artifactDirs', () => {
-    const payload = {
-      ...validStartPayload(),
-      runtimeOptions: {
-        ...validStartPayload().runtimeOptions,
-        cliDirectoryPolicy: {
-          workspaceDirs: ['/tmp/test-workspace'],
-        },
+        cliDirectoryPolicy: {},
       },
     };
     const result = decodeStartInstance(payload);

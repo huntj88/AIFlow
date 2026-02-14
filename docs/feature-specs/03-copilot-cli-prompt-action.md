@@ -53,10 +53,10 @@ This spec adopts the following implementation decisions for this rollout:
 - Client start-instance requests must send the new required `runtimeOptions` contract.
 - No client compatibility mode in this rollout.
 
-5. **Artifact directory policy: base dirs in request**
+5. **Artifact allow-dir source: `artifactsWorkspaceRoot`**
 
-- `runtimeOptions.cliDirectoryPolicy.artifactDirs` are base artifact directories.
-- Server appends family-root lineage at runtime; clients do not send `<rootInstanceId>`-scoped artifact directories.
+- `runtimeOptions.cliDirectoryPolicy` only provides `workspaceDirs`.
+- The artifacts `--add-dir` value is always `ctx.artifactsWorkspace.root` (family-root scoped).
 
 6. **JSON recovery retries: bounded**
 
@@ -154,11 +154,11 @@ The action executes `copilot` CLI with:
 1. A system directory-guidance prompt prepended before the user prompt **only when starting a new conversation**.
 2. User prompt as the main task prompt.
 3. YOLO mode enabled.
-4. Allowed directories passed as CLI arguments from machine/runtime directory policy.
+4. Allowed directories passed as CLI arguments from runtime `workspaceDirs` plus `ctx.artifactsWorkspace.root`.
 5. Optional context file arguments derived from `contextFilePaths`.
 6. Optional conversation resume using `conversationId` when provided.
 
-Runtime resolves directory-policy entries to absolute paths before passing them as `--add-dir` values.
+Runtime resolves `workspaceDirs` entries to absolute paths before passing them as `--add-dir` values, and always appends `ctx.artifactsWorkspace.root` as the artifacts allow-dir.
 These flags configure Copilot CLI with the expected state-machine workspaces; the state machine itself does not enforce filesystem access control.
 
 > CLI compatibility note: current Copilot CLI builds expose `--add-dir` (not `--allow-dir`) and session resume via `--resume` (not `--conversation-id`).
@@ -265,10 +265,8 @@ This migration intentionally makes breaking changes to move directly to the targ
 
 1. **Replace start-instance contract**
    - Replace the request contract with required `runtimeOptions` (not optional):
-     - `cliDirectoryPolicy: { workspaceDirs: string[]; artifactDirs: string[] }`
-     - `cliOutputCapture: { enabled: boolean }`
-
-- `artifactDirs` are base artifact roots in request payloads; runtime appends family-root lineage.
+   - `cliDirectoryPolicy: { workspaceDirs: string[] }`
+   - `cliOutputCapture: { enabled: boolean }`
 
 - Remove legacy start behavior that runs without runtime CLI policy input.
 - Do not provide compatibility shims or fallback request shapes.
@@ -651,8 +649,7 @@ yield * registry.register('handle-copilot-exec-error', handleCopilotExecErrorAct
   "workspaceRoot": "/home/user/my-repo",
   "runtimeOptions": {
     "cliDirectoryPolicy": {
-      "workspaceDirs": ["/home/user/my-repo"],
-      "artifactDirs": ["/home/user/.aiflow/artifacts"]
+      "workspaceDirs": ["/home/user/my-repo"]
     },
     "cliOutputCapture": {
       "enabled": true

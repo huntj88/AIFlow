@@ -51,7 +51,6 @@ function makeCtx(stateData: unknown, overrides?: Partial<ActionContext>): Action
     runtimeOptions: {
       cliDirectoryPolicy: {
         workspaceDirs: ['/tmp/test-workspace'],
-        artifactDirs: ['/tmp/data/artifacts'],
       },
       cliOutputCapture: {
         enabled: false,

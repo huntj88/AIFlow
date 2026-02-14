@@ -29,7 +29,6 @@ import {
 const E2E_RUNTIME_OPTIONS = {
   cliDirectoryPolicy: {
     workspaceDirs: [E2E_TEST_WORKSPACE_ROOT],
-    artifactDirs: [`${E2E_TEST_WORKSPACE_ROOT}/artifacts`],
   },
   cliOutputCapture: {
     enabled: false,

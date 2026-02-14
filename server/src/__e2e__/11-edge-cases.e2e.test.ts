@@ -277,7 +277,7 @@ describe('§21 — Negative & Edge Cases', () => {
           cliDirectoryPolicy: {
             workspaceDirs: [testWorkspaceRoot],
           },
-          // missing cliOutputCapture and artifactDirs
+          // missing cliOutputCapture
         },
       });
 

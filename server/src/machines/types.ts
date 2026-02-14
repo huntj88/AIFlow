@@ -146,7 +146,6 @@ export interface InstanceFilter {
 /** Runtime CLI directory policy provided when starting an instance. */
 export interface CliDirectoryPolicy {
   readonly workspaceDirs: readonly string[];
-  readonly artifactDirs: readonly string[];
 }
 
 /** Runtime CLI transcript capture policy provided when starting an instance. */

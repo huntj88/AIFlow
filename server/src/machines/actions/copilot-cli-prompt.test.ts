@@ -22,7 +22,6 @@ function makeCtx(
     runtimeOptions: {
       cliDirectoryPolicy: {
         workspaceDirs: ['/workspace/project'],
-        artifactDirs: ['/workspace/artifacts'],
       },
       cliOutputCapture: { enabled: false },
     },

@@ -41,7 +41,6 @@ export function makeApiHelpers(handler: Handler, defaultWorkspaceRoot?: string) 
   const makeRuntimeOptions = (workspaceRoot: string) => ({
     cliDirectoryPolicy: {
       workspaceDirs: [workspaceRoot],
-      artifactDirs: [path.join(workspaceRoot, 'artifacts')],
     },
     cliOutputCapture: {
       enabled: false,

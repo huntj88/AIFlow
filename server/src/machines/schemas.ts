@@ -120,7 +120,6 @@ export const UpdateDefinitionRequestSchema = CreateDefinitionRequestSchema;
 /** Runtime validator for `CliDirectoryPolicy`. */
 export const CliDirectoryPolicySchema = Schema.Struct({
   workspaceDirs: Schema.Array(Schema.String),
-  artifactDirs: Schema.Array(Schema.String),
 });
 
 /** Runtime validator for `CliOutputCapturePolicy`. */

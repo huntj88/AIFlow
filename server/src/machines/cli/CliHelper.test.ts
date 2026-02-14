@@ -36,7 +36,6 @@ beforeEach(() => {
     runtimeOptions: {
       cliDirectoryPolicy: {
         workspaceDirs: [tmpDir],
-        artifactDirs: [artifactsDir],
       },
       cliOutputCapture: {
         enabled: false,

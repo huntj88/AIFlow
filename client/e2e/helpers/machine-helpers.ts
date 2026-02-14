@@ -13,7 +13,6 @@ export const E2E_TEST_WORKSPACE_ROOT = '/tmp/aiflow-e2e-test';
 const makeRuntimeOptions = (workspaceRoot: string) => ({
   cliDirectoryPolicy: {
     workspaceDirs: [workspaceRoot],
-    artifactDirs: [`${workspaceRoot}/artifacts`],
   },
   cliOutputCapture: {
     enabled: false,

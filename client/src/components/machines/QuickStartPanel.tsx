@@ -51,7 +51,6 @@ export function QuickStartPanel({ definitions, isLoading, onLaunch }: QuickStart
     const runtimeOptions: MachineRuntimeOptions = {
       cliDirectoryPolicy: {
         workspaceDirs: [workspaceRoot],
-        artifactDirs: [`${workspaceRoot}/artifacts`],
       },
       cliOutputCapture: {
         enabled: captureEnabled,
