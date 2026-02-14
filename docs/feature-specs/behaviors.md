@@ -523,6 +523,9 @@
 - [ ] Transcript writes stream while command output is produced (no deferred end-of-command or end-of-action flush)
 - [ ] `ctx.cli.exec(...)` returns capture metadata (transcript file reference) when capture is enabled
 - [ ] Capture behavior is centralized in the CLI helper (actions do not implement custom capture logic)
+- [ ] Transcript filenames use a `-log` suffix convention
+- [ ] Multiple `ctx.cli.exec(...)` calls within one state visit append to the same transcript log file
+- [ ] Shared state transcript files include clear delimiter blocks between CLI invocations
 
 ### 16.8 Transcript Lineage Paths
 
@@ -530,6 +533,7 @@
 - [ ] Child-instance CLI transcripts are written under `children/<childInstanceId>/<stateName>/<visitIndex>-<label>.txt`
 - [ ] Deeply nested children continue lineage nesting as `children/<instanceId>/...`
 - [ ] Re-visiting the same state increments `<visitIndex>` (`001`, `002`, ...)
+- [ ] Re-visiting the same state creates a new state-visit log file (new `<visitIndex>`)
 - [ ] Parent/child integration tests verify transcript paths are associated with the instance that executed each command
 - [ ] If transcript stream-write fails for a command, the action does not fail for that reason alone and warning diagnostics are surfaced
 
@@ -761,6 +765,7 @@
 - [ ] The action performs strict JSON result capture and validates required schema fields
 - [ ] Result prompt + JSON-repair prompt turns use `gpt-5.1-codex-mini`
 - [ ] Copilot CLI calls follow the same global streamed transcript policy applied to all `ctx.cli.exec(...)` usage
+- [ ] Copilot CLI calls in one state visit append to one shared `-log` transcript file with invocation delimiters
 - [ ] On schema-valid result (including `status: 'error'`), machine transitions to `successState` and emits `conversationId` + `copilotResult` + `normalizedFilePaths`
 - [ ] Integration run verifies normalized file-path records include `workspace`, `path`, and `resolvedPath`
 - [ ] If result JSON is invalid, action issues in-action JSON-repair reprompts up to `maxFormatRetries = 2` (3 total attempts including initial result prompt)

@@ -16,19 +16,20 @@ This plan delivers the `copilot-cli-prompt` rollout as a hard-cut migration:
 4. Ship full verification (unit/integration/e2e/client) and required developer curl workflow tooling.
 5. Apply post-rollout follow-ups to remove conversation reset semantics and drop `artifactDirs` from runtime policy.
 6. Add system-wide streamed CLI transcript behavior and enforce prompt-model routing for result formatting.
+7. Consolidate per-state CLI transcript files into shared `-log` files with invocation delimiters.
 
 ---
 
 ## Phase Summary
 
-| Phase | Tasks | Description                                                                   |
-| ----- | ----- | ----------------------------------------------------------------------------- |
-| 1     | 01–04 | Platform contract cutover (`runtimeOptions`, schema/API, runner pass-through) |
-| 2     | 05–09 | Capture infrastructure + lineage + client/test harness cutover                |
-| 3     | 10–15 | Copilot action implementation and registry wiring                             |
-| 4     | 16–20 | Verification, e2e workflows, developer script, rollout gates                  |
-| 5     | 21–22 | Follow-up contract changes: reset removal + artifact policy simplification    |
-| 6     | 23    | Follow-up behavior hardening: streamed CLI transcripts + model routing policy |
+| Phase | Tasks | Description                                                                                               |
+| ----- | ----- | --------------------------------------------------------------------------------------------------------- |
+| 1     | 01–04 | Platform contract cutover (`runtimeOptions`, schema/API, runner pass-through)                             |
+| 2     | 05–09 | Capture infrastructure + lineage + client/test harness cutover                                            |
+| 3     | 10–15 | Copilot action implementation and registry wiring                                                         |
+| 4     | 16–20 | Verification, e2e workflows, developer script, rollout gates                                              |
+| 5     | 21–22 | Follow-up contract changes: reset removal + artifact policy simplification                                |
+| 6     | 23–24 | Follow-up behavior hardening: streamed CLI transcripts, model routing, and state-scoped log consolidation |
 
 ## Simplified execution slices (draft)
 
@@ -65,6 +66,10 @@ To reduce handoff overhead, implement as larger slices while preserving the same
 8. **Slice H — Result-log/model-routing follow-up**
    - Task **23**.
    - Outcome: stream transcript writes for all CLI usage while commands run and enforce model split (`gpt-5.1-codex-mini` for result prompts, `gpt-5.3-codex` otherwise).
+
+9. **Slice I — State-scoped transcript consolidation follow-up**
+   - Task **24**.
+   - Outcome: use one `-log` transcript file per state visit with explicit delimiter blocks between CLI invocations.
 
 ### Simplification guardrails
 
@@ -103,6 +108,7 @@ To reduce handoff overhead, implement as larger slices while preserving the same
 20 ──→ 21 Remove Conversation Reset Step
 21 ──→ 22 Remove artifactDirs from Runtime Policy
 22 ──→ 23 Streamed CLI Transcripts + Model Routing
+23 ──→ 24 State-Scoped CLI Log File Consolidation
 ```
 
 No task points back to an upstream dependency, so the graph has no circular edges.
@@ -124,6 +130,7 @@ No task points back to an upstream dependency, so the graph has no circular edge
 | Rollout decision 10 (`filePaths` warn + pass-through)                           | 14, 17             |
 | Rollout decision 13 (system-wide streamed CLI transcript writes)                | 23                 |
 | Rollout decision 14 (model routing policy)                                      | 12, 13, 23         |
+| Follow-up transcript readability policy (state-scoped `-log` file + delimiters) | 24                 |
 | Required system refactors section                                               | 01–07              |
 | Action input/CLI execution/prelude contracts                                    | 10–12              |
 | JSON recovery + required result schema                                          | 11, 13             |
@@ -140,7 +147,7 @@ No task points back to an upstream dependency, so the graph has no circular edge
 | §4.1 Start & Complete (runtimeOptions on start payload)     | 02, 03, 08, 09, 17     |
 | §4.5 Runtime CLI Options Validation                         | 02, 03, 09, 17         |
 | §16.7 Global Transcript Capture (runtime toggle)            | 06, 07, 17, 23         |
-| §16.8 Transcript Lineage Paths                              | 05, 06, 07, 17, 23     |
+| §16.8 Transcript Lineage Paths                              | 05, 06, 07, 17, 23, 24 |
 | §21.9 Copilot CLI Prompt Action Workflow                    | 10–18, 23              |
 | §21.10 Developer Curl Workflow Script                       | 19                     |
 | §22.1 API Error Responses (missing runtimeOptions branches) | 03, 09, 17             |
@@ -154,4 +161,4 @@ No task points back to an upstream dependency, so the graph has no circular edge
 - This plan intentionally omits compatibility shims for legacy start payloads.
 - Tests for transcript capture and lineage are treated as rollout blockers, not follow-up cleanup.
 - Copilot CLI parameter compatibility must track installed CLI behavior (`--add-dir` / `--resume`) when implementing command construction and workflow tooling.
-- Tasks 21–23 are explicit follow-up adjustments and should be landed with matching spec + behavior updates.
+- Tasks 21–24 are explicit follow-up adjustments and should be landed with matching spec + behavior updates.

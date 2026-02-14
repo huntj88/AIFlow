@@ -100,6 +100,12 @@ This spec adopts the following implementation decisions for this rollout:
 - Use `gpt-5.3-codex` for main task turns (new and resumed conversations).
 - Use `gpt-5.1-codex-mini` for strict-JSON result prompt turns (initial + repair retries).
 
+15. **State-scoped transcript file policy**
+
+- Within one state visit, all `ctx.cli.exec(...)` calls append to a single shared transcript log file.
+- Use clear delimiter blocks between CLI invocations in that shared file.
+- Transcript filenames use a `-log` suffix.
+
 ## Implementation simplifications (draft, no behavior/contract changes)
 
 The following simplifications are recommended before implementation. They reduce moving parts while preserving all rollout decisions and behavior-spec obligations.
@@ -368,8 +374,9 @@ Each transcript is written under an artifacts folder scoped to the machine insta
 - Nested children:
   - Continue nesting with `/children/<instanceId>/...` for each level.
 - `<visitIndex>` is the 1-based count of how many times that state has been visited for the executing instance (for example: `001`, then `002`).
-- `<label>` is helper-derived from command name.
-- If multiple commands in one state visit share the same derived label, helper appends a deterministic numeric suffix to avoid filename collisions.
+- The transcript filename for a state visit uses a `-log` suffix (for example `001-log.txt`).
+- Multiple CLI invocations in one state visit append to that same state-visit log file.
+- Delimiter blocks are written between invocations to preserve command boundaries.
 
 This keeps command outputs associated with the spawning machine instance while preserving parent/child hierarchy.
 
@@ -391,6 +398,7 @@ Every `ctx.cli.exec(...)` call writes to its transcript artifact as CLI output a
 This includes Copilot prompt flow commands (initial prompt execution, result prompt, JSON-repair retries) and all non-Copilot action commands that use `ctx.cli.exec(...)`.
 
 - Streamed transcript content should retain command context and include stream source markers (`stdout`/`stderr`) in arrival order.
+- In state-shared transcript files, each CLI invocation must begin with a clear delimiter section containing invocation metadata (index/command/args/cwd/timestamp).
 - If a transcript stream write fails, action execution continues and returns a warning diagnostic in `commandOutputWarnings`.
 
 ### Required system result prompt behavior
