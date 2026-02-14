@@ -36,3 +36,6 @@ Thumbs.db
 
 # Test artifacts
 server/data/
+
+# Dev workflow workspace
+devEnv/workspace/

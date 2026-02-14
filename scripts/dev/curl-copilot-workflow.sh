@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
+
 BASE_URL="${BASE_URL:-http://localhost:3001/api/machines}"
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-$(pwd -P)}"
-ARTIFACT_DIR="${ARTIFACT_DIR:-${WORKSPACE_ROOT}/.aiflow-artifacts}"
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-${REPO_ROOT}/devEnv/workspace}"
 MACHINE_NAME="${MACHINE_NAME:-dev-copilot-cli-workflow}"
 WORKFLOW_TAG="${WORKFLOW_TAG:-dev-copilot-workflow}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-2}"
@@ -19,7 +21,7 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p "$ARTIFACT_DIR"
+mkdir -p "$WORKSPACE_ROOT"
 
 RESPONSE_STATUS=""
 RESPONSE_BODY=""
